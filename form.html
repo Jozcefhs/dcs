@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="css/form.css">
+    <link rel="icon" href="images/real.png" type="image/png" />
+    <link rel="stylesheet" href="https://unicons.iconscout.com/release/v4.0.0/css/line.css">
+    <title>Destiny Christian Academy</title> 
+</head>
+<body>
+    <div class="container">
+        <header>Registration Form</header>
+
+        <form action="https://sheetdb.io/api/v1/xa7bnq8nip4mc" method="post" id="sheetdb-form">
+            <div class="form first">
+                <div class="details personal">
+                    <span class="title">Personal Details</span>
+
+                    <div class="fields">
+                        <div class="input-field">
+                            <label>First Name</label>
+                            <input type="text" name="data[FName]" placeholder="Enter first name" required>
+                        </div>
+                        <div class="input-field">
+                            <label>Last Name</label>
+                            <input type="text" name="data[LName]" placeholder="Enter last name" required>
+                        </div>
+                        <div class="input-field">
+                            <label>Other Names</label>
+                            <input type="text" name="data[OName]" placeholder="Enter other names">
+                        </div>
+
+                        <div class="input-field">
+                            <label>Gender</label>
+                            <select name="data[Gender]" required>
+                                <option value="" disabled selected>Select gender</option>
+                                <option value="Male">Male</option>
+                                <option value="Female">Female</option>
+                            </select>
+                        </div>
+
+                        <div class="input-field">
+                            <label>Date of Birth</label>
+                            <input type="date" name="data[DOB]" placeholder="Enter birth date" min="2008-01-01" max="2013-09-30" required>
+                        </div>
+
+                        <div class="input-field">
+                            <label>Age</label>
+                            <select name="data[Age]" required>
+                                <option value="" Hidden>Select your age</option>
+                                <option value="10yrs">10 yrs old</option>
+                                <option value="11yrs">11 yrs old</option>
+                                <option value="12yrs">12 yrs old</option>
+                                <option value="13yrs">13 yrs old</option>
+                                <option value="14yrs">14 yrs old</option>
+                                <option value="15yrs">15 yrs old</option>
+                            </select>
+                        </div>
+                        
+                        <div class="input-field">
+                            <label>Religion</label>
+                            <select name="data[Religion]" required>
+                                <option value="" Hidden>What is your religion?</option>
+                                <option value="Christianity">Christianity</option>
+                                <option value="Islam">Islam</option>
+                                <option value="Others">Others</option>
+                            </select>
+                        </div>
+
+                        <div class="input-field">
+                            <label>Nationality</label>
+                            <input type="text" name="data[Nation]" placeholder="Enter your nationality" required>
+                        </div>
+
+                        <div class="input-field">
+                            <label>State of Origin</label>
+                            <input type="text" name="data[SOrigin]" placeholder="Enter your state of origin" required>
+                        </div>
+
+                        <div class="input-field">
+                            <label>Local Govt. Area</label>
+                            <input type="text" name="data[LGA]" placeholder="Enter your LGA" required>
+                        </div>
+
+                        <div class="input-field">
+                            <label>Residential Address</label>
+                            <input type="address" name="data[rAddress]" placeholder="Enter address of residence" name="data[email]" required>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="details ID">
+                    <span class="title">Admission Request Info</span>
+
+                    <div class="fields">
+                        <div class="input-field">
+                            <label>Class Completed</label>
+                            <select name="data[Hclass]" required>
+                                <option value="" Hidden>Select highest class completed</option>
+                                <option value="Pri.4">Primary 4</option>
+                                <option value="Pri.5">Primary 5</option>
+                                <option value="Pri.6">Primary 6</option>
+                                <option value="JSS 1">JSS 1</option>
+                                <option value="JSS 2">JSS 2</option>
+                            </select>
+                        </div>
+
+                        <div class="input-field">
+                            <label>Class into which Admission is Sought</label>
+                            <select name="data[AdClass]" required>
+                                <option value="" Hidden>Class applying for</option>
+                                <option value="JSS 1">JSS 1</option>
+                                <option value="JSS 2">JSS 2</option>
+                            </select>
+                        </div>
+
+                        <div class="input-field">
+                            <label>Transfer Certificate/Testimonial</label>
+                            <select name="data[Testimonial]" required>
+                                <option value="" disabled selected>Select Option</option>
+                                <option value="Available">Available</option>
+                                <option value="Not available">Not Available</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="details address">
+                        <span class="title">Family Information</span>
+    
+                        <div class="fields">
+                            <div class="input-field">
+                                <label>Father's Name</label>
+                                <input type="text" name="data[faName]" placeholder="Enter your father's name" name="data[fathname]" required>
+                            </div>
+    
+                            <div class="input-field">
+                                <label for="name">Occupation</label>
+                                <input id="name" type="text" name="data[faOccupation]" placeholder="Enter your father's occupation" name="data[occupation]" required>
+                            </div>
+    
+                            <div class="input-field">
+                                <label>Office Address</label>
+                                <input type="address" name="data[faAddress]" placeholder="Office address" name="data[office address]">
+                            </div>
+    
+                            <div class="input-field">
+                                <label>Telephone</label>
+                                <input type="phone" name="data[faPhone]" placeholder="Enter phone number" name="data[phone1]">
+                            </div>
+    
+                            <div class="input-field">
+                                <label>Mother's Name</label>
+                                <input type="text" name="data[moName]" placeholder="Enter your father's name" name="data[mothname]" required>
+                            </div>
+    
+                            <div class="input-field">
+                                <label for="name">Occupation</label>
+                                <input id="name" type="text" name="data[mOccupation]" placeholder="Enter your father's occupation" name="data[occupation]" required>
+                            </div>
+    
+                            <div class="input-field">
+                                <label>Office Address</label>
+                                <input type="address" name="data[moAddress]" placeholder="Office address" name="data[office address]">
+                            </div>
+    
+                            <div class="input-field">
+                                <label>Telephone</label>
+                                <input type="phone" name="data[moPhone]" placeholder="Enter phone number" name="data[phone2]">
+                            </div>
+    
+                            <div class="input-field">
+                                <label>With whom are you living?</label>
+                                <select name="data[LivingWith]" required>
+                                    <option value="" disabled selected>Select Option</option>
+                                    <option value="Parents">Parents</option>
+                                    <option value="Guardian">Guardian</option>
+                                    <option value="Step parent">Step parent</option>
+                                    <option value="Single parent">Single parent</option>
+                                    <option value="Others">Others</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                </div> 
+           
+
+            <div class="details family">
+                <span class="title">School Information</span>
+                <p>This will help us know how to give your child any needed additional attention.</p>
+
+                <div class="radio">
+                    <div class="input-radio">
+                        <h5>Has applicant ever been expelled, dismissed, suspended, or refused of admission to another school?</h5>
+                        <label><input type="radio" value="Yes" id="first" name="data[first]" >Yes</label>
+                        <label><input type="radio" value="No" id="first" name="data[first]" >No</label>
+                    </div>
+
+                    <div class="radio-if">
+                        <input type="text" name="data[fYes]" placeholder="If yes, explain here.">
+                    </div>
+
+                    <div class="input-radio">
+                        <h5>Has applicant ever had disciplinary difficulty at school?</h5>
+                        <label><input type="radio" value="Yes" id="second" name="data[second]">Yes</label>
+                        <label><input type="radio" value="No" id="second" name="data[second]">No</label>
+                    </div>
+
+                    <div class="radio-if">
+                        <input type="text" name="data[sYes]" placeholder="If yes, details here.">
+                    </div>
+
+                    <div class="input-radio">
+                        <h5>Does applicant have a juvenile arrest record?</h5>
+                        <label><input type="radio" value="Yes" id="third" name="data[third]">Yes</label>
+                        <label><input type="radio" value="No" id="third" name="data[third]">No</label>
+                    </div>
+
+                    <div class="radio-if">
+                        <input type="text" name="data[tYes]" placeholder="If yes, explain here.">
+                    </div>
+
+                    <div class="input-radio">
+                        <h5>Has applicant failed an academic subject in school?</h5>
+                        <label><input type="radio" value="Yes" id="fourth" name="data[fourth]">Yes</label>
+                        <label><input type="radio" value="No" id="fourth" name="data[fourth]">No</label>
+                    </div>
+
+                    <div class="radio-if">
+                        <input type="text" name="data[fYes]" placeholder="If yes, explain here.">
+                    </div>
+                </div>
+
+                <div class="fields">
+                    <div class="input-field">
+                        <label>Please indicate academic level of applicant's previous work.</label>
+                        <select name="data[acadLevel]" required>
+                            <option value="" disabled selected>Select Option</option>
+                            <option value="Excellent">Excellent</option>
+                            <option value="Good">Good</option>
+                            <option value="Average">Average</option>
+                            <option value="Poor">Poor</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="details address">
+                    <span class="title">General Information</span>
+
+                    <div class="radio">
+                        <div class="radio-if">
+                            <label>How did you receive information about this school?</label>
+                            <input type="text" name="data[Referrer]" placeholder="Type here.">
+                        </div>
+
+                        <div class="radio-if">
+                            <label for="nam">Reason for choosing this school</label>
+                            <input id="nam" type="text" name="data[whyChoose]" placeholder="Type here.">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="details address">
+                    <span class="title">You are required to upload the following documents.</span>
+
+                    <div class="fields">
+                        <div class="input-field">
+                            <label for="profile-picture">Passport Photo:</label>
+                            <input id="profile-picture" type="file" name="data[file1]" required/>
+                        </div>
+                        <div class="input-field">
+                            <label for="profile-picture">Birth Certificate:</label>
+                            <input id="profile-picture" type="file" name="data[file2]" />
+                        </div>
+                        <div class="input-field">
+                            <label for="profile-picture">Latest Result:</label>
+                            <input id="profile-picture" type="file" name="data[file3]" />
+                        </div>
+                        <div class="input-field">
+                            <label for="profile-picture">First School Leaving Certificate:</label>
+                            <input id="profile-picture" type="file" name="data[file4]"/>
+                        </div>
+                        <div class="input-field">
+                            <label for="profile-picture">Attestation Letter from previous school:</label>
+                            <input id="profile-picture" type="file" name="data[file5]"/>
+                        </div>
+                        <div class="input-field">
+                            <label for="profile-picture">Transfer Letter from previous school:</label>
+                            <input id="profile-picture" type="file" name="data[file6]"/>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="details address">
+                     <!--div class="fields1">
+                        <div class="input-field1">
+                            <h4>FEES</h4>
+                            <label class="class">
+                                Admission fee of <strong> ₦15,000</strong> is non-refundable and a testing fee <strong>₦2,000</strong> is required for pupils coming in for JSS1 & 2 and SS1 & 2. An interview with the parents and applicant will also be required before final acceptance.
+Upon acceptance of your child into the school, you will be required to pay a registration fee of <strong>₦2,500.</strong> This will cover the cost of setting up the student’s file and documentation.
+School fees will cover cost of text books, tuition, extra-curricular activities, and other learning materials in this academic year. Submit this application form along with (i) 4 Passport Photographs of the applicant, (ii) Photocopy of Birth Certificate, (ii) Photocopy of the applicants School Leaving Certificate, Last Report Card.
+<strong>The originals must be sighted at interview with Parents.</strong>
+                            </label>
+                        </div-->
+                    
+                        <div class="input-field1">
+                            <h4>COMMITMENT</h4>
+                            <label class="class">
+                                I hereby pledge to pay my financial obligations to the school on the date due, usually before resumption and understand that it may be necessary to withdraw my child/ward if proper arrangements are not made on outstanding payments. I understand that Destiny Christian Academy is a Christian school, which will be operated on Biblical principles. I hereby, give my permission for my child/ward to be instructed in accordance with all the standards of the school. I also give permission for my child/ward to take part in all school activities, including sports and school-sponsored trips away from the school premises, and absolve the school from liability to me or my child/because of any injury to my child/ward at school or during school activity. (By God’s grace they are preserved)
+I agree to uphold and support the high academic standard of the school by providing a place at home for my child/ward to study and giving my child/ward encouragement in the completion of any assignments.
+I appreciate the high standards of the school and do not tolerate profanity, obscenity in word, or action, dishonor to the Godhead and the word of God, or disrespect to the personnel of the school. I hereby agree to support all regulations of the school in the applicant’s behalf and authorize the school to employ discipline. As it deems wise and expedient for the training of my child/ward. 
+I understand that the school reserves the right to dismiss anyone who fails to comply with the established regulations and discipline or whose financial obligation remains unmet.
+I understand the terms stated on this application and agree to this (agree thereto).
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                        <div class="radio-i">
+                            <input type="checkbox" id="accept" name="data[Accept]" value="I accept." required>
+                            <label>I Accept.</label>
+                        </div>
+                    
+
+                <div class="buttons">                    
+                    <button id="but" class="sumbit">
+                        <span class="btnText">Submit</span>
+                        <i class="uil uil-navigator"></i>
+                    </button>
+                </div>
+            </div> 
+
+            
+        </div>
+
+           
+        </form>
+        <script>
+            var btn = document.getElementById('but');
+            var form = document.getElementById('sheetdb-form');
+            /*btn.onclick = () => {
+                document.querySelector('.buttons').innerHTML = 'Submitting...';
+                document.querySelector('.buttons').classList.add('submitting');
+            }*/
+
+            form.addEventListener("submit", e => {
+                e.preventDefault();
+                document.querySelector('.buttons').innerHTML = 'Submitting...';
+                document.querySelector('.buttons').classList.add('submitting');
+                fetch(form.action, {
+                    method : "POST",
+                    body: new FormData(document.getElementById("sheetdb-form")),
+                }).then(
+                    response => response.json()
+                ).then((html) => {
+                    //window.open('d.html', '_blank');
+                    document.querySelector('.container').style.textAlign = 'center';
+                    document.querySelector('.container').innerHTML = `SUCCESS!<br><br><small>You have submitted the form.<br><br><a href="index.html" style="text-decoration:none;padding:8px 16px;background-color:#333;color:#aaa;">OK</a></small>`;
+                    //form.style.display = 'none';
+                });
+            });
+        </script>
+        <!--script src="scripts/form.js"></script-->
+    </div>
+
+ 
+</body>
+</html>
