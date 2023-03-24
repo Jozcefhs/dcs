@@ -20,11 +20,11 @@
 
                     <div class="fields">
                         <div class="input-field">
-                            <label>First Name</label>
+                            <label>First Name<span class="required">*</span></label>
                             <input type="text" name="data[FName]" placeholder="Enter first name" required>
                         </div>
                         <div class="input-field">
-                            <label>Last Name</label>
+                            <label>Last Name<span class="required">*</span></label>
                             <input type="text" name="data[LName]" placeholder="Enter last name" required>
                         </div>
                         <div class="input-field">
@@ -33,7 +33,7 @@
                         </div>
 
                         <div class="input-field">
-                            <label>Gender</label>
+                            <label>Gender<span class="required">*</span></label>
                             <select name="data[Gender]" required>
                                 <option value="" disabled selected>Select gender</option>
                                 <option value="Male">Male</option>
@@ -42,12 +42,12 @@
                         </div>
 
                         <div class="input-field">
-                            <label>Date of Birth</label>
-                            <input type="date" name="data[DOB]" placeholder="Enter birth date" min="2008-01-01" max="2013-09-30" required>
+                            <label>Date of Birth<span class="required">*</span></label>
+                            <input type="date" name="data[DOB]" placeholder="Enter birth date" min="2008-01-01" max="2013-12-31" required>
                         </div>
 
                         <div class="input-field">
-                            <label>Age</label>
+                            <label>Age<span class="required">*</span></label>
                             <select name="data[Age]" required>
                                 <option value="" Hidden>Select your age</option>
                                 <option value="10yrs">10 yrs old</option>
@@ -60,7 +60,7 @@
                         </div>
                         
                         <div class="input-field">
-                            <label>Religion</label>
+                            <label>Religion<span class="required">*</span></label>
                             <select name="data[Religion]" required>
                                 <option value="" Hidden>What is your religion?</option>
                                 <option value="Christianity">Christianity</option>
@@ -70,23 +70,28 @@
                         </div>
 
                         <div class="input-field">
-                            <label>Nationality</label>
+                            <label>Nationality<span class="required">*</span></label>
                             <input type="text" name="data[Nation]" placeholder="Enter your nationality" required>
                         </div>
 
                         <div class="input-field">
-                            <label>State of Origin</label>
+                            <label>State of Origin<span class="required">*</span></label>
                             <input type="text" name="data[SOrigin]" placeholder="Enter your state of origin" required>
                         </div>
 
                         <div class="input-field">
-                            <label>Local Govt. Area</label>
+                            <label>Local Govt. Area<span class="required">*</span></label>
                             <input type="text" name="data[LGA]" placeholder="Enter your LGA" required>
                         </div>
 
                         <div class="input-field">
-                            <label>Residential Address</label>
-                            <input type="address" name="data[rAddress]" placeholder="Enter address of residence" name="data[email]" required>
+                            <label>Residential Address<span class="required">*</span></label>
+                            <input type="address" name="data[rAddress]" placeholder="Enter address of residence" required>
+                        </div>
+
+                        <div class="input-field">
+                            <label>National Identification Number (NIN)<span class="required">*</span></label>
+                            <input type="text" minlength="11" maxlength="11" name="data[NIN]" placeholder="Enter applicant's NIN" required>
                         </div>
                     </div>
                 </div>
@@ -96,7 +101,7 @@
 
                     <div class="fields">
                         <div class="input-field">
-                            <label>Class Completed</label>
+                            <label>Class Completed<span class="required">*</span></label>
                             <select name="data[Hclass]" required>
                                 <option value="" Hidden>Select highest class completed</option>
                                 <option value="Pri.4">Primary 4</option>
@@ -108,7 +113,7 @@
                         </div>
 
                         <div class="input-field">
-                            <label>Class into which Admission is Sought</label>
+                            <label>Class into which Admission is Sought<span class="required">*</span></label>
                             <select name="data[AdClass]" required>
                                 <option value="" Hidden>Class applying for</option>
                                 <option value="JSS 1">JSS 1</option>
@@ -117,7 +122,7 @@
                         </div>
 
                         <div class="input-field">
-                            <label>Transfer Certificate/Testimonial</label>
+                            <label>Transfer Certificate/Testimonial<span class="required">*</span></label>
                             <select name="data[Testimonial]" required>
                                 <option value="" disabled selected>Select Option</option>
                                 <option value="Available">Available</option>
@@ -131,47 +136,47 @@
     
                         <div class="fields">
                             <div class="input-field">
-                                <label>Father's Name</label>
-                                <input type="text" name="data[faName]" placeholder="Enter your father's name" name="data[fathname]" required>
+                                <label>Father's Name<span class="required">*</span></label>
+                                <input type="text" name="data[faName]" placeholder="Enter your father's name"  required>
                             </div>
     
                             <div class="input-field">
-                                <label for="name">Occupation</label>
-                                <input id="name" type="text" name="data[faOccupation]" placeholder="Enter your father's occupation" name="data[occupation]" required>
+                                <label for="name">Occupation<span class="required">*</span></label>
+                                <input id="name" type="text" name="data[faOccupation]" placeholder="Enter your father's occupation" required>
                             </div>
     
                             <div class="input-field">
-                                <label>Office Address</label>
-                                <input type="address" name="data[faAddress]" placeholder="Office address" name="data[office address]">
+                                <label>Office Address<span class="required">*</span></label>
+                                <input type="address" name="data[faAddress]" placeholder="Office address" required>
                             </div>
     
                             <div class="input-field">
-                                <label>Telephone</label>
-                                <input type="phone" name="data[faPhone]" placeholder="Enter phone number" name="data[phone1]">
+                                <label>Telephone<span class="required">*</span></label>
+                                <input type="phone" name="data[faPhone]" placeholder="Enter phone number" required>
                             </div>
     
                             <div class="input-field">
-                                <label>Mother's Name</label>
-                                <input type="text" name="data[moName]" placeholder="Enter your father's name" name="data[mothname]" required>
+                                <label>Mother's Name<span class="required">*</span></label>
+                                <input type="text" name="data[moName]" placeholder="Enter your father's name" required>
                             </div>
     
                             <div class="input-field">
-                                <label for="name">Occupation</label>
-                                <input id="name" type="text" name="data[mOccupation]" placeholder="Enter your father's occupation" name="data[occupation]" required>
+                                <label for="name">Occupation<span class="required">*</span></label>
+                                <input id="name" type="text" name="data[mOccupation]" placeholder="Enter your father's occupation" required>
                             </div>
     
                             <div class="input-field">
-                                <label>Office Address</label>
-                                <input type="address" name="data[moAddress]" placeholder="Office address" name="data[office address]">
+                                <label>Office Address<span class="required">*</span></label>
+                                <input type="address" name="data[moAddress]" placeholder="Office address" required>
                             </div>
     
                             <div class="input-field">
-                                <label>Telephone</label>
-                                <input type="phone" name="data[moPhone]" placeholder="Enter phone number" name="data[phone2]">
+                                <label>Telephone<span class="required">*</span></label>
+                                <input type="phone" name="data[moPhone]" placeholder="Enter phone number" required>
                             </div>
     
                             <div class="input-field">
-                                <label>With whom are you living?</label>
+                                <label>With whom are you living?<span class="required">*</span></label>
                                 <select name="data[LivingWith]" required>
                                     <option value="" disabled selected>Select Option</option>
                                     <option value="Parents">Parents</option>
@@ -194,7 +199,7 @@
                 <div class="radio">
                     <div class="input-radio">
                         <h5>Has applicant ever been expelled, dismissed, suspended, or refused of admission to another school?</h5>
-                        <label><input type="radio" value="Yes" id="first" name="data[first]" >Yes</label>
+                        <label><input type="radio" checked value="Yes" id="first" name="data[first]" >Yes</label>
                         <label><input type="radio" value="No" id="first" name="data[first]" >No</label>
                     </div>
 
@@ -204,7 +209,7 @@
 
                     <div class="input-radio">
                         <h5>Has applicant ever had disciplinary difficulty at school?</h5>
-                        <label><input type="radio" value="Yes" id="second" name="data[second]">Yes</label>
+                        <label><input type="radio" checked value="Yes" id="second" name="data[second]">Yes</label>
                         <label><input type="radio" value="No" id="second" name="data[second]">No</label>
                     </div>
 
@@ -214,7 +219,7 @@
 
                     <div class="input-radio">
                         <h5>Does applicant have a juvenile arrest record?</h5>
-                        <label><input type="radio" value="Yes" id="third" name="data[third]">Yes</label>
+                        <label><input type="radio" checked value="Yes" id="third" name="data[third]">Yes</label>
                         <label><input type="radio" value="No" id="third" name="data[third]">No</label>
                     </div>
 
@@ -224,18 +229,18 @@
 
                     <div class="input-radio">
                         <h5>Has applicant failed an academic subject in school?</h5>
-                        <label><input type="radio" value="Yes" id="fourth" name="data[fourth]">Yes</label>
+                        <label><input type="radio" checked value="Yes" id="fourth" name="data[fourth]">Yes</label>
                         <label><input type="radio" value="No" id="fourth" name="data[fourth]">No</label>
                     </div>
 
                     <div class="radio-if">
-                        <input type="text" name="data[fYes]" placeholder="If yes, explain here.">
+                        <input type="text" name="data[fthYes]" placeholder="If yes, explain here.">
                     </div>
                 </div>
 
                 <div class="fields">
                     <div class="input-field">
-                        <label>Please indicate academic level of applicant's previous work.</label>
+                        <label>Please indicate academic level of applicant's previous work.<span class="required">*</span></label>
                         <select name="data[acadLevel]" required>
                             <option value="" disabled selected>Select Option</option>
                             <option value="Excellent">Excellent</option>
@@ -267,28 +272,28 @@
 
                     <div class="fields">
                         <div class="input-field">
-                            <label for="profile-picture">Passport Photo:</label>
+                            <label for="profile-picture">Passport Photo:<span class="required">*</span></label>
                             <input id="profile-picture" type="file" name="data[file1]" required/>
                         </div>
                         <div class="input-field">
-                            <label for="profile-picture">Birth Certificate:</label>
-                            <input id="profile-picture" type="file" name="data[file2]" />
+                            <label for="profile-picture">Birth Certificate:<span class="required">*</span></label>
+                            <input id="profile-picture" required type="file" name="data[file2]" />
                         </div>
                         <div class="input-field">
                             <label for="profile-picture">Latest Result:</label>
                             <input id="profile-picture" type="file" name="data[file3]" />
                         </div>
                         <div class="input-field">
-                            <label for="profile-picture">First School Leaving Certificate:</label>
-                            <input id="profile-picture" type="file" name="data[file4]"/>
+                            <label for="profile-picture">First School Leaving Certificate:<span class="required">*</span></label>
+                            <input id="profile-picture" required type="file" name="data[file4]"/>
                         </div>
                         <div class="input-field">
                             <label for="profile-picture">Attestation Letter from previous school:</label>
                             <input id="profile-picture" type="file" name="data[file5]"/>
                         </div>
                         <div class="input-field">
-                            <label for="profile-picture">Transfer Letter from previous school:</label>
-                            <input id="profile-picture" type="file" name="data[file6]"/>
+                            <label for="profile-picture">Transfer Letter from previous school:<span class="required">*</span></label>
+                            <input id="profile-picture" required type="file" name="data[file6]"/>
                         </div>
                     </div>
                 </div>
@@ -308,9 +313,14 @@ School fees will cover cost of text books, tuition, extra-curricular activities,
                         <div class="input-field1">
                             <h4>COMMITMENT</h4>
                             <label class="class">
-                                I hereby pledge to pay my financial obligations to the school on the date due, usually before resumption and understand that it may be necessary to withdraw my child/ward if proper arrangements are not made on outstanding payments. I understand that Destiny Christian Academy is a Christian school, which will be operated on Biblical principles. I hereby, give my permission for my child/ward to be instructed in accordance with all the standards of the school. I also give permission for my child/ward to take part in all school activities, including sports and school-sponsored trips away from the school premises, and absolve the school from liability to me or my child/because of any injury to my child/ward at school or during school activity. (By God’s grace they are preserved)
+                                I hereby pledge to pay my financial obligations to the school on the date due, usually before resumption and understand that it may be necessary to withdraw my child/ward if
+                                 proper arrangements are not made on outstanding payments. I understand that Destiny Christian Academy is a Christian school, which will be operated on Biblical principles. 
+                                 I hereby, give my permission for my child/ward to be instructed in accordance with all the standards of the school. I also give permission for my child/ward to take part in 
+                                 all school activities, including sports and school-sponsored trips away from the school premises, and absolve the school from liability to me or my child/because of any injury 
+                                 to my child/ward at school or during school activity. (By God’s grace they are preserved)
 I agree to uphold and support the high academic standard of the school by providing a place at home for my child/ward to study and giving my child/ward encouragement in the completion of any assignments.
-I appreciate the high standards of the school and do not tolerate profanity, obscenity in word, or action, dishonor to the Godhead and the word of God, or disrespect to the personnel of the school. I hereby agree to support all regulations of the school in the applicant’s behalf and authorize the school to employ discipline. As it deems wise and expedient for the training of my child/ward. 
+I appreciate the high standards of the school and do not tolerate profanity, obscenity in word, or action, dishonor to the Godhead and the word of God, or disrespect to the personnel of the school. I hereby 
+agree to support all regulations of the school in the applicant’s behalf and authorize the school to employ discipline. As it deems wise and expedient for the training of my child/ward. 
 I understand that the school reserves the right to dismiss anyone who fails to comply with the established regulations and discipline or whose financial obligation remains unmet.
 I understand the terms stated on this application and agree to this (agree thereto).
                             </label>
@@ -333,6 +343,11 @@ I understand the terms stated on this application and agree to this (agree there
             </div> 
 
             
+        </div>
+
+        <div class="code">
+            <label>Registration Code<span class="required">*</span></label>
+            <input type="text" minlength="8" maxlength="8" name="data[Code]" placeholder="Paste Reg. code here." required>
         </div>
 
            

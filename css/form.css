@@ -211,3 +211,33 @@ form .fields1 .input-field1{
     height: 25px;
     width: 25px; 
 }
+.required{
+    color: red;
+    font-size: 1.2em;
+}
+.code{
+    display: flex;
+    position: absolute;
+    top: 54px;
+    justify-content: space-around;
+    
+}
+
+.code input {
+    width: 250px;
+    border-radius: 5px;
+    height: 42px;
+    border: none;
+    text-align: center;
+    font-size: 1.2rem;
+    color: skyblue;
+    
+}
+
+.code label {
+    display: flex;
+    justify-content: center;
+    position: absolute;
+    top: -22px;
+    color: rgb(196, 228, 238);
+}
