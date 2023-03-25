@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+	<head>
+	<link rel="stylesheet" href="css/search-page.css"/>
+	<script src="scripts/search-page.js" defer></script>
+	</head>
+	<body>
+		<div id="main">
+			<div class="dropdownDiv">
+				<select>
+					<option value="100">1 - 100</option>
+					<option value="200">101 - 200</option>
+					<option value="300">201 - 300</option>
+					<option value="400">301 - 400</option>
+				</select>
+				<input type="submit" value="View" onclick="checkView()"/>
+				<div class="total" data-record>All applicants: </div>
+			</div>
+			
+			<div class="search-wrapper">
+				<label for="search"></label>
+				<input type="search" placeholder="Search..." id="search" data-search/>
+				<!--input type="submit" id="search" value="Search"/-->
+			</div>
+		</div>
+		<div class="user-cards" data-user-cards-container></div>
+		<template data-user-template>
+			<div class="card">
+				<div class="header" data-header>Jakob Creudtzfeldt Creudtzfeldt Creudtzfeldt</div>
+				<div class="body" data-body>
+					<div class="date">12/12/1212</div>
+					<div class="email">asdfjklqwery@gmail.com</div>
+					<div class="email-status">Bounced</div>
+				</div>
+			</div>
+		</template>
+		<script>
+			const viewbtn = document.querySelector("input[type=submit]");
+			var mySelection = document.querySelector('.dropdownDiv select');
+			function checkView(){
+				console.log(mySelection.value);
+			}
+		</script>
+	</body>
+</html>

@@ -2,7 +2,7 @@
 var laClef = [];     //arr for auth name
 const authware = {
 	1: "Emmanuel Onuh",
-	2: "Beatrice Ogwubo",
+	2: "Jozcefhs El-kanah",
 	3: "Ihotu Essien",
 	4: "Joseph Nnamdi"
 }
