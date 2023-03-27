@@ -188,7 +188,7 @@ body{
   }
   
   #bg-video {
-      height: 600px;
+      height: 650px;
       min-width: 100%;
       max-width: 100%;
       /*min-height: 100vh;
@@ -357,7 +357,6 @@ body{
    ;
   }
   .cbl img {
-    width: 50%;
-  
+    width: 350px;
    
   }
