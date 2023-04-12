@@ -12,8 +12,7 @@
 <body>
     <div class="container">
         <header>Registration Form</header>
-<!--https://sheetdb.io/api/v1/zs2n579f3zps5//for FORM-->
-        <form action="https://sheetdb.io/api/v1/xa7bnq8nip4mc" method="post" id="sheetdb-form">
+        <form name="formApps" action="" method="post" id="sheetdb-form">
             <div class="form first">
                 <div class="details personal">
                     <span class="title">Personal Details</span>
@@ -21,20 +20,20 @@
                     <div class="fields">
                         <div class="input-field">
                             <label>First Name<span class="required">*</span></label>
-                            <input type="text" name="data[FName]" placeholder="Enter first name" required>
+                            <input type="text" name="FName" placeholder="Enter first name" required>
                         </div>
                         <div class="input-field">
                             <label>Last Name<span class="required">*</span></label>
-                            <input type="text" name="data[LName]" placeholder="Enter last name" required>
+                            <input type="text" name="LName" placeholder="Enter last name" required>
                         </div>
                         <div class="input-field">
                             <label>Other Names</label>
-                            <input type="text" name="data[OName]" placeholder="Enter other names">
+                            <input type="text" name="OName" placeholder="Enter other names">
                         </div>
 
                         <div class="input-field">
                             <label>Gender<span class="required">*</span></label>
-                            <select name="data[Gender]" required>
+                            <select name="Gender" required>
                                 <option value="" disabled selected>Select gender</option>
                                 <option value="Male">Male</option>
                                 <option value="Female">Female</option>
@@ -43,12 +42,12 @@
 
                         <div class="input-field">
                             <label>Date of Birth<span class="required">*</span></label>
-                            <input type="date" name="data[DOB]" placeholder="Enter birth date" min="2008-01-01" max="2013-12-31" required>
+                            <input type="date" name="DOB" placeholder="Enter birth date" min="2008-01-01" max="2013-12-31" required>
                         </div>
 
                         <div class="input-field">
                             <label>Age<span class="required">*</span></label>
-                            <select name="data[Age]" required>
+                            <select name="Age" required>
                                 <option value="" Hidden>Select your age</option>
                                 <option value="10yrs">10 yrs old</option>
                                 <option value="11yrs">11 yrs old</option>
@@ -61,7 +60,7 @@
                         
                         <div class="input-field">
                             <label>Religion<span class="required">*</span></label>
-                            <select name="data[Religion]" required>
+                            <select name="Religion" required>
                                 <option value="" Hidden>What is your religion?</option>
                                 <option value="Christianity">Christianity</option>
                                 <option value="Islam">Islam</option>
@@ -71,27 +70,27 @@
 
                         <div class="input-field">
                             <label>Nationality<span class="required">*</span></label>
-                            <input type="text" name="data[Nation]" placeholder="Enter your nationality" required>
+                            <input type="text" name="Nation" placeholder="Enter your nationality" required>
                         </div>
 
                         <div class="input-field">
                             <label>State of Origin<span class="required">*</span></label>
-                            <input type="text" name="data[SOrigin]" placeholder="Enter your state of origin" required>
+                            <input type="text" name="SOrigin" placeholder="Enter your state of origin" required>
                         </div>
 
                         <div class="input-field">
                             <label>Local Govt. Area<span class="required">*</span></label>
-                            <input type="text" name="data[LGA]" placeholder="Enter your LGA" required>
+                            <input type="text" name="LGA" placeholder="Enter your LGA" required>
                         </div>
 
                         <div class="input-field">
                             <label>Residential Address<span class="required">*</span></label>
-                            <input type="address" name="data[rAddress]" placeholder="Enter address of residence" required>
+                            <input type="address" name="rAddress" placeholder="Enter address of residence" required>
                         </div>
 
                         <div class="input-field">
                             <label>National Identification Number (NIN)</label>
-                            <input type="text" minlength="11" maxlength="11" name="data[NIN]" placeholder="Enter your NIN if available">
+                            <input type="text" minlength="11" maxlength="11" name="NIN" placeholder="Enter your NIN if available">
                         </div>
                     </div>
                 </div>
@@ -102,7 +101,7 @@
                     <div class="fields">
                         <div class="input-field">
                             <label>Class Completed<span class="required">*</span></label>
-                            <select name="data[Hclass]" required>
+                            <select name="Hclass" required>
                                 <option value="" Hidden>Select highest class completed</option>
                                 <option value="Pri.4">Primary 4</option>
                                 <option value="Pri.5">Primary 5</option>
@@ -114,7 +113,7 @@
 
                         <div class="input-field">
                             <label>Class into which Admission is Sought<span class="required">*</span></label>
-                            <select name="data[AdClass]" required>
+                            <select name="AdClass" required>
                                 <option value="" Hidden>Class applying for</option>
                                 <option value="JSS 1">JSS 1</option>
                                 <option value="JSS 2">JSS 2</option>
@@ -123,7 +122,7 @@
 
                         <div class="input-field">
                             <label>Transfer Certificate/Testimonial<span class="required">*</span></label>
-                            <select name="data[Testimonial]" required>
+                            <select name="Testimonial" required>
                                 <option value="" disabled selected>Select Option</option>
                                 <option value="Available">Available</option>
                                 <option value="Not available">Not Available</option>
@@ -137,47 +136,47 @@
                         <div class="fields">
                             <div class="input-field">
                                 <label>Father's Name<span class="required">*</span></label>
-                                <input type="text" name="data[faName]" placeholder="Enter your father's name"  required>
+                                <input type="text" name="faName" placeholder="Enter your father's name"  required>
                             </div>
     
                             <div class="input-field">
                                 <label for="name">Occupation<span class="required">*</span></label>
-                                <input id="name" type="text" name="data[faOccupation]" placeholder="Enter your father's occupation" required>
+                                <input id="name" type="text" name="faOccupation" placeholder="Enter your father's occupation" required>
                             </div>
     
                             <div class="input-field">
                                 <label>Office Address<span class="required">*</span></label>
-                                <input type="address" name="data[faAddress]" placeholder="Office address" required>
+                                <input type="address" name="faAddress" placeholder="Office address" required>
                             </div>
     
                             <div class="input-field">
                                 <label>Telephone<span class="required">*</span></label>
-                                <input type="phone" name="data[faPhone]" placeholder="Enter phone number" required>
+                                <input type="phone" name="faPhone" placeholder="Enter phone number" required>
                             </div>
     
                             <div class="input-field">
                                 <label>Mother's Name<span class="required">*</span></label>
-                                <input type="text" name="data[moName]" placeholder="Enter your father's name" required>
+                                <input type="text" name="moName" placeholder="Enter your father's name" required>
                             </div>
     
                             <div class="input-field">
                                 <label for="name">Occupation<span class="required">*</span></label>
-                                <input id="name" type="text" name="data[mOccupation]" placeholder="Enter your father's occupation" required>
+                                <input id="name" type="text" name="mOccupation" placeholder="Enter your father's occupation" required>
                             </div>
     
                             <div class="input-field">
                                 <label>Office Address<span class="required">*</span></label>
-                                <input type="address" name="data[moAddress]" placeholder="Office address" required>
+                                <input type="address" name="moAddress" placeholder="Office address" required>
                             </div>
     
                             <div class="input-field">
                                 <label>Telephone<span class="required">*</span></label>
-                                <input type="phone" name="data[moPhone]" placeholder="Enter phone number" required>
+                                <input type="phone" name="moPhone" placeholder="Enter phone number" required>
                             </div>
     
                             <div class="input-field">
                                 <label>With whom are you living?<span class="required">*</span></label>
-                                <select name="data[LivingWith]" required>
+                                <select name="LivingWith" required>
                                     <option value="" disabled selected>Select Option</option>
                                     <option value="Parents">Parents</option>
                                     <option value="Guardian">Guardian</option>
@@ -199,49 +198,49 @@
                 <div class="radio">
                     <div class="input-radio">
                         <h5>Has applicant ever been expelled, dismissed, suspended, or refused of admission to another school?</h5>
-                        <label><input type="radio" checked value="Yes" id="first" name="data[first]" >Yes</label>
-                        <label><input type="radio" value="No" id="first" name="data[first]" >No</label>
+                        <label><input type="radio" checked value="Yes" id="first" name="first" >Yes</label>
+                        <label><input type="radio" value="No" id="first" name="first" >No</label>
                     </div>
 
                     <div class="radio-if">
-                        <input type="text" name="data[fYes]" placeholder="If yes, explain here.">
+                        <input type="text" name="fYes" placeholder="If yes, explain here.">
                     </div>
 
                     <div class="input-radio">
                         <h5>Has applicant ever had disciplinary difficulty at school?</h5>
-                        <label><input type="radio" checked value="Yes" id="second" name="data[second]">Yes</label>
-                        <label><input type="radio" value="No" id="second" name="data[second]">No</label>
+                        <label><input type="radio" checked value="Yes" id="second" name="second">Yes</label>
+                        <label><input type="radio" value="No" id="second" name="second">No</label>
                     </div>
 
                     <div class="radio-if">
-                        <input type="text" name="data[sYes]" placeholder="If yes, details here.">
+                        <input type="text" name="sYes" placeholder="If yes, details here.">
                     </div>
 
                     <div class="input-radio">
                         <h5>Does applicant have a juvenile arrest record?</h5>
-                        <label><input type="radio" checked value="Yes" id="third" name="data[third]">Yes</label>
-                        <label><input type="radio" value="No" id="third" name="data[third]">No</label>
+                        <label><input type="radio" checked value="Yes" id="third" name="third">Yes</label>
+                        <label><input type="radio" value="No" id="third" name="third">No</label>
                     </div>
 
                     <div class="radio-if">
-                        <input type="text" name="data[tYes]" placeholder="If yes, explain here.">
+                        <input type="text" name="tYes" placeholder="If yes, explain here.">
                     </div>
 
                     <div class="input-radio">
                         <h5>Has applicant failed an academic subject in school?</h5>
-                        <label><input type="radio" checked value="Yes" id="fourth" name="data[fourth]">Yes</label>
-                        <label><input type="radio" value="No" id="fourth" name="data[fourth]">No</label>
+                        <label><input type="radio" checked value="Yes" id="fourth" name="fourth">Yes</label>
+                        <label><input type="radio" value="No" id="fourth" name="fourth">No</label>
                     </div>
 
                     <div class="radio-if">
-                        <input type="text" name="data[fthYes]" placeholder="If yes, explain here.">
+                        <input type="text" name="fthYes" placeholder="If yes, explain here.">
                     </div>
                 </div>
 
                 <div class="fields">
                     <div class="input-field">
                         <label>Please indicate academic level of applicant's previous work.<span class="required">*</span></label>
-                        <select name="data[acadLevel]" required>
+                        <select name="acadLevel" required>
                             <option value="" disabled selected>Select Option</option>
                             <option value="Excellent">Excellent</option>
                             <option value="Good">Good</option>
@@ -257,12 +256,12 @@
                     <div class="radio">
                         <div class="radio-if">
                             <label>How did you receive information about this school?</label>
-                            <input type="text" name="data[Referrer]" placeholder="Type here.">
+                            <input type="text" name="Referrer" placeholder="Type here.">
                         </div>
 
                         <div class="radio-if">
                             <label for="nam">Reason for choosing this school</label>
-                            <input id="nam" type="text" name="data[whyChoose]" placeholder="Type here.">
+                            <input id="nam" type="text" name="whyChoose" placeholder="Type here.">
                         </div>
                     </div>
                 </div>
@@ -273,27 +272,27 @@
                     <div class="fields">
                         <div class="input-field">
                             <label for="profile-picture">Passport Photo:<span class="required">*</span></label>
-                            <input id="profile-picture" type="file" name="data[file1]" required/>
+                            <input id="profile-picture" type="file" name="file1" required/>
                         </div>
                         <div class="input-field">
                             <label for="profile-picture">Birth Certificate:<span class="required">*</span></label>
-                            <input id="profile-picture" type="file" name="data[file2]" required/>
+                            <input id="profile-picture" type="file" name="file2" required/>
                         </div>
                         <div class="input-field">
                             <label for="profile-picture">Latest Result:<span class="required">*</span></label>
-                            <input id="profile-picture" type="file" name="data[file3]" required/>
+                            <input id="profile-picture" type="file" name="file3" required/>
                         </div>
                         <div class="input-field">
                             <label for="profile-picture">First School Leaving Certificate:</label>
-                            <input id="profile-picture" type="file" name="data[file4]"/>
+                            <input id="profile-picture" type="file" name="file4"/>
                         </div>
                         <div class="input-field">
                             <label for="profile-picture">Attestation Letter:<span class="required">*</span></label>
-                            <input id="profile-picture" type="file" name="data[file5]" required/>
+                            <input id="profile-picture" type="file" name="file5" required/>
                         </div>
                         <div class="input-field">
                             <label for="profile-picture">Transfer Letter (JSS2 Only):</label>
-                            <input id="profile-picture" type="file" name="data[file6]"/>
+                            <input id="profile-picture" type="file" name="file6"/>
                         </div>
                     </div>
                 </div>
@@ -341,7 +340,7 @@ I understand the terms stated on this application and agree to this (agree there
                 </div>
 
                         <div class="radio-i">
-                            <input type="checkbox" id="accept" name="data[Accept]" value="I accept." required>
+                            <input type="checkbox" id="accept" name="Accept" value="I accept." required>
                             <label>I Accept.</label>
                         </div>
                     
@@ -359,14 +358,16 @@ I understand the terms stated on this application and agree to this (agree there
 
         <div class="code">
             <label>Registration Code<span class="required">*</span></label>
-            <input type="text" minlength="8" maxlength="8" name="data[Code]" placeholder="Paste Reg. code here." required>
+            <input type="text" minlength="8" maxlength="8" name="Code" placeholder="Paste Reg. code here." required>
         </div>
 
            
         </form>
         <script>
+            const scriptURL = 'https://script.google.com/macros/s/AKfycbwUu8zwSvGIG0oqVluoJJGehT76BOpdZ-Xu72hwSw576wwNQ5yiURxgt2zJ4_gSFRFXSA/exec'
+			const form = document.forms['formApps']
             var btn = document.getElementById('but');
-            var form = document.getElementById('sheetdb-form');
+            //var form = document.getElementById('sheetdb-form');
             /*btn.onclick = () => {
                 document.querySelector('.buttons').innerHTML = 'Submitting...';
                 document.querySelector('.buttons').classList.add('submitting');
@@ -376,7 +377,7 @@ I understand the terms stated on this application and agree to this (agree there
                 e.preventDefault();
                 document.querySelector('.buttons').innerHTML = 'Submitting...';
                 document.querySelector('.buttons').classList.add('submitting');
-                fetch(form.action, {
+                fetch(scriptURL, {
                     method : "POST",
                     body: new FormData(document.getElementById("sheetdb-form")),
                 }).then(
