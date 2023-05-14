@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<meta name="author" content="Dynamax">
+	<title>Admission Status</title>
+	<style>
+		* {
+			margin:0;
+			padding:0;
+			box-sizing:border-box;
+		}
+		#container {
+			//height:100vh;
+			min-height:100vh;
+			background:#4070f4;
+			padding:40px;
+			//background-image:url('images/barney_passport.jpg');
+			//color:#fff;
+			display:flex;
+			flex-direction:column;
+			gap:20px;
+			justify-content:center;
+			align-items:center;
+			border-radius:20px;
+			font-family:Segoe UI;
+			font-size:20px;
+		}
+		section {
+			border:1px solid #
+		}
+		.group {
+			position:relative;
+			width:400px;
+			border:1px #cccccc solid;
+			display:none;
+			justify-content:space-around;
+			flex-direction:column;
+			background:#fff;
+			border-radius:8px;
+			box-shadow:3px 5px 4px rgba(0,0,0,0.1);
+		}
+		.check {
+			//position:absolute;
+			padding:20px 30px;
+			//background-color:green;
+			color:green;
+			//font-size:20px;
+			font-weight:bold;
+			opacity:0;
+			transition: opacity 0.4s;
+		}
+		input {
+			font-size:18px;
+			/*height:50px;*/
+			padding:20px 5px 20px 40px;
+			outline:none;
+			border:none;
+			/*border:1px solid blue;*/
+			width:100%;
+			background:transparent;
+		}
+		.unhide{
+			opacity:1;
+		}
+		.group:nth-child(2), .group:nth-child(4) {
+			display:none;
+		}
+		.group:nth-child(1), .group:nth-child(2), .group:nth-child(3){
+			flex-direction:row;
+		}
+		.form-element {
+			margin:20px;
+			background-color:orange;
+			opacity:0.7;
+			text-align:center;
+		}
+		.form-element div {
+			color:#fff;
+			background-color:rgba(0,0,0,0.3);
+		}
+		.form-element div span {
+			font-weight:bold;
+		}
+		.message {
+			display:flex;
+			justify-content:space-around;
+			align-items:center;
+			margin:20px 0;
+			color:#fff;
+		}
+		#bio {
+			display:none;
+			//max-width:400px;
+			//justify-content:space-around;
+			flex-wrap:wrap;
+			gap:20px;
+			padding:20px 0;
+		}
+		#bio > p{
+			flex-basis:100%;
+			text-align:center;
+			padding:10px;
+		}
+		button {
+			cursor:pointer;
+			border:none;
+			font-size:1em;
+			padding:16px 8px;
+			//flex:1;
+			flex-basis:30%;
+			background-color:orange;
+			color:#333;
+			border-radius:5px;
+			transition: color 0.3s;
+		}
+		button:hover, figure label:hover {
+			color:#fff;
+			opacity:1;
+		}
+		figure label {
+			background-color:orange;
+			opacity:0.7;
+			text-align:center;
+			font-size:30px;
+			color:#fff;
+			height:50px;
+			width:50px;
+			border-radius:50%;
+			position:absolute;
+			bottom:10px;
+			right:10%;
+			cursor:pointer;
+			transition: all 0.3s;
+		}
+		figure {
+			display:none;
+			width:400px;
+			flex-direction:column;
+			justify-content:center;
+			align-items:center;
+			color:#fff;
+		}
+		figure div {
+			position:relative;
+		}
+		figcaption {
+			//padding:10px 0;
+		}
+		img {
+			border-radius:50%;
+		}
+		input[type="file"]{
+			display:none;
+		}
+		i {
+			background-color:#fff;
+			padding:10px;
+			margin:10px;
+			border-radius:50%;
+			transform:scale(0.5);
+			transition:transform 0.5s;
+		}
+	</style>
+</head>
+<body>
+	<div id="container">
+		<div class="group" style="display:none;">
+			<input type="email" name="email address" placeholder="Enter email address" onkeyup="checkInput()" autocomplete="off"/><span class="check">&check;</span>
+		</div>
+		<div class="group">
+			<input type="text" name="code" placeholder="Enter code" onkeyup="checkInput()" autocomplete="off"/><span class="check">&check;</span>
+		</div>
+		<div class="group" id="bio">
+			<p>Are you...</p>
+			<!--p style="text-align:left;"></p-->
+			<button id="yes" onclick="yesBtn()">Yes</button>
+			<button id="no" onclick="location.reload()">No</button>
+		</div>
+		
+		<!--form action="" method="post" id="form"-->
+			<figure>Pick a most recent passport photograph.
+				<div>
+					<img src="images/avatar1.png" alt="avatar/passport" width="200px" height="200px"/>
+					<label title="Pick Passport Photo" for="upload" name="f1">+<input type="file" name="file1" id="upload" accept="image/*" required/></label>
+				</div>
+				<figcaption></figcaption>
+			</figure>
+		<form id="form" name="myform">
+			<div class="group" style="flex-direction:column;">
+				<p class="formtxt" style="margin:20px;">Finally, upload these docs, then view result.<br/><small>( Max file size: 300kb )</small></p>
+				<div class="form-element formtxt">
+					<label for="dob_cert">Birth Certificate<div name="f2"><span>+</span></div></label>
+					<input id="dob_cert" type="file" name="file2" required/>
+				</div>
+				<div class="form-element formtxt">
+					<label for="last_result">Latest Result<div name="f3"><span>+</span></div></label>
+					<input id="last_result" type="file" name="file3" required/>
+				</div>
+				<div class="form-element formtxt">
+					<label for="attestation">Attestation Letter<div name="f4"><span>+</span></div></label>
+					<input id="attestation" type="file" name="file4" required/>
+				</div>
+				<!--input type="submit" value="submit"/-->
+				<button disabled id="view_result" style="margin:20px;background-color:#4070f4;color:#fff;opacity:0.3;">View Result</button>
+			</div>		
+		</form>
+		<p class="message"><i></i><i></i><i></i></p>
+	</div>
+	<script>
+		var myInput = document.querySelectorAll('input');
+		var span = document.querySelectorAll('.check');
+		var message = document.querySelector('.message');
+		var Incrementer = 0;
+		var position;
+		
+		function checkInput() {
+			if(myInput[Incrementer].value.length > 7){
+				if (emails.includes(myInput[Incrementer].value) || codes.indexOf(myInput[Incrementer].value) == position) {
+					myInput[Incrementer].disabled = true;
+					message.innerHTML = '';
+					span[Incrementer].classList.add('unhide');
+					if(Incrementer == 1){
+						position;
+					} else {
+						position = emails.indexOf(myInput[Incrementer].value);
+						document.querySelector('#bio p').innerHTML += fullnames[position] + "?";
+					}
+					Incrementer++;
+					document.querySelector('.group:nth-child(' + (Incrementer + 1) + ')').style.display = "flex";
+				}  else {
+					span[Incrementer].classList.remove('unhide');
+					message.innerHTML = `The ${myInput[Incrementer].name} is not valid.`;
+				}
+			}
+			//console.log(position);
+		}
+		
+		function yesBtn() {
+			document.querySelector('#bio p').innerHTML = "Yes, I am " + fullnames[position] + ".";
+			document.querySelectorAll('#bio > button').forEach(elem => {
+				elem.style.display = 'none';
+			});
+			if(viewed[position] == 'false'){
+				document.querySelector('figure').style.display = 'flex';
+			} else {
+				document.querySelectorAll('.formtxt').forEach((elem)=>{elem.style.display='none';});
+				document.querySelector('form .group').style.display = "flex";
+				document.getElementById('view_result').disabled = false;
+				document.getElementById('view_result').style.opacity = 1;
+			}
+		}
+	</script>
+	<script>
+		const passport = document.getElementById('upload');
+		var figcaption = document.querySelector('figcaption');
+		var loadedImage = "";
+		
+		var form = document.getElementById('form');
+		var button = document.getElementById('view_result');
+		var counter = 0;
+		var obj = {};
+		
+		passport.addEventListener('change', function(){
+			var reader = new FileReader();
+			reader.addEventListener('load', () => {
+				loadedImage = reader.result;
+				document.querySelector('img').src = loadedImage;
+
+				let spt = loadedImage.split("base64,")[1];
+				//console.log(file.type);
+					obj['upload'] = {
+					base64 : spt,
+					type : passport.files[0].type,
+					name : passport.files[0].name,
+					username : fullnames[position],
+					mycode : codes[position]
+				}
+				//console.log(obj['upload'].base64);
+			});
+			reader.readAsDataURL(this.files[0]);
+			figcaption.innerText = this.files[0].name;
+			document.querySelector('form .group').style.display = "flex";
+		});
+
+		
+		function previewBeforeUpload(id, div) {
+			var myDiv = document.getElementsByName(div);
+			
+			document.querySelector('#'+id).addEventListener("change", (e) => {
+				document.querySelector('.message').innerHTML = "";
+				if(e.target.files.length > 0 && e.target.files[0].size < 300024) {
+					let file = e.target.files[0];
+					let fr = new FileReader(); //data
+					fr.addEventListener('loadend', ()=>{
+						let res = fr.result;
+						let spt = res.split("base64,")[1];
+						//console.log(file.type);
+							obj[id] = {
+							base64 : spt,
+							type : file.type,
+							name : file.name,
+							//username : fullnames[position]
+						}
+						//console.log(obj[id].base64);
+						//the FETCH was took from here.
+					})
+					fr.readAsDataURL(file); //data
+
+					if(myDiv[0].innerText == "+"){
+						counter++;
+					}
+					myDiv[0].innerText = file.name;
+
+					//console.log(e.target.files.length);
+					//console.log("counter: " + counter);
+				} else {
+					return document.querySelector('.message').innerHTML = "The file you are attempting to load is larger than 300 kilobyte.";
+				}
+				if(counter == 3) {
+					button.disabled = false;
+					button.style.opacity = 1;
+				}
+				//console.log(counter);
+			});
+		}
+		previewBeforeUpload('dob_cert','f2');
+		previewBeforeUpload('last_result','f3');
+		previewBeforeUpload('attestation', 'f4');
+		
+		
+		button.addEventListener("click", (e) => {
+			// on form submission, prevent default
+			e.preventDefault();
+			button.disabled = true;
+			button.style.opacity = 0.3;
+			document.querySelector('.message').innerHTML = "Please wait...";
+			
+			localStorage.setItem("userIndex", codes[position]);
+			
+			if(viewed[position] == 'false'){
+				fetch("https://script.google.com/macros/s/AKfycbwEKMmeagqRqD7yBdehSS-DMLxlnmMhzwmCuBrv1VV3hTfJvl0hMAU1dP7WgUOL4f1KOA/exec", {
+					method : 'POST',
+					body : JSON.stringify(obj)
+				})
+				.then(r=>r.text())
+				.then(data=>{
+					console.log(data)
+					if(data = "Images uploaded."){
+						location.href = "status_final.html";
+					}
+				})
+			} else {
+				location.href = "status_final.html";
+			}
+			
+		});
+		
+		form.addEventListener("formdata", (e) => {
+			console.log("formdata fired");
+
+			// Get the form data from the event object
+			const data = e.formData;
+			
+			//BRING IN THE fetch() API HERE TO post data
+			/*fetch('https://script.google.com/macros/s/AKfycbw0wBntdZrwGi3_lM2crr6PKZtNLsdQsCwhwLhTZ0AkvJBfgm6nl82FsoOum7u0Zcc0/exec',
+				{
+					method: 'POST',
+					body: data,
+					mode: 'no-cors'
+				}
+			)
+			.catch(err => console.log(err))*/
+				
+			//for (const value of data.values()) {
+				
+			//}
+		});
+	</script>
+	<script src="scripts/status.js"></script>
+</body>
+</html>

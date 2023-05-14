@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<style>
+		* {
+			margin:0;
+			padding:0;
+			box-sizing:border-box;
+		}
+		body {
+            position:relative;
+        }
+		#container {
+			background-color:#4070f4;
+			min-height:100vh;
+			border-radius:20px;
+			display:flex;
+			//flex-direction:column;
+			justify-content:center;
+			align-items:center;
+			position:relative;
+		}
+		#main {
+			background-color:#4070f4;
+			border-radius:20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-size: large;
+		}
+		#main div{
+			background-color:#fff;
+            position:relative;
+            width:45%;
+            padding: 50px 20px;
+        }
+        #main p{
+            margin:10px;
+            text-align: justify;
+        }
+        #main p:nth-child(2){
+            text-align:right;
+        }
+        #main p:nth-child(4){
+            text-align: center;
+        }
+		.blockquote {
+			max-width:500px;
+			min-height:300px;
+			max-height:300px;
+			overflow:hidden;
+			padding:25px;
+			background:#f8fffe;
+			border-left:1px solid orange;
+			box-shadow:0 0 15px 7px rgba(0,0,0,0.1);
+		}
+		.blockquote_bordered {
+			//border-left-width:10px;
+			//border-radius:5px;
+		}
+		.blockquote_background {
+			background-color:orange;
+			//color:#f8fffe;
+		}
+		.blockquote_text {
+			font-family:Raleway, sans-serif;
+			font-size:1.15em;
+			line-height:1.5;
+			margin:20px;
+		}
+		.blockquote_text_credit {
+			text-align:right;
+		}
+		.blockquote_text_credit::before {
+			content:"\2014\0020";
+		}
+		figure {
+			position:relative;
+			min-height:100px;
+			min-width:100px;
+			border-radius:50%;
+			background-image: url("images/avatar1.png");
+			background-size:cover;
+			background-repeat:no-repeat;
+		}
+		figcaption {
+			position:absolute;
+			bottom:0;
+			width:100%;
+			text-align:center;
+			font-family:Raleway, sans-serif;
+			font-size:1.5em;
+			border:1px solid red;
+		}
+		span {
+			color:#fff;
+			padding:8px 16px;
+		}
+		.blockquote_p {
+			margin:10px;
+		}
+		@media only screen and (max-width: 600px) {
+			#container {
+				flex-direction:column;
+			}
+		}
+		@media print{
+            body * {
+                display:none;
+            }
+            #main div{
+                font-size:14px;
+                width:100%;
+            }
+            #main, #main * {
+                display:block;
+            }
+        }
+		.btn-print {
+			display:none;
+            position:fixed;
+            right:20%;
+            margin:50px;
+            height:50px;
+            width:50px;
+            background-color:#fff;
+            border-radius:50%;
+			justify-content:center;
+			align-items:center;
+            border:none;
+            outline:none;
+            cursor:pointer;
+            transition:all .3s;
+            font-size:xx-large;
+            //z-index: 1;
+        }
+		.btn-print span{
+			color:black;
+		}
+        .btn-print:hover {
+            background-color:orange;
+            color:#fff;
+        }
+		#theLetter {
+			background-color:transparent;
+			border-radius:7px;
+			padding:7px;
+			border:1px solid #ccc;
+			transition:all .3s;
+			cursor:pointer;
+		}
+		#theLetter:hover {
+			//color:#fff;
+			background-color:#ccc;
+		}
+		#letterhead{
+			//border:1px solid red;
+			width:1000px;
+			height:100vh;
+			font-size:1.2em;
+			font-family:arial, sans-serif;
+			background-color:#fff;
+			padding:60px;
+			margin:120px 0;
+		}
+		.forLetter{
+			display:none;
+		}
+	</style>
+</head>
+<body>
+	<button type="button" class="btn-print" onclick="print()" title="Print">
+        <span class="material-symbols-outlined">&#128438;</span>
+    </button>
+	<div id="container">
+		<div class="blockquote blockquote_background" style="display:flex;justify-content:center;align-items:center;">
+			<figure></figure>
+			<div class="blockquote_text">
+				<p class="blockquote_p">Name: <span>xxx</span></p>
+				<p class="blockquote_p">Score: <span>xxx</span></p>
+				<p class="blockquote_p">Status: <span>xxx</span></p>
+			</div>
+		</div>
+		
+		<blockquote class="blockquote blockquote_bordered">
+			<p class="blockquote_text">xxxxxxxxxxxxxx</p>
+			<p class="blockquote_text blockquote_text_credit">Vincent Ikape<br/><small>Principal</small></p>
+		</blockquote>
+		<!--div class="forLetter" style="background-color:inherit;position:fixed;top:0;width:100%;text-align:center;padding:40px">
+			<button style="background-color:orange;border:none;padding:10px 4px;font-size:1em;cursor:pointer;" onclick="window.print()">Print Letter</button>
+		</div-->	
+	</div>
+	
+	<script>
+		const currentDiv = document.querySelector('.blockquote_bordered');
+		var span = document.querySelector('span');
+		var name_elem = document.querySelectorAll('.blockquote_p span')[0];
+		var score_elem = document.querySelectorAll('.blockquote_p span')[1];
+		var status_elem = document.querySelectorAll('.blockquote_p span')[2];
+		var quote = document.querySelectorAll('.blockquote_text')[1];
+		var [true_codes, full_names, enroll_num, scores, statuss, adm_class, local_key] = [[],[],[],[],[],[],localStorage.getItem('userIndex')];
+		var myletter = "";
+		
+		fetch('https://script.google.com/macros/s/AKfycbzxRBgNzxFSSnJmVwDIid7VOg3aa6oU22iVuwtfTb1PB8jjDxG5pANzNkC1EjlNB6OycA/exec'/*, {
+			method:"GET",
+			mode:"no-cors"
+		}*/)
+		.then(res => res.json())
+		.then(data => {
+			for(i = 0; i < data.appRegion.length; i++) {
+                true_codes[i] = data.appRegion[i][0];
+                full_names[i] = data.appRegion[i][1];
+				enroll_num[i] = data.appRegion[i][2];
+                scores[i] = data.appRegion[i][3];
+                statuss[i] = data.appRegion[i][4];
+                adm_class[i] = data.appRegion[i][5];
+            }
+			name_elem.innerText = full_names[true_codes.indexOf(local_key)];
+			score_elem.innerText = scores[true_codes.indexOf(local_key)] + "%";
+			status_elem.innerText = statuss[true_codes.indexOf(local_key)];
+			myletter = data.appQuote.letter;
+			
+			
+			switch (statuss[true_codes.indexOf(local_key)]) {
+				case "Admitted":
+					quote.innerText = data.appQuote.granted;
+					currentDiv.innerHTML += '<button id="theLetter">View and Print Admission Letter</button>';
+					document.querySelector('#theLetter').addEventListener('click', linkToLetter);
+					/*document.getElementById('letterbody').innerHTML = myletter.replace(/SOMEBODY|DATE|ENROLLNUM/gi,
+						function (matched) {
+							return el[matched];
+						});*/
+					break;
+				case "Denied":
+					quote.innerText = data.appQuote.denied;
+					break;
+				default:
+					quote.innerText = data.appQuote.awaiting;
+			}
+			
+			
+			function linkToLetter(){
+				let formNames = {
+					"JSS 1":"Junior Secondary School One (JSS 1)", 
+					"JSS 2":"Junior Secondary School Two (JSS 2)", 
+					"SSS 1":"Senior Secondary School One (SSS 1)"
+				}
+				let el = {
+					ENROLLNUM: enroll_num[true_codes.indexOf(local_key)],
+					PERSON: name_elem.innerText.toUpperCase(),
+					FORMER: formNames[adm_class[true_codes.indexOf(local_key)]],
+					DATE: new Date().toLocaleDateString('en-us', { year:"numeric", day:"numeric", month:"short"})
+				}
+				document.querySelector('.btn-print').style.display = 'flex';
+				document.getElementById('container').innerHTML = myletter.replace(/DATE|ENROLLNUM|PERSON|FORMER/gi,
+					function (matched) {
+						return el[matched];
+					});
+				document.querySelector('#container').setAttribute('id','main');
+					/*for(i=0;i<2;i++){
+						document.querySelector('.blockquote').style.display = "none";
+						document.querySelectorAll('.forLetter')[i].style.display = "flex";
+					}*/
+			}
+				/*const newDiv = document.createElement('div');
+				const divTxt = document.createTextNode();
+				
+				newDiv.appendChild(divTxt);*/
+				
+				//currentDiv.innerHTML += '<p><a href="#">Click to view and print out admission letter.</a></p>';
+				
+				//document.body.insertAfter(newDiv, currentDiv);
+			
+		})
+	</script>
+</body>
+</html>
