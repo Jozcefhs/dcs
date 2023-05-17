@@ -53,7 +53,7 @@ function verifyAdmission(){
 			break;
 		case 'Granted':
 			document.getElementsByClassName("title")[0].innerText = "Success !";
-			document.getElementsByClassName("description")[0].innerText = `${myArr3[y]}, you've been granted admission into Destiny College. We wish you a hearty congratulation and hope that you will take us on our offer.`;
+			document.getElementsByClassName("description")[0].innerText = `${myArr3[y]}, you've been granted admission into Destiny. We wish you a hearty congratulation and hope that you will take us on our offer.`;
 			break;
 		case 'Denied':
 			document.getElementsByClassName("title")[0].innerText = "Denied.";
