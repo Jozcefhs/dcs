@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Destiny Christian Academy</title>
+    <link rel="stylesheet" href="css/stylesA.css">
+</head>
+<body>
+    <div id="demo" style="display: none;"><span></span></div>
+    <div id="container" style="position:relative">
+        <div style="position:fixed;width:1000px;top:0;background-color:#fff;">
+            <h2>Dynamax<small> | &copy; 2023</small></h2>
+            <div style="float:right;" class="form-group">
+                <select name="mypages" id="pages" >
+                    <option value="100">Page 1</option>
+                    <option value="200">Page 2</option>
+                    <option value="300">Page 3</option>
+                    <option value="400">Page 4</option>
+                    <option value="500">Page 5</option>
+                    <option value="600">Page 6</option>
+                    <option value="700">Page 7</option>
+                </select>
+            </div>
+            <form role="form">
+                <div class="form-group">
+                    <input type="text" id="title" placeholder="Name" required />
+                </div> 
+                <div class="row">
+                    <div class="form-group">
+                        <input type="text" id="qty" placeholder="Admission Number" autocomplete="off" />
+                    </div> 
+                    <div class="form-group">
+                        <input type="text" id="cp" placeholder="Score"  autocomplete="off" required/>
+                    </div> 
+                    <div class="form-group">
+                        <!--input type="text" id="sp" placeholder="Status" required /-->
+                        <select name="adm" id="admStat" required>
+                            <option value="Pending" selected>Pending</option>
+                            <option value="Admitted">Admitted</option>
+                            <option value="Denied">Denied</option>
+                        </select>
+                    </div> 
+                </div> 
+                <button type="button" id="commit" style="float:left;">Commit Changes</button>
+                <button type="button" style="display:none;">Cancel</button>          
+                <button type="submit">Save</button>          
+            </form>
+        
+
+            <div id="output">
+                <h2>STUDENT'S LIST</h2>
+                <!--a href="javascript:void(0);" id="btnClearData">Empty Data[<span id="dataCount">0</span>]</a-->
+                <input type="search" id="search" placeholder="Search...">
+            </div>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Code</th>
+                    <th>Adm No</th>
+                    <th>Name</th>
+                    <th>Score</th>
+                    <th>Status</th>
+                    <!--th>ACTION</th-->
+                </tr>
+            </thead>
+            <tbody></tbody>
+            <tfoot></tfoot>
+        </table>
+    </div>
+
+    <script src="scripts/scriptA.js"></script>
+</body>
+</html>
