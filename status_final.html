@@ -1,7 +1,10 @@
 <!DOCTYPE html>
 <html>
 <head>
-	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Offer of Admission</title>
 	<style>
 		* {
 			margin:0;
@@ -44,6 +47,9 @@
             text-align:right;
         }
         #main p:nth-child(4){
+            text-align: center;
+        }
+		h3{
             text-align: center;
         }
 		.blockquote {
@@ -111,7 +117,7 @@
                 display:none;
             }
             #main div{
-                font-size:14px;
+                font-size:16px;
                 width:100%;
             }
             #main, #main * {
@@ -226,12 +232,8 @@
 			switch (statuss[true_codes.indexOf(local_key)]) {
 				case "Admitted":
 					quote.innerText = data.appQuote.granted;
-					currentDiv.innerHTML += '<button id="theLetter">View and Print Admission Letter</button>';
+					currentDiv.innerHTML += '<button id="theLetter">View and print Offer of Admission</button>';
 					document.querySelector('#theLetter').addEventListener('click', linkToLetter);
-					/*document.getElementById('letterbody').innerHTML = myletter.replace(/SOMEBODY|DATE|ENROLLNUM/gi,
-						function (matched) {
-							return el[matched];
-						});*/
 					break;
 				case "Denied":
 					quote.innerText = data.appQuote.denied;
@@ -254,25 +256,12 @@
 					DATE: new Date().toLocaleDateString('en-us', { year:"numeric", day:"numeric", month:"short"})
 				}
 				document.querySelector('.btn-print').style.display = 'flex';
-				document.getElementById('container').innerHTML = myletter.replace(/DATE|ENROLLNUM|PERSON|FORMER/gi,
+				document.getElementById('container').innerHTML = myletter.replace(/DATE|PERSON|FORMER/g,
 					function (matched) {
 						return el[matched];
 					});
 				document.querySelector('#container').setAttribute('id','main');
-					/*for(i=0;i<2;i++){
-						document.querySelector('.blockquote').style.display = "none";
-						document.querySelectorAll('.forLetter')[i].style.display = "flex";
-					}*/
-			}
-				/*const newDiv = document.createElement('div');
-				const divTxt = document.createTextNode();
-				
-				newDiv.appendChild(divTxt);*/
-				
-				//currentDiv.innerHTML += '<p><a href="#">Click to view and print out admission letter.</a></p>';
-				
-				//document.body.insertAfter(newDiv, currentDiv);
-			
+			}			
 		})
 	</script>
 </body>
