@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<meta name="author" content="Dynamax">
+	<title>Admission Letter</title>
+	<style>
+		* {
+			margin:0;
+			padding:0;
+			box-sizing:border-box;
+		}
+		#container {
+			min-height:100vh;
+			background:green;
+			padding:40px;
+			display:flex;
+			flex-direction:column;
+			gap:20px;
+			justify-content:center;
+			align-items:center;
+			border-radius:20px;
+			font-family:Segoe UI;
+			font-size:20px;
+		}
+		#main {
+			background-color:green;
+			border-radius:20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-size: large;
+		}
+		#main div{
+			background-color:#fff;
+            position:relative;
+            width:45%;
+            padding: 50px 20px;
+        }
+        #main p{
+            margin:10px;
+            text-align: justify;
+        }
+        #main p:nth-child(2){
+            text-align:right;
+        }
+        #main p:nth-child(4){
+            text-align: center;
+        }
+		.group {
+			position:relative;
+			width:400px;
+			border:1px #cccccc solid;
+			display:none;
+			justify-content:space-around;
+			flex-direction:column;
+			background:#fff;
+			border-radius:8px;
+			box-shadow:3px 5px 4px rgba(0,0,0,0.1);
+		}
+		.check {
+			padding:20px 30px;
+			color:green;
+			font-weight:bold;
+			opacity:0;
+			transition: opacity 0.4s;
+		}
+		input {
+			font-size:18px;
+			/*height:50px;*/
+			padding:20px 5px 20px 40px;
+			outline:none;
+			border:none;
+			/*border:1px solid blue;*/
+			width:100%;
+			background:transparent;
+		}
+		.unhide{
+			opacity:1;
+		}
+		.group:nth-child(2), .group:nth-child(4) {
+			display:none;
+		}
+		.group:nth-child(1), .group:nth-child(2), .group:nth-child(3){
+			flex-direction:row;
+		}
+		.message {
+			display:flex;
+			justify-content:space-around;
+			align-items:center;
+			margin:20px 0;
+			color:#fff;
+		}
+		#bio {
+			display:none;
+			flex-wrap:wrap;
+			gap:20px;
+			padding:20px 0;
+		}
+		#bio > p{
+			flex-basis:100%;
+			text-align:center;
+			padding:10px;
+		}
+		i {
+			background-color:#fff;
+			padding:10px;
+			margin:10px;
+			border-radius:50%;
+			transform:scale(0.5);
+			transition:transform 0.5s;
+		}
+		@media only screen and (max-width: 600px) {
+			#container {
+				flex-direction:column;
+			}
+		}
+		@media print{
+            body * {
+                display:none;
+            }
+            #main div{
+                font-size:16px;
+                width:100%;
+            }
+            #main, #main * {
+                display:block;
+            }
+        }
+		.btn-print {
+			display:none;
+            position:fixed;
+            right:20%;
+            margin:50px;
+            height:50px;
+            width:50px;
+            background-color:#fff;
+            border-radius:50%;
+			justify-content:center;
+			align-items:center;
+            border:none;
+            outline:none;
+            cursor:pointer;
+            transition:all .3s;
+            font-size:xx-large;
+        }
+		.btn-print span{
+			color:black;
+		}
+        .btn-print:hover {
+            background-color:orange;
+            color:#fff;
+        }
+	</style>
+</head>
+<body>
+	<button type="button" class="btn-print" onclick="print()" title="Print">
+        <span class="material-symbols-outlined">&#128438;</span>
+    </button>
+	<div id="container">
+		<div class="group">
+			<input type="text" name="code" maxlength="8" placeholder="Enter code" onkeyup="checkInput()" autocomplete="off"/><span class="check">&check;</span>
+		</div>
+		<p class="message"><i></i><i></i><i></i></p>
+	</div>
+	<script src="scripts/letter.js"></script>
+	<!--script src="letter.js"></script-->
+	<script>
+		var myContainer = document.getElementById('container');
+		var myInput = document.querySelector('input');
+		var span = document.querySelector('.check');
+		var message = document.querySelector('.message');
+		var Incrementer = 0;
+		var position;
+
+		function checkInput() {
+			if(myInput.value.length > 7){
+				let a = codes.indexOf(myInput.value);
+				if(a != -1 && code50k[a] == '50,000'){
+					position = codes.indexOf(myInput.value);
+					span.classList.add('unhide');
+
+					let formNames = {
+						"JSS 1":"Junior Secondary School One (JSS 1)", 
+						"JSS 2":"Junior Secondary School Two (JSS 2)", 
+						"SSS 1":"Senior Secondary School One (SSS 1)"
+					}
+					let el = {
+						ENROLLNUM: pID[position],
+						PERSON: student[position].toUpperCase(),
+						FORMER: formNames[placement[position]],
+						DATE: new Date().toLocaleDateString('en-us', { year:"numeric", day:"numeric", month:"long"})
+					}
+					document.querySelector('.btn-print').style.display = 'flex';
+					myContainer.innerHTML = myletter.replace(/DATE|PERSON|FORMER|ENROLLNUM/gi,
+						function (matched) {
+							return el[matched];
+						});
+					myContainer.setAttribute('id','main');
+				} else {
+					message.innerHTML = 'No letter available for this code.';
+				}
+			}
+		}
+	</script>
+</body>
+</html>
