@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tasks</title>
+    <style>
+        *{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Poppins', sans-serif;
+        }
+        body{
+            background-color: #e3edf7;
+        }
+        .accordion{
+            margin: 60px auto;
+            width: 600px;
+        }
+        .accordion li{
+            list-style: none;
+            width: 100%;
+            margin: 20px;
+            padding: 10px;
+            border-radius: 8px;
+            background-color: #e3edf7;
+            box-shadow: 6px 6px 10px -1px rgba(0, 0, 0, 0.15), -6px -6px 10px -1px rgba(255, 255, 255, 0.7);
+        }
+        .accordion li label{
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            font-size: 18px;
+            font-weight: 500;
+            cursor: pointer;
+        }
+        input[type='radio']{
+            display: none;
+        }
+        .accordion .content{
+            color: #555;
+            padding: 0 20px;
+            max-height: 0;
+            overflow: hidden;
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+            transition: max-height 0.5s, padding 0.5s;
+        }
+        .accordion .content span{
+            width: 30%;
+            text-align: center;
+            padding: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .accordion .content span:hover, .accordion .content span:active{
+            background-color: #324aa8;
+            color: #fff;
+        }
+        .accordion input[type='radio']:checked + label + .content{
+            max-height: 400px;
+            padding: 10px 10px 20px;
+        }
+    </style>
+    
+</head>
+<body>
+    <ul class="accordion">
+        <% result.forEach((e, i) => { %>
+            <li>
+                <input type="radio" name="tasks" id="<%= 'task' + i %>>">
+                <label for="<%= 'task' + i %>>"><%= e.name %></label>    
+                <div class="content">
+                    <% e.tasks.forEach((f) => { %>
+                        <span><%= f %></span>
+                    <% }) %>
+                </div>
+            </li>
+        <% }) %>
+            
+    </ul>
+</body>
+</html>

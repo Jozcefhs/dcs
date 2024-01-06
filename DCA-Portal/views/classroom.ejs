@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+    <style>
+        #rightContainer {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-start;
+            align-items: flex-start;
+            gap: 3em;
+            width: 100%;
+            padding: 50px;
+            height: fit-content;
+        }
+        .card {
+            cursor: pointer;
+            flex-basis: 15%;
+            padding: 20px 0;
+            background-color: rgba(0,0,0,0.2);
+            border-radius: 10px;
+            color: #fff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: 350ms;
+        }
+        .card:hover {
+            transform: scale(1.1);
+        }
+        .card__name {
+            text-align: center;
+            border-right: 3px solid #fff;
+        }
+        .card__int {
+            color: greenyellow;
+            text-align: right;
+        }
+        .card__name, .card__int {
+            padding: 12px 18px;
+        }
+    </style>
+    <%- include('./partials/dashboard.ejs') %>
+    <section id="right">
+        <div id="rightContainer">
+            <small id="<%= room %>">Junior Secondary 1</small>
+            <% for (i = 0; i < data.length; i++) { %>
+                <div class="card">
+                    <span class="card__name"><%= data[i] %></span>
+                    <span class="card__int">0</span>    
+                    <!-- <span class="card__int"><%#= result.filter(x => x.arm==data[i]).length %></span>     -->
+                </div>
+            <% } %>
+        </div>
+    </section>
+
+    <script>
+        fetch('/room/v2/' + document.querySelector('small').id)
+        // .then(res => res.json())
+        //     .then(data => console.log(data.length))
+        // )
+        .then(data => {
+            console.log(data);
+        })
+    </script>
+</html>

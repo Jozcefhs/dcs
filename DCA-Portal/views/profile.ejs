@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <style>
+        *{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            color: #ffffff;
+            font-family: 'Poppins', sans-serif;
+            font-size: 18px;
+        }
+        #main{
+            height: 100vh;
+            background-color: #324aa8;
+        }
+        header{
+            padding:10px 20px;
+            margin-bottom: 70px;
+        }
+        .tabs{
+            display: flex;
+            height: 70vh;
+            padding: 0 100px 0 100px;
+        }
+        .tabs__sidebar{
+            width: 300px;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            justify-content: center;
+            gap: 10px;
+        }
+        .tabs__button{
+            text-align: left;
+            width: 100%;
+            padding: 12px 12px 12px 30px;
+            background-color: transparent;
+            color: #ffffff;
+            border: none;
+            outline: none;
+            cursor: pointer;
+            transition: all 0.1s;
+        }
+        .tabs__button:hover{
+            border-left: 2px solid #ffffff;
+        }
+        .tabs__content{
+            border: 0;
+            width: 55%;
+            border-radius: 8px;
+            background-color: transparent;
+            display: none;
+        }
+        .active__tabs__content{
+            display: block;
+        }
+        .active__tabs__button{
+            border-radius: 8px 0 0 8px;
+            font-weight: bold;
+            background-color: #e3edf7;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div id="main">
+        <header>
+            <%= user.fname %>
+        </header>
+        <div class="tabs">
+            <div class="tabs__sidebar">
+                <button class="tabs__button active__tabs__button" formtarget="tasks" id="frame1" data-for-tab="1">Tasks</button>
+                <button class="tabs__button" formtarget="completed" id="frame2" data-for-tab="2">Completed</button>
+                <button class="tabs__button" formtarget="performance" id="frame3" data-for-tab="3">Performance</button>
+            </div>
+    
+            <iframe class="tabs__content active__tabs__content" name="tasks" src="/tasks" data-tab="1" sandbox="allow-same-origin"></iframe>
+            <iframe class="tabs__content" name="completed" src="/completed" data-tab="2"></iframe>
+            <iframe class="tabs__content" name="performance" src="/performance" data-tab="3"></iframe>
+            <!--iframe class="tabs__content" name="completed" src="about:blank"></iframe>
+            <iframe class="tabs__content" name="performance" src="about:blank" loading="lazy"></iframe-->
+    
+            <!--div data-tab="1">
+                Lorem1 ipsum, dolor sit amet consectetur adipisicing elit. Doloremque expedita libero, praesentium nam iure architecto laudantium ipsum iusto itaque. Doloremque incidunt, illum sit corrupti fugiat et veritatis cumque nesciunt possimus.
+            </div>
+            <div data-tab="2">
+                Lorem1 ipsum, dolor sit amet consectetur adipisicing elit. Doloremque expedita libero, praesentium nam iure architecto laudantium ipsum iusto itaque. Doloremque incidunt, illum sit corrupti fugiat et veritatis cumque nesciunt possimus.
+            </div>
+            <div data-tab="3">
+                Lorem1 ipsum, dolor sit amet consectetur adipisicing elit. Doloremque expedita libero, praesentium nam iure architecto laudantium ipsum iusto itaque. Doloremque incidunt, illum sit corrupti fugiat et veritatis cumque nesciunt possimus.
+            </div-->
+            
+        </div>
+    </div>
+    <script>
+        /*
+        document.getElementById('frame2').addEventListener('click', (e) => {
+            let url = '/login';
+            let other = window.open(url, 'completed')
+        })
+        */
+
+        function setupTabs(){
+            document.querySelectorAll('.tabs__button').forEach(button => {
+                button.addEventListener('click', () => {
+                    const sideBar = button.parentElement;
+                    const tabsContainer = sideBar.parentElement;
+                    const tabNumber = button.dataset.forTab;
+                    const tabToActivate = tabsContainer.querySelector(`.tabs__content[data-tab="${tabNumber}"]`);
+
+                    sideBar.querySelectorAll('.tabs__button').forEach(button => {
+                        button.classList.remove('active__tabs__button');
+                    })
+
+                    tabsContainer.querySelectorAll('.tabs__content').forEach(tab => {
+                        tab.style.display = 'none';
+                    })
+                    
+                    tabToActivate.style.display = 'block';
+                    button.classList.add('active__tabs__button');
+                })
+            })
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            setupTabs();
+        })
+    </script>
+</body>
+</html>
