@@ -1,8 +1,0 @@
-
-10 REM program to find the square root of numbers
-20 INPUT  PROMPT "Enter the first number of range":A
-30 INPUT  PROMPT "Enter the last number of range":B
-40 FOR I=A TO B
-50    PRINT"the square root of";A;"is";SQR(A)
-60 NEXT I
-70 END
