@@ -18,9 +18,7 @@ const appSettings = {
 const app = initializeApp(appSettings)
 const database = getDatabase(app)
 const namesInDB = ref(database, "names")
-
-
-console.log(app)
+const sucMsg = document.getElementById('sucmsg')
 
 
 const form = document.querySelector('form')
@@ -29,8 +27,15 @@ form.addEventListener('submit', function(e)  {
     e.preventDefault()
     const fd = new FormData(form)
     const obj = Object.fromEntries(fd)
-    console.log(obj)
      push(namesInDB, obj)
+     
+     form.reset()
+     form.style.display = "none"
+   
 })
 
-console.log(app)
+
+// function sucMe() {
+//     let message = sucMsg.textContent
+//     message = "Thank you"
+// }
