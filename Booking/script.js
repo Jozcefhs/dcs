@@ -19,6 +19,8 @@ const app = initializeApp(appSettings)
 const database = getDatabase(app)
 const namesInDB = ref(database, "names")
 const sucMsg = document.getElementById('sucmsg')
+const okBtn = document.querySelector('#btn')
+
 
 
 const form = document.querySelector('form')
@@ -28,14 +30,20 @@ form.addEventListener('submit', function(e)  {
     const fd = new FormData(form)
     const obj = Object.fromEntries(fd)
      push(namesInDB, obj)
-     
      form.reset()
      form.style.display = "none"
+     openSuccess()
    
 })
 
+function openSuccess() {
+    sucMsg.classList.add('open-success')
+}
+function closeSuccess() {
+    sucMsg.classList.remove('open-success')
+}
 
-// function sucMe() {
-//     let message = sucMsg.textContent
-//     message = "Thank you"
-// }
+okBtn.addEventListener('click', function() {
+    closeSuccess()
+    window.close()
+})
