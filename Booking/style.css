@@ -99,11 +99,12 @@ input, select {
     display: flex;
     align-items: center;
     justify-content: center;
+    height: 100%;
    }
 
    .success {
     width: 320px;
-    height: 30vh;
+    /*height: 30vh;*/
     background: #fff;
     border-radius: 6px;
     position: absolute;
