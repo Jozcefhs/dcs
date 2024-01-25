@@ -47,3 +47,4 @@ okBtn.addEventListener('click', function() {
     closeSuccess()
     window.close()
 })
+

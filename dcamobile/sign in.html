@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="refres" content="4;URL='http://www.mysite.com/homepage.html'" />
+    <link rel="icon" href="images/real.png" type="image/png" />
+    <link rel="stylesheet" href="css/sign in.css">
+    <link rel="#" href="#">
+    <title>Destiny Christian Academy</title>
+   </head>
+<body>
+  <div class="container">
+    <input type="checkbox" id="flip">
+    <div class="cover">
+      <div class="front">
+        <img src="images/frontImg.jpg" alt="">
+        <div class="text">
+          <span class="text-1">“None of us is as smart <br> as all of us.”</span>
+          <span class="text-2">—Ken Blanchard. ...</span>
+        </div>
+      </div>
+      <div class="back">
+        <img src="images/backImg.jpg" alt="">
+        <div class="text">
+          <span class="text-1">"Education cost money, but then  <br> so does ignorance."</span>
+          <span class="text-2">Clause Moser</span>
+        </div>
+      </div>
+    </div>
+    <div class="forms">
+        <div class="form-content">
+          <div class="login-form">
+            <div class="title">Login</div>
+          <form role="form" onsubmit="signIn(event);" autocomplete="on">
+            <div class="input-boxes">
+              <div class="input-box">
+                <i class="fas fa-envelope"></i>
+                <input type="email" placeholder="Enter your email" id="emaild" required>
+              </div>
+              <div class="input-box">
+                <i class="fas fa-lock"></i>
+                <input type="password" placeholder="Enter your password" id="pwdd" required>
+              </div>
+              <div class="text"><a href="#">Forgot password?</a></div>
+              <div class="button input-box">
+                <input type="submit" value="Sumbit">
+              </div>
+              <div class="text sign-up-text">Don't have an account? <label for="flip">Sigup now</label></div>
+            </div>
+        </form>
+      </div>
+      <!-- Registration Form-->
+        <div class="signup-form">
+          <div class="title">Signup</div>
+        <form action="https://sheetdb.io/api/v1/ro679scwwt0a3"  role="form" onsubmit="signUp(event);" autocomplete="on" method="post" id="sheetdb-form">
+            <div class="input-boxes" role="form">
+              <div class="input-box">
+                <i class="fas fa-user"></i>
+                <input type="text" placeholder="Enter your name" id="fname" name="data[FirstName]" required>
+              </div>
+              <div class="input-box">
+                <i class="fas fa-user"></i>
+                <input type="text" placeholder="Enter your name" id="lname" name="data[LastName]" required>
+              </div>
+              <div class="input-box">
+                <i class="fas fa-envelope"></i>
+                <input type="text" placeholder="Enter your email" id="email" name="data[Email]" required>
+              </div>
+              <div class="input-box">
+                <i class="fas fa-lock"></i>
+                <input type="password" placeholder="Enter your password" id="pwd" name="data[Password]" required>
+              </div>
+              
+              <div class="button input-box">
+                <input type="submit" value="Sumbit">
+              </div>
+              <div class="text sign-up-text">Already have an account? <label for="flip">Login now</label></div>
+            </div>
+      </form>
+    </div>
+    </div>
+    </div>
+  </div>
+  <!--script>
+    function LoginUser()
+    {
+    var username = document.getElementById("username").value;
+    var password = document.getElementById("password").value;
+    google.script.run.withSuccessHandler(function(output) 
+    {
+      if(output == 'TRUE')
+      {
+         var url1 ='#';
+         var winRef = window.open(url1);
+         winRef ? google.script.host.close() : window.onload=function(){document.getElementById('url').href = url1;}    
+      }
+      else if(output == 'FALSE')
+      {
+        document.getElementById("errorMessage").innerHTML = "Invalid data";     
+      }    
+    }).checkLogin(username, password);
+    }
+  </script-->
+</body>
+</html>

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- <meta http-equiv="refresh" content="2;URL='sign in.html'" /> -->
+    <link rel="icon" href="images/real.png" type="image/png" />
+    <link rel="stylesheet" href="css/index.css">
+    <link rel="#" href="#">
+    <title>Destiny Christian Academy</title>
+</head>
+<body>
+    <div class="login-cat">
+        <button id="log-btn">student</button>
+      </div>
+    <div class="login-cat">
+        <button id="log-btn">teacher</button>
+      </div>
+    <div class="login-cat">
+        <button id="log-btn">admin</button>
+      </div>
+    <div class="login-cat">
+        <button id="log-btn">parent</button>
+      </div>
+
+      <script>
+        const but = document.querySelector('#log-btn')
+        console.log(but)
+
+        but.addEventListener('click', function() {
+          console.log('the Lord is so good')
+          const targetPage = '/dcamobile/menu/index.html'
+          window.location.href = targetPage
+          window.history.replaceState(null, '', targetPage)
+        })
+      </script>
+      
+</body>
+</html>

@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login Page</title>
+    <link rel="stylesheet" href="login-style.css">
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-form">
+            <h1>Login</h1>
+
+            <label for="userType">Select User Type:</label>
+            <select id="userType">
+                <option value="student">Student</option>
+                <option value="teacher">Teacher</option>
+                <option value="admin">Admin</option>
+            </select>
+
+            <label for="username">Email:</label>
+            <input type="text" id="email" placeholder="Enter your email addresss">
+
+            <label for="password">Password:</label>
+            <input type="password" id="password" placeholder="Enter your password">
+
+            <button id="login1">Login</button>
+        </div>
+    </div>
+    <script src="script.js" type="module"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.2/firebase-app.js" type="module"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.2/firebase-auth.js" type="module"></script>
+</body>
+</html>

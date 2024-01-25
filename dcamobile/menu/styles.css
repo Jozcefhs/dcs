@@ -1,0 +1,134 @@
+/* Reset some default styles */
+body, html {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    overflow: hidden;
+    
+  }
+  
+  /* Set up basic styling */
+  body {
+    font-family: Arial, sans-serif;
+  }
+  
+  /* Header styling */
+  header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    background: linear-gradient(to right, #2a4e3c, #3e2f50, #3e2f50, #3e2f50);
+    /*color: cyan;*/
+    padding: 10px;
+    z-index: 1000; /* Ensure the header is above other elements */
+    box-shadow: 0 0 20px cyan;
+  }
+   h1 {
+    -webkit-text-stroke: #8512b3;
+    -webkit-text-stroke-width: .8px;
+    text-shadow: 0 0 10px turquoise;
+   }
+  
+  .image img {
+    
+    max-width: 70px; /* Adjust the width of your logo as needed */
+    height: 70px;
+    
+    
+  }
+
+  .image {
+    width: 90px;
+    height: 90px;
+    /* box-shadow: 0 0 15px 8px rgba(175, 174, 92, 0.808); */
+    background-color: white;
+    border-radius: 50%;
+    border: 4px solid goldenrod;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  
+  /* Content styling */
+  .content {
+    margin-top: 80px; /* Adjust to match the height of your header */
+    padding: 20px;
+    margin-bottom: 80px; /* Adjust to match the height of your footer */
+    background-image: url(/dcamobile/images/4.jpg);
+    
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+   
+  }
+  
+  /* Scroll container styling */
+  .scroll-container {
+    max-height: calc(100vh - 200px); /* Adjust to fit your layout */
+    overflow-y: auto;
+  }
+  
+  /* Style for the grid menu */
+  .grid-menu {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+  }
+  
+  .menu-item {
+    /* border: 1px solid #ddd; */
+    padding: 15px;
+    text-align: center;
+    border-radius: 8px;
+  }
+  
+  /* Footer styling */
+  footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    background: linear-gradient(to right, #2a4e3c, #2a4e3c, #3e2f50);
+    /*color: #fff;*/
+    padding: 10px;
+    z-index: 1000; /* Ensure the footer is above other elements */
+    box-shadow: 0 0 20px #b8ebd1;
+  }
+  
+  .footer-item {
+    text-align: center;
+  }
+  
+  /* Additional styling for icons */
+  .icon {
+    width: 100px;
+    /* height: 55px; */
+    font-size: 50px;
+   /* margin-bottom: 5px; /* Adjust the margin between icon and label */
+    border: 1px solid #ddd;
+    text-align: center;
+    border-radius: 8px;
+    /*background-color: #fff;*/
+  }
+
+    .menu-icon {
+      color: aquamarine;
+      font-size: 30px;
+      text-align: center;
+  }
+  
+  .label {
+    display: block; /* Ensure labels appear below icons */
+    font-size: 15px;
+    /*font-weight: bold;*/
+    /* margin-top: 10px; */
+    color: #fff;
+  }
+  

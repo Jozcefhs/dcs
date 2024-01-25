@@ -1,0 +1,18 @@
+	* {
+		margin: 0;
+		padding: 0;
+		overflow: hidden;
+	}
+
+  body {
+	display: flex;
+	position: relative;
+	width: 100vw;
+	height: 100vh;
+	background-image: url(/dcamobile/images/6.jpg);
+	background-size: cover;
+	align-items: center;
+	justify-content: center;
+  }
+  
+  
