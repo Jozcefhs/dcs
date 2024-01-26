@@ -89,10 +89,12 @@
     console.log(but)
 
     but.addEventListener('click', function() {
-      console.log('the Lord is so good')
-      const targetPage = '/dcamobile/sign in.html'
+      
+      window.location.href = '/dcamobile/menu/index.html'
+      const targetPage = '/dcamobile/menu/index.html'
       window.location.href = targetPage
       window.history.replaceState(null, '', targetPage)
+      
     })
   </script>
 </body>
