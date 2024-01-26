@@ -34,7 +34,7 @@
         <div class="form-content">
           <div class="login-form">
             <div class="title">Login</div>
-          <form role="form" onsubmit="signIn(event);" autocomplete="on">
+          <form autocomplete="on">
             <div class="input-boxes">
               <div class="input-box">
                 <i class="fas fa-envelope"></i>
@@ -46,7 +46,7 @@
               </div>
               <div class="text"><a href="#">Forgot password?</a></div>
               <div class="button input-box">
-                <input type="submit" value="Sumbit">
+                <input type="submit" value="Sumbit" id="btn">
               </div>
               <div class="text sign-up-text">Don't have an account? <label for="flip">Sigup now</label></div>
             </div>
@@ -55,7 +55,7 @@
       <!-- Registration Form-->
         <div class="signup-form">
           <div class="title">Signup</div>
-        <form action="https://sheetdb.io/api/v1/ro679scwwt0a3"  role="form" onsubmit="signUp(event);" autocomplete="on" method="post" id="sheetdb-form">
+        <form action="" >
             <div class="input-boxes" role="form">
               <div class="input-box">
                 <i class="fas fa-user"></i>
@@ -84,25 +84,16 @@
     </div>
     </div>
   </div>
-  <!--script>
-    function LoginUser()
-    {
-    var username = document.getElementById("username").value;
-    var password = document.getElementById("password").value;
-    google.script.run.withSuccessHandler(function(output) 
-    {
-      if(output == 'TRUE')
-      {
-         var url1 ='#';
-         var winRef = window.open(url1);
-         winRef ? google.script.host.close() : window.onload=function(){document.getElementById('url').href = url1;}    
-      }
-      else if(output == 'FALSE')
-      {
-        document.getElementById("errorMessage").innerHTML = "Invalid data";     
-      }    
-    }).checkLogin(username, password);
-    }
-  </script-->
+  <script>
+    const but = document.querySelector('#btn')
+    console.log(but)
+
+    but.addEventListener('click', function() {
+      console.log('the Lord is so good')
+      const targetPage = '/dcamobile/menu/index.html'
+      window.location.href = targetPage
+      window.history.replaceState(null, '', targetPage)
+    })
+  </script>
 </body>
 </html>

@@ -35,15 +35,15 @@ body, html {
   
   .image img {
     
-    max-width: 70px; /* Adjust the width of your logo as needed */
-    height: 70px;
+    max-width: 50px; /* Adjust the width of your logo as needed */
+    height: 50px;
     
     
   }
 
   .image {
-    width: 90px;
-    height: 90px;
+    width: 60px;
+    height: 60px;
     /* box-shadow: 0 0 15px 8px rgba(175, 174, 92, 0.808); */
     background-color: white;
     border-radius: 50%;
@@ -55,8 +55,8 @@ body, html {
   
   /* Content styling */
   .content {
-    margin-top: 80px; /* Adjust to match the height of your header */
-    padding: 20px;
+    margin-top: 40px; /* Adjust to match the height of your header */
+    padding: 50px;
     margin-bottom: 80px; /* Adjust to match the height of your footer */
     background-image: url(/dcamobile/images/4.jpg);
     
@@ -100,6 +100,7 @@ body, html {
     padding: 10px;
     z-index: 1000; /* Ensure the footer is above other elements */
     box-shadow: 0 0 20px #b8ebd1;
+  
   }
   
   .footer-item {
@@ -108,10 +109,10 @@ body, html {
   
   /* Additional styling for icons */
   .icon {
-    width: 100px;
-    /* height: 55px; */
-    font-size: 50px;
-   /* margin-bottom: 5px; /* Adjust the margin between icon and label */
+    /* width: 100px;
+    height: 55px; */
+    font-size: 40px;
+    /* margin-bottom: 15px; Adjust the margin between icon and label */
     border: 1px solid #ddd;
     text-align: center;
     border-radius: 8px;
@@ -128,7 +129,7 @@ body, html {
     display: block; /* Ensure labels appear below icons */
     font-size: 15px;
     /*font-weight: bold;*/
-    /* margin-top: 10px; */
+    margin-top: 10px;
     color: #fff;
   }
   
