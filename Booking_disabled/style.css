@@ -50,7 +50,7 @@ body::before {
     border-radius: 12px;
     padding: 8px 0;
     isolation: isolate;
-    opacity: 0.8;
+    /* opacity: 0.8;  */
 }
 
 input, select {
