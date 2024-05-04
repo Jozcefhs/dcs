@@ -63,12 +63,12 @@
 			box-shadow:0 0 15px 7px rgba(0,0,0,0.1);
 		}
 		.blockquote_bordered {
-			//border-left-width:10px;
-			//border-radius:5px;
+			/* border-left-width:10px;
+			border-radius:5px; */
 		}
 		.blockquote_background {
 			background-color:orange;
-			//color:#f8fffe;
+			/* color:#f8fffe; */
 		}
 		.blockquote_text {
 			font-family:Raleway, sans-serif;
@@ -140,7 +140,7 @@
             cursor:pointer;
             transition:all .3s;
             font-size:xx-large;
-            //z-index: 1;
+            /* z-index: 1; */
         }
 		.btn-print span{
 			color:black;
@@ -158,11 +158,11 @@
 			cursor:pointer;
 		}
 		#theLetter:hover {
-			//color:#fff;
+			/* color:#fff; */
 			background-color:#ccc;
 		}
 		#letterhead{
-			//border:1px solid red;
+			/* border:1px solid red; */
 			width:1000px;
 			height:100vh;
 			font-size:1.2em;
@@ -208,11 +208,9 @@
 		var quote = document.querySelectorAll('.blockquote_text')[1];
 		var [true_codes, full_names, enroll_num, scores, statuss, adm_class, local_key] = [[],[],[],[],[],[],localStorage.getItem('userIndex')];
 		var myletter = "";
-		
-		fetch('https://script.google.com/macros/s/AKfycbzxRBgNzxFSSnJmVwDIid7VOg3aa6oU22iVuwtfTb1PB8jjDxG5pANzNkC1EjlNB6OycA/exec'/*, {
-			method:"GET",
-			mode:"no-cors"
-		}*/)
+				
+		const url = 'https://script.google.com/macros/s/AKfycbzxRBgNzxFSSnJmVwDIid7VOg3aa6oU22iVuwtfTb1PB8jjDxG5pANzNkC1EjlNB6OycA/exec';
+		fetch(url)
 		.then(res => res.json())
 		.then(data => {
 			for(i = 0; i < data.appRegion.length; i++) {
