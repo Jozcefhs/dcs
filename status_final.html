@@ -62,10 +62,10 @@
 			border-left:1px solid orange;
 			box-shadow:0 0 15px 7px rgba(0,0,0,0.1);
 		}
-		.blockquote_bordered {
-			/* border-left-width:10px;
-			border-radius:5px; */
-		}
+		/* .blockquote_bordered {
+			border-left-width:10px;
+			border-radius:5px;
+		} */
 		.blockquote_background {
 			background-color:orange;
 			/* color:#f8fffe; */
@@ -209,7 +209,8 @@
 		var [true_codes, full_names, enroll_num, scores, statuss, adm_class, local_key] = [[],[],[],[],[],[],localStorage.getItem('userIndex')];
 		var myletter = "";
 				
-		const url = 'https://script.google.com/macros/s/AKfycbzxRBgNzxFSSnJmVwDIid7VOg3aa6oU22iVuwtfTb1PB8jjDxG5pANzNkC1EjlNB6OycA/exec';
+		// const url = 'https://script.google.com/macros/s/AKfycbzxRBgNzxFSSnJmVwDIid7VOg3aa6oU22iVuwtfTb1PB8jjDxG5pANzNkC1EjlNB6OycA/exec';
+		const url = 'https://script.google.com/macros/s/AKfycbzOE17J2tLHUVjrIPyzjN47bGhdhymY-bpYrXuiyKcdX41STU0VHRhWAD_plTQSNmBFPg/exec';
 		fetch(url)
 		.then(res => res.json())
 		.then(data => {
