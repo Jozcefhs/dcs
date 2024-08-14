@@ -16,7 +16,6 @@ fetch(myURL)
 			codes[i] = mylist[i][0];
 			student[i] = mylist[i][1];
 			placement[i] = mylist[i][2];
-			//pDate[i] = mylist[i][3];
 			pID[i] = mylist[i][4];
 			code50k[i] = mylist[i][5];
 		}
