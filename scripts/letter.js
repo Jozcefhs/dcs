@@ -1,4 +1,3 @@
-// const myURL = 'https://script.google.com/macros/s/AKfycby_PT5APSRGbS8vPIy2hW8LvNrm2ocrtXAkX3JBsnE6yk4UK4xVlKcmT7clZ-tPO_GdpA/exec';
 const myURL = 'https://script.google.com/macros/s/AKfycbxExK7h0NB1qR5itDb57cW-3qgc3AWzoLmD8Gjcm0cyLPrnBZe6iGyPMnlY0n3FlUEPKA/exec';
 let [codes, student, placement, pID, pDate, code50k, mylist, myletter] = [[],[],[],[],[],[], '', ''];
 
