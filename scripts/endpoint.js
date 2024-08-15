@@ -23,4 +23,3 @@ function myData() {
 }
 
 myData();
-//create a delay timer to allow for the loading of data
