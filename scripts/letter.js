@@ -19,4 +19,4 @@ fetch(myURL)
 			pID[i] = mylist[i][4];
 			code50k[i] = mylist[i][5];
 		}
-	})
+	});
