@@ -192,7 +192,7 @@
 						ENROLLNUM: pID[position],
 						PERSON: student[position].toUpperCase(),
 						FORMER: formNames[placement[position]],
-						DATE: 'Today' || new Date().toLocaleDateString('en-us', { year:"numeric", day:"numeric", month:"long"})
+						DATE: new Date().toLocaleDateString('en-us', { year:"numeric", day:"numeric", month:"long"})
 					}
 					document.querySelector('.btn-print').style.display = 'flex';
 					myContainer.innerHTML = myletter.replace(/DATE|PERSON|FORMER|ENROLLNUM/gi,
