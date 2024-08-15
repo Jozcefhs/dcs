@@ -166,8 +166,8 @@
 		</div>
 		<p class="message"><i></i><i></i><i></i></p>
 	</div>
+
 	<script src="scripts/letter.js"></script>
-	<!--script src="letter.js"></script-->
 	<script>
 		var myContainer = document.getElementById('container');
 		var myInput = document.querySelector('input');
@@ -192,7 +192,7 @@
 						ENROLLNUM: pID[position],
 						PERSON: student[position].toUpperCase(),
 						FORMER: formNames[placement[position]],
-						DATE: new Date().toLocaleDateString('en-us', { year:"numeric", day:"numeric", month:"long"})
+						DATE: 'Today' || new Date().toLocaleDateString('en-us', { year:"numeric", day:"numeric", month:"long"})
 					}
 					document.querySelector('.btn-print').style.display = 'flex';
 					myContainer.innerHTML = myletter.replace(/DATE|PERSON|FORMER|ENROLLNUM/gi,
