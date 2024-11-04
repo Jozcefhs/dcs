@@ -19,7 +19,7 @@ button#commit{ float:left; background: #4070FD; color: #fff; }
 button[type="button"]{ background: #ddd; color: #777; }
 button[type="submit"]{ background: dodgerblue; color: #fff; }
 
-table{ width: 100%; }
+table{ width: 100%; position: relative;}
 tr:nth-child(even){ background: #eee; }
 th{ font-size: 16px; background: #000; color: #fff; padding: 10px; }
 td{ padding: 5px; }
@@ -40,3 +40,11 @@ td{ padding: 5px; }
 
 .modal input{ margin: 10px;}
 .modal::backdrop{ background-color:rgba(0, 0, 0, 0.7) }
+.tbd {
+    position: absolute;
+    left: 50%;
+    top: 100%;
+    transform: translate(-50%, 100%);
+    color: #555;
+    letter-spacing: 1px;
+}

@@ -32,8 +32,9 @@ let data = localStorage.getItem('products'),
             //dataCount.textContent = data ? data.length : 0;
             // assert the data array is not empty
             if(data != null && data.length > 0){
+                const len = pages.value > data.length ? data.length : pages.value;
                 // loop through the data array and display the data in the table
-                for(i=0;i<100;i++){
+                for(i=0;i<len;i++){
                     tbody.innerHTML += `<tr>
                         <TD>${data[i][0]}</td>
                         <td>${data[i][2]}</td>
@@ -61,9 +62,10 @@ pages.addEventListener('change', e => {
         tbody.innerHTML = '';
         //console.log(pages.value);
         if(data != null && data.length > 0){
+            const len = pages.value > data.length ? data.length : pages.value;
             // loop through the data array and display the data in the table
             try{
-                for(i=pages.value - 100;i<pages.value;i++){
+                for(i=pages.value - 400;i<len;i++){
                     tbody.innerHTML += `<tr>
                         <TD>${data[i][0]}</td>
                         <td>${data[i][2]}</td>
@@ -181,7 +183,6 @@ previewUpdate = i => {
     i = (100+i)-pages.value;
     --i;
     //console.log(i);
-
     title.value = tdName[i].innerText;
     qty.value = tdID[i].innerText;
     cp.value = tdScore[i].innerText;

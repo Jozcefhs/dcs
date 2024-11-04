@@ -36,8 +36,9 @@ const fetchdata = () => {
         //dataCount.textContent = data ? data.length : 0;
         // assert the data array is not empty
         if(data != null && data.length > 0){
+            const len = 400 > data.length ? data.length : 400;
             // loop through the data array and display the data in the table :::<td>${data[i][2]}</td> for Adm.NO
-            for(i=0;i<100;i++){ //this reading the first 20. To be changed to the first 100 later.
+            for(i=0;i<len;i++){ //this reading the first 20. To be changed to the first 100 later.
                 tbody.innerHTML += `<tr>
                     <td>${data[i][0]}</td>
                     <td>${data[i][1].toUpperCase()}</td>
@@ -66,9 +67,10 @@ pages.addEventListener('change', e => {
     tbody.innerHTML = '';
                 
     if(data != null && data.length > 0){
+        const len = pages.value > data.length ? data.length : pages.value;
         // loop through the data array and display the data in the table :::<td>${data[i][2]}</td> for Adm.NO
         try {
-            for(i=pages.value - 100;i<pages.value;i++){ //this reading the first 20. To be changed to the first 100 later.
+            for(i=pages.value - 400;i<len;i++){ //this reading the first 20. To be changed to the first 100 later.
                 tbody.innerHTML += `<tr>
                     <td>${data[i][0]}</td>
                     <td>${data[i][1].toUpperCase()}</td>
@@ -81,7 +83,7 @@ pages.addEventListener('change', e => {
                 </tr>`;
             }
         } catch (err) {
-            err.name ? console.log(`A ${err.name}: EOF (You've reached the last page.)`) : console.log('OK');
+            err.name ? tbody.innerHTML = "<div class='tbd'>Empty page.</div>" : console.log('OK');
         }
     }
     else{
