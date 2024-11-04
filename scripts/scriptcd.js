@@ -136,10 +136,9 @@ previewUpdate = i => {
     let tdScore = document.querySelectorAll('td:nth-child(4)');
 
     //console.log("Before: " + i);
-    i = (100+i)-pages.value;
+    i = (400+i)-pages.value;
     --i;
     //console.log("After: " + i);
-
     let myNumber = window.prompt(`Enter admission number: ${document.querySelectorAll('td:nth-child(2)')[i].textContent}`);
 
     if(myNumber){
@@ -189,7 +188,7 @@ deleteProduct = i => {
     let tdScore = document.querySelectorAll('td:nth-child(4)');
     /*&& tdlast[i].lastElementChild.textContent == "-"*/
 
-    i = (100+i)-pages.value;
+    i = (400+i)-pages.value;
     --i;
     //console.log(i);
 

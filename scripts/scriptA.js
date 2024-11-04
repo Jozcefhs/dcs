@@ -180,7 +180,7 @@ previewUpdate = i => {
     let tdStatus = document.querySelectorAll('td:nth-child(5)');
 
     //--i;
-    i = (100+i)-pages.value;
+    i = (400+i)-pages.value;
     --i;
     //console.log(i);
     title.value = tdName[i].innerText;
