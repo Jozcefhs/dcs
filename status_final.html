@@ -185,7 +185,9 @@
 			<figure></figure>
 			<div class="blockquote_text">
 				<p class="blockquote_p">Name: <span>xxx</span></p>
-				<p class="blockquote_p">Score: <span>xxx</span></p>
+				<p class="blockquote_p">Oral Assessment: <span>xxx</span></p>
+				<div class="blockquote_p">Academic Score: <span>xxx</span></div>
+				<p class="blockquote_p">Total Score: <span>xxx</span></p>
 				<p class="blockquote_p">Status: <span>xxx</span></p>
 			</div>
 		</div>
@@ -202,9 +204,7 @@
 	<script>
 		const currentDiv = document.querySelector('.blockquote_bordered');
 		var span = document.querySelector('span');
-		var name_elem = document.querySelectorAll('.blockquote_p span')[0];
-		var score_elem = document.querySelectorAll('.blockquote_p span')[1];
-		var status_elem = document.querySelectorAll('.blockquote_p span')[2];
+		const quoteSpans = document.querySelectorAll('.blockquote_p span');
 		var quote = document.querySelectorAll('.blockquote_text')[1];
 		var [true_codes, full_names, enroll_num, scores, statuss, adm_class, local_key] = [[],[],[],[],[],[],localStorage.getItem('userIndex')];
 		var myletter = "";
@@ -223,11 +223,16 @@
                 statuss[i] = data.appRegion[i][4];
                 adm_class[i] = data.appRegion[i][5];
             }
-			name_elem.innerText = full_names[true_codes.indexOf(local_key)];
-			score_elem.innerText = scores[true_codes.indexOf(local_key)] + "%";
-			status_elem.innerText = statuss[true_codes.indexOf(local_key)];
+			const oral = 5;
+			const sc = scores[true_codes.indexOf(local_key)];
+			quoteSpans.forEach((span, idx) => {
+				if (idx === 0) span.textContent = full_names[true_codes.indexOf(local_key)];
+				if (idx === 1) span.textContent = oral + '%';
+				if (idx === 2) span.textContent = sc - oral + '%';
+				if (idx === 3) span.textContent = sc + "%";
+				if (idx === 4) span.textContent = statuss[true_codes.indexOf(local_key)];
+			});
 			myletter = data.appQuote.letter;
-			
 			
 			switch (statuss[true_codes.indexOf(local_key)]) {
 				case "Admitted":
