@@ -225,8 +225,9 @@
             }
 			const oral = 5;
 			const sc = scores[true_codes.indexOf(local_key)];
+			const nameOfCand = full_names[true_codes.indexOf(local_key)];
 			quoteSpans.forEach((span, idx) => {
-				if (idx === 0) span.textContent = full_names[true_codes.indexOf(local_key)];
+				if (idx === 0) span.textContent = nameOfCand;
 				if (idx === 1) span.textContent = oral + '%';
 				if (idx === 2) span.textContent = sc - oral + '%';
 				if (idx === 3) span.textContent = sc + "%";
@@ -256,7 +257,7 @@
 				}
 				let el = {
 					ENROLLNUM: enroll_num[true_codes.indexOf(local_key)],
-					PERSON: name_elem.innerText.toUpperCase(),
+					PERSON: nameOfCand.toUpperCase(),
 					FORMER: formNames[adm_class[true_codes.indexOf(local_key)]],
 					DATE: new Date().toLocaleDateString('en-us', { year:"numeric", day:"numeric", month:"short"})
 				}
