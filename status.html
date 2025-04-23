@@ -243,14 +243,15 @@
 			document.querySelectorAll('#bio > button').forEach(elem => {
 				elem.style.display = 'none';
 			});
-			if(viewed[position] == 'false'){
-				document.querySelector('figure').style.display = 'flex';
-			} else {
+			// if(viewed[position] == 'false'){
+			// 	document.querySelector('figure').style.display = 'flex';
+			// } else {
+				console.log(viewed[position]);
 				document.querySelectorAll('.formtxt').forEach((elem)=>{elem.style.display='none';});
 				document.querySelector('form .group').style.display = "flex";
 				document.getElementById('view_result').disabled = false;
 				document.getElementById('view_result').style.opacity = 1;
-			}
+			// }
 		}
 	</script>
 	<script>
@@ -338,7 +339,7 @@
 			document.querySelector('.message').innerHTML = "Please wait...";
 			
 			localStorage.setItem("userIndex", codes[position]);
-			
+			/*
 			if(viewed[position] == 'false'){
 				fetch("https://script.google.com/macros/s/AKfycbwEKMmeagqRqD7yBdehSS-DMLxlnmMhzwmCuBrv1VV3hTfJvl0hMAU1dP7WgUOL4f1KOA/exec", {
 					method : 'POST',
@@ -352,8 +353,9 @@
 					}
 				})
 			} else {
+			*/
 				location.href = "status_final.html";
-			}
+			// }
 			
 		});
 		
