@@ -171,7 +171,7 @@
 			<input type="email" name="email address" placeholder="Enter email address" onkeyup="checkInput()" autocomplete="off"/><span class="check">&check;</span>
 		</div>
 		<div class="group">
-			<input type="text" name="code" placeholder="Enter code" onkeyup="checkInput()" autocomplete="off"/><span class="check">&check;</span>
+			<input type="text" name="code" placeholder="Enter code" onkeyup="checkCode()" autocomplete="off"/><span class="check">&check;</span>
 		</div>
 		<div class="group" id="bio">
 			<p>Are you...</p>
@@ -216,9 +216,31 @@
 		var Incrementer = 0;
 		var position;
 		
+
 		function checkInput() {
 			if(myInput[Incrementer].value.length > 7){
-				if (emails.includes(myInput[Incrementer].value) || codes.indexOf(myInput[Incrementer].value) == position) {
+				if (emails.includes(myInput[Incrementer].value)) {
+					myInput[Incrementer].disabled = true;
+					message.innerHTML = '';
+					span[Incrementer].classList.add('unhide');
+					if(Incrementer == 1){
+						position;
+					} else {
+						position = emails.indexOf(myInput[Incrementer].value);
+						document.querySelector('#bio p').innerHTML += fullnames[position] + "?";
+					}
+					Incrementer++;
+					document.querySelector('.group:nth-child(' + (Incrementer + 1) + ')').style.display = "flex";
+				}  else {
+					span[Incrementer].classList.remove('unhide');
+					message.innerHTML = `The ${myInput[Incrementer].name} is not valid.`;
+				}
+			}
+			//console.log(position);
+		}
+		function checkCode() {
+			if(myInput[Incrementer].value.length > 7){
+				if (codes.indexOf(myInput[Incrementer].value) == position) {
 					myInput[Incrementer].disabled = true;
 					message.innerHTML = '';
 					span[Incrementer].classList.add('unhide');
