@@ -185,7 +185,7 @@
 			<figure></figure>
 			<div class="blockquote_text">
 				<p class="blockquote_p">Name: <span>xxx</span></p>
-				<p class="blockquote_p">Oral Assessment: <span>xxx</span></p>
+				<!--p class="blockquote_p">Oral Assessment: <span>xxx</span></p-->
 				<div class="blockquote_p">Academic Score: <span>xxx</span></div>
 				<p class="blockquote_p">Total Score: <span>xxx</span></p>
 				<p class="blockquote_p">Status: <span>xxx</span></p>
@@ -223,13 +223,13 @@
                 statuss[i] = data.appRegion[i][4];
                 adm_class[i] = data.appRegion[i][5];
             }
-			const oral = 5;
+			//const oral = 5;
 			const sc = scores[true_codes.indexOf(local_key)];
 			const nameOfCand = full_names[true_codes.indexOf(local_key)];
 			quoteSpans.forEach((span, idx) => {
 				if (idx === 0) span.textContent = nameOfCand;
-				if (idx === 1) span.textContent = oral + '%';
-				if (idx === 2) span.textContent = sc - oral + '%';
+				//if (idx === 1) span.textContent = oral + '%';
+				//if (idx === 2) span.textContent = sc - oral + '%';
 				if (idx === 3) span.textContent = sc + "%";
 				if (idx === 4) span.textContent = statuss[true_codes.indexOf(local_key)];
 			});
