@@ -1,18 +1,17 @@
 // Cloudflare Pages Function: /api/verify
-// Set these Cloudflare environment variables:
-// GOOGLE_APPS_SCRIPT_URL = your deployed Apps Script Web App URL ending in /exec
-// GOOGLE_APPS_SCRIPT_SECRET = the same shared secret used in Apps Script
+// Set these Cloudflare Pages environment variables:
+// GOOGLE_APPS_SCRIPT_URL = your Apps Script Web App URL ending in /exec
+// GOOGLE_APPS_SCRIPT_SECRET = the same shared secret in Apps Script
 
 export async function onRequestPost(context) {
   try {
     const { request, env } = context;
     const body = await request.json();
-
-    const email = String(body.email || '').trim();
-    const code = String(body.code || '').trim();
+    const email = String(body.email || '').trim().toLowerCase();
+    const code = String(body.code || '').trim().toUpperCase();
 
     if (!email || !code) {
-      return Response.json({ ok: false, message: 'Email and code are required' }, { status: 400 });
+      return Response.json({ ok: false, message: 'Email and code are required.' }, { status: 400 });
     }
 
     if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {

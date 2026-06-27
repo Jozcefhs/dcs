@@ -3,47 +3,214 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Admission Application Form</title>
+  <title>DCA Admission Application Form</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <main class="card wide">
-    <h1>Admission Application Form</h1>
-    <p id="verifiedInfo"></p>
+  <main class="page-wrap">
+    <section class="card">
+      <div class="form-header">
+        <img src="images/logo.png" alt="Destiny Christian Academy" class="logo small" onerror="this.style.display='none'">
+        <div>
+          <h1>Destiny Christian Academy</h1>
+          <p class="muted">The Lord's Garden, Airport Road, Lugbe, Abuja</p>
+          <h2>Admission Application Form</h2>
+        </div>
+      </div>
 
-    <!-- Replace this section with your full admission form when ready. -->
-    <form>
-      <label>Applicant's Full Name</label>
-      <input type="text" required>
+      <div id="verifiedBox" class="verified-box"></div>
 
-      <label>Date of Birth</label>
-      <input type="date" required>
+      <form id="applicationForm">
+        <fieldset>
+          <legend>Applicant / Student Information</legend>
+          <div class="grid two">
+            <div>
+              <label for="surname">Surname</label>
+              <input id="surname" name="Surname" required>
+            </div>
+            <div>
+              <label for="firstName">First Name</label>
+              <input id="firstName" name="FirstName" required>
+            </div>
+            <div>
+              <label for="middleName">Middle Name</label>
+              <input id="middleName" name="MiddleName">
+            </div>
+            <div>
+              <label for="gender">Gender</label>
+              <select id="gender" name="Gender" required>
+                <option value="">Select</option>
+                <option>Male</option>
+                <option>Female</option>
+              </select>
+            </div>
+            <div>
+              <label for="dob">Date of Birth</label>
+              <input id="dob" name="DateOfBirth" type="date" required>
+            </div>
+            <div>
+              <label for="classApplying">Class Applying For</label>
+              <select id="classApplying" name="ClassApplyingFor" required>
+                <option value="">Select class</option>
+                <option>Nursery 1</option>
+                <option>Nursery 2</option>
+                <option>Nursery 3</option>
+                <option>Primary 1</option>
+                <option>Primary 2</option>
+                <option>Primary 3</option>
+                <option>Primary 4</option>
+                <option>Primary 5</option>
+                <option>JSS 1 / Grade 7</option>
+                <option>JSS 2 / Grade 8</option>
+                <option>JSS 3 / Grade 9</option>
+                <option>SS 1 / Grade 10</option>
+                <option>SS 2 / Grade 11</option>
+              </select>
+            </div>
+            <div>
+              <label for="nationality">Nationality</label>
+              <input id="nationality" name="Nationality" value="Nigerian">
+            </div>
+            <div>
+              <label for="stateOfOrigin">State of Origin</label>
+              <input id="stateOfOrigin" name="StateOfOrigin">
+            </div>
+            <div>
+              <label for="lga">LGA</label>
+              <input id="lga" name="LGA">
+            </div>
+            <div>
+              <label for="previousSchool">Previous School</label>
+              <input id="previousSchool" name="PreviousSchool">
+            </div>
+          </div>
+        </fieldset>
 
-      <label>Class Applying For</label>
-      <input type="text" required>
+        <fieldset>
+          <legend>Parent / Guardian Information</legend>
+          <div class="grid two">
+            <div>
+              <label for="fatherName">Father's Name</label>
+              <input id="fatherName" name="FatherName">
+            </div>
+            <div>
+              <label for="fatherPhone">Father's Phone</label>
+              <input id="fatherPhone" name="FatherPhone" type="tel">
+            </div>
+            <div>
+              <label for="fatherEmail">Father's Email</label>
+              <input id="fatherEmail" name="FatherEmail" type="email">
+            </div>
+            <div>
+              <label for="fatherOccupation">Father's Occupation</label>
+              <input id="fatherOccupation" name="FatherOccupation">
+            </div>
+            <div>
+              <label for="motherName">Mother's Name</label>
+              <input id="motherName" name="MotherName">
+            </div>
+            <div>
+              <label for="motherPhone">Mother's Phone</label>
+              <input id="motherPhone" name="MotherPhone" type="tel">
+            </div>
+            <div>
+              <label for="motherEmail">Mother's Email</label>
+              <input id="motherEmail" name="MotherEmail" type="email">
+            </div>
+            <div>
+              <label for="motherOccupation">Mother's Occupation</label>
+              <input id="motherOccupation" name="MotherOccupation">
+            </div>
+            <div>
+              <label for="guardianName">Guardian's Name, if applicable</label>
+              <input id="guardianName" name="GuardianName">
+            </div>
+            <div>
+              <label for="guardianPhone">Guardian's Phone</label>
+              <input id="guardianPhone" name="GuardianPhone" type="tel">
+            </div>
+          </div>
+        </fieldset>
 
-      <label>Parent/Guardian Name</label>
-      <input type="text" required>
+        <fieldset>
+          <legend>Contact and Residential Details</legend>
+          <div class="grid two">
+            <div class="full">
+              <label for="homeAddress">Residential Address</label>
+              <textarea id="homeAddress" name="ResidentialAddress" rows="3" required></textarea>
+            </div>
+            <div>
+              <label for="city">City / Area</label>
+              <input id="city" name="CityArea">
+            </div>
+            <div>
+              <label for="stateResidence">State of Residence</label>
+              <input id="stateResidence" name="StateOfResidence" value="FCT Abuja">
+            </div>
+          </div>
+        </fieldset>
 
-      <label>Parent/Guardian Phone</label>
-      <input type="tel" required>
+        <fieldset>
+          <legend>Medical / Emergency Information</legend>
+          <div class="grid two">
+            <div>
+              <label for="bloodGroup">Blood Group</label>
+              <input id="bloodGroup" name="BloodGroup">
+            </div>
+            <div>
+              <label for="genotype">Genotype</label>
+              <input id="genotype" name="Genotype">
+            </div>
+            <div class="full">
+              <label for="medicalCondition">Known Medical Condition / Allergy</label>
+              <textarea id="medicalCondition" name="MedicalCondition" rows="3" placeholder="Write None if not applicable"></textarea>
+            </div>
+            <div>
+              <label for="emergencyName">Emergency Contact Name</label>
+              <input id="emergencyName" name="EmergencyContactName">
+            </div>
+            <div>
+              <label for="emergencyPhone">Emergency Contact Phone</label>
+              <input id="emergencyPhone" name="EmergencyContactPhone" type="tel">
+            </div>
+          </div>
+        </fieldset>
 
-      <label>Home Address</label>
-      <textarea rows="4" required></textarea>
+        <fieldset>
+          <legend>Admission Preferences</legend>
+          <div class="grid two">
+            <div>
+              <label for="studentType">Student Type</label>
+              <select id="studentType" name="StudentType" required>
+                <option value="">Select</option>
+                <option>Day Student</option>
+                <option>Boarding Student</option>
+              </select>
+            </div>
+            <div>
+              <label for="session">Academic Session</label>
+              <input id="session" name="AcademicSession" placeholder="2026/2027" required>
+            </div>
+            <div class="full">
+              <label for="howHeard">How did you hear about Destiny Christian Academy?</label>
+              <input id="howHeard" name="HowHeard">
+            </div>
+          </div>
+        </fieldset>
 
-      <button type="submit">Submit Application</button>
-    </form>
+        <fieldset>
+          <legend>Declaration</legend>
+          <label class="check-row">
+            <input type="checkbox" name="DeclarationAccepted" value="YES" required>
+            <span>I confirm that the information provided is true and complete to the best of my knowledge.</span>
+          </label>
+        </fieldset>
+
+        <button type="submit" id="submitBtn">Submit Application</button>
+        <p id="submitStatus" class="status" aria-live="polite"></p>
+      </form>
+    </section>
   </main>
-
-  <script>
-    if (sessionStorage.getItem('dcaVerified') !== 'YES') {
-      window.location.href = 'verify.html';
-    }
-
-    const applicantName = sessionStorage.getItem('dcaApplicantName') || '';
-    const receiptNo = sessionStorage.getItem('dcaReceiptNo') || '';
-    document.getElementById('verifiedInfo').textContent =
-      `Verified${applicantName ? ': ' + applicantName : ''}${receiptNo ? ' | Receipt: ' + receiptNo : ''}`;
-  </script>
+  <script src="js/application.js"></script>
 </body>
 </html>

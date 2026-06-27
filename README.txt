@@ -1,22 +1,37 @@
-DCA Admission Website - Simple Version
+DCA Admission Website - Rewritten Version
 
-Keep only these files/folders for the Cloudflare Pages site:
+FILES TO KEEP/UPLOAD TO GITHUB:
+- index.html
+- verify.html
+- application.html
+- css/style.css
+- js/verify.js
+- js/application.js
+- functions/api/verify.js
+- functions/api/submit-application.js
+- apps_script_backend.gs  (do not upload to website; paste into Google Apps Script)
 
-index.html
-verify.html
-application.html
-css/style.css
-functions/api/verify.js
+GOOGLE SHEET SETUP:
+1. Create/open your Google Sheet.
+2. Extensions > Apps Script.
+3. Paste apps_script_backend.gs.
+4. Change SHARED_SECRET.
+5. Deploy > New deployment > Web app.
+6. Execute as: Me.
+7. Who has access: Anyone.
+8. Copy the Web App URL ending with /exec.
 
-Also use apps_script_admission_sales_expiry.gs in Google Apps Script. Do not upload this .gs file to Cloudflare unless you just want it as backup.
+CLOUDFLARE PAGES ENVIRONMENT VARIABLES:
+Set these in Cloudflare Pages > Settings > Environment variables:
+- GOOGLE_APPS_SCRIPT_URL = your Apps Script Web App URL
+- GOOGLE_APPS_SCRIPT_SECRET = same secret from Apps Script
 
-Cloudflare environment variables required:
-GOOGLE_APPS_SCRIPT_URL = your Apps Script Web App URL ending with /exec
-GOOGLE_APPS_SCRIPT_SECRET = the same secret in the Apps Script file
+SHEETS CREATED BY THE SCRIPT:
+- FormSales: payment/verification records from the desktop app.
+- Applications: completed admission application forms.
 
-Flow:
-1. Desktop app sells form and writes Email + VerificationCode + ExpiryDate + Used=NO to Google Sheet.
-2. Applicant clicks Register on index.html.
-3. verify.html sends email + code to /api/verify.
-4. functions/api/verify.js checks Google Sheet through Apps Script.
-5. If valid, code is marked Used=YES and applicant continues to application.html.
+NOTES:
+- The applicant verifies with email + code.
+- After successful verification, application.html opens.
+- The completed form is submitted to the Applications sheet.
+- The old node_modules, dist, .git folder contents, and unused HTML files are not needed for this simple setup.

@@ -7,59 +7,24 @@
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <main class="card">
-    <h1>Verify Admission Form Purchase</h1>
-    <p>Enter the email address and verification code sent after payment.</p>
+  <main class="page-wrap narrow">
+    <section class="card">
+      <h1>Verify Admission Form Purchase</h1>
+      <p>Enter the email address and verification code sent after payment.</p>
 
-    <form id="verifyForm">
-      <label>Email Address</label>
-      <input id="email" type="email" required placeholder="parent@example.com">
+      <form id="verifyForm" autocomplete="on">
+        <label for="email">Email Address</label>
+        <input id="email" name="email" type="email" required placeholder="parent@example.com">
 
-      <label>Verification Code</label>
-      <input id="code" type="text" required placeholder="DCA-123456">
+        <label for="code">Verification Code</label>
+        <input id="code" name="code" type="text" required placeholder="ABC123" maxlength="12" autocomplete="one-time-code">
 
-      <button type="submit">Verify and Continue</button>
-    </form>
+        <button type="submit" id="verifyBtn">Verify and Continue</button>
+      </form>
 
-    <p id="message" class="message"></p>
+      <p id="status" class="status" aria-live="polite"></p>
+    </section>
   </main>
-
-  <script>
-    const form = document.getElementById('verifyForm');
-    const message = document.getElementById('message');
-
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      message.textContent = 'Checking...';
-      message.className = 'message';
-
-      const email = document.getElementById('email').value.trim();
-      const code = document.getElementById('code').value.trim();
-
-      try {
-        const response = await fetch('/api/verify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, code })
-        });
-
-        const data = await response.json();
-
-        if (!response.ok || !data.ok) {
-          message.textContent = data.message || 'Verification failed.';
-          message.className = 'message error';
-          return;
-        }
-
-        sessionStorage.setItem('dcaVerified', 'YES');
-        sessionStorage.setItem('dcaApplicantName', data.applicantName || '');
-        sessionStorage.setItem('dcaReceiptNo', data.receiptNo || '');
-        window.location.href = 'application.html';
-      } catch (err) {
-        message.textContent = 'Network error. Please try again.';
-        message.className = 'message error';
-      }
-    });
-  </script>
+  <script src="js/verify.js"></script>
 </body>
 </html>
