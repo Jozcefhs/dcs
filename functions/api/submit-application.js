@@ -1,5 +1,5 @@
 // Cloudflare Pages Function: /api/submit-application
-// Submits completed admission form to a different sheet/tab through Apps Script.
+// Submits completed admission form to Google Apps Script.
 
 export async function onRequestPost(context) {
   try {
@@ -12,11 +12,17 @@ export async function onRequestPost(context) {
     const code = String(verification.code || '').trim().toUpperCase();
 
     if (!email || !code) {
-      return Response.json({ ok: false, message: 'Verification information is missing. Please verify again.' }, { status: 400 });
+      return Response.json(
+        { ok: false, message: 'Verification information is missing. Please verify again.' },
+        { status: 400 }
+      );
     }
 
     if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
-      return Response.json({ ok: false, message: 'Server submission is not configured yet.' }, { status: 500 });
+      return Response.json(
+        { ok: false, message: 'Server submission is not configured yet.' },
+        { status: 500 }
+      );
     }
 
     const payload = {
@@ -35,8 +41,15 @@ export async function onRequestPost(context) {
     });
 
     const data = await res.json();
-    return Response.json(data, { status: data.ok ? 200 : 400 });
+
+    return Response.json(data, {
+      status: data.ok ? 200 : 400
+    });
+
   } catch (err) {
-    return Response.json({ ok: false, message: String(err) }, { status: 500 });
+    return Response.json(
+      { ok: false, message: String(err) },
+      { status: 500 }
+    );
   }
 }

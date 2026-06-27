@@ -3,11 +3,19 @@ const verifiedBox = document.getElementById('verifiedBox');
 const form = document.getElementById('applicationForm');
 const statusEl = document.getElementById('submitStatus');
 const submitBtn = document.getElementById('submitBtn');
+
 let verified = null;
 
 function setStatus(message, type) {
   statusEl.textContent = message;
   statusEl.className = 'status ' + (type || '');
+}
+
+function disableForm() {
+  const fields = form.querySelectorAll('input, select, textarea, button');
+  fields.forEach((field) => {
+    field.disabled = true;
+  });
 }
 
 try {
@@ -19,7 +27,8 @@ try {
 if (!verified || !verified.email || !verified.code) {
   window.location.href = 'verify.html';
 } else {
-  verifiedBox.textContent = `Verified purchase: ${verified.email}${verified.receiptNo ? ' | Receipt: ' + verified.receiptNo : ''}`;
+  verifiedBox.textContent =
+    `Verified purchase: ${verified.email}${verified.receiptNo ? ' | Receipt: ' + verified.receiptNo : ''}`;
 }
 
 form.addEventListener('submit', async (event) => {
@@ -35,6 +44,7 @@ form.addEventListener('submit', async (event) => {
 
   const formData = new FormData(form);
   const application = {};
+
   for (const [key, value] of formData.entries()) {
     application[key] = value;
   }
@@ -50,17 +60,43 @@ form.addEventListener('submit', async (event) => {
     });
 
     const data = await response.json();
+
     if (!response.ok || !data.ok) {
       throw new Error(data.message || 'Application submission failed.');
     }
 
+    const reference = data.applicationReference || data.reference || '';
+
+    const applicantName = [
+      application.Surname || '',
+      application.FirstName || '',
+      application.MiddleName || ''
+    ]
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
     sessionStorage.removeItem('dcaAdmissionVerified');
-    form.reset();
-    verifiedBox.textContent = 'Application submitted successfully.';
-    setStatus('Your application has been submitted successfully. Thank you.', 'ok');
+
+    sessionStorage.setItem('dcaApplicationSuccess', JSON.stringify({
+      reference,
+      applicantName,
+      email: verified.email,
+      submittedAt: new Date().toISOString()
+    }));
+
+    disableForm();
+    setStatus('Application submitted successfully. Opening confirmation page...', 'ok');
+
+    const params = new URLSearchParams();
+
+    if (reference) params.set('ref', reference);
+    if (applicantName) params.set('name', applicantName);
+
+    window.location.href = `success.html?${params.toString()}`;
+
   } catch (error) {
     setStatus(error.message, 'bad');
-  } finally {
     submitBtn.disabled = false;
   }
 });
