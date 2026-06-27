@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admission Application Form</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <main class="card wide">
+    <h1>Admission Application Form</h1>
+    <p id="verifiedInfo"></p>
+
+    <!-- Replace this section with your full admission form when ready. -->
+    <form>
+      <label>Applicant's Full Name</label>
+      <input type="text" required>
+
+      <label>Date of Birth</label>
+      <input type="date" required>
+
+      <label>Class Applying For</label>
+      <input type="text" required>
+
+      <label>Parent/Guardian Name</label>
+      <input type="text" required>
+
+      <label>Parent/Guardian Phone</label>
+      <input type="tel" required>
+
+      <label>Home Address</label>
+      <textarea rows="4" required></textarea>
+
+      <button type="submit">Submit Application</button>
+    </form>
+  </main>
+
+  <script>
+    if (sessionStorage.getItem('dcaVerified') !== 'YES') {
+      window.location.href = 'verify.html';
+    }
+
+    const applicantName = sessionStorage.getItem('dcaApplicantName') || '';
+    const receiptNo = sessionStorage.getItem('dcaReceiptNo') || '';
+    document.getElementById('verifiedInfo').textContent =
+      `Verified${applicantName ? ': ' + applicantName : ''}${receiptNo ? ' | Receipt: ' + receiptNo : ''}`;
+  </script>
+</body>
+</html>

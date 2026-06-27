@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Verify Admission Form Purchase</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <main class="card">
+    <h1>Verify Admission Form Purchase</h1>
+    <p>Enter the email address and verification code sent after payment.</p>
+
+    <form id="verifyForm">
+      <label>Email Address</label>
+      <input id="email" type="email" required placeholder="parent@example.com">
+
+      <label>Verification Code</label>
+      <input id="code" type="text" required placeholder="DCA-123456">
+
+      <button type="submit">Verify and Continue</button>
+    </form>
+
+    <p id="message" class="message"></p>
+  </main>
+
+  <script>
+    const form = document.getElementById('verifyForm');
+    const message = document.getElementById('message');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      message.textContent = 'Checking...';
+      message.className = 'message';
+
+      const email = document.getElementById('email').value.trim();
+      const code = document.getElementById('code').value.trim();
+
+      try {
+        const response = await fetch('/api/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, code })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.ok) {
+          message.textContent = data.message || 'Verification failed.';
+          message.className = 'message error';
+          return;
+        }
+
+        sessionStorage.setItem('dcaVerified', 'YES');
+        sessionStorage.setItem('dcaApplicantName', data.applicantName || '');
+        sessionStorage.setItem('dcaReceiptNo', data.receiptNo || '');
+        window.location.href = 'application.html';
+      } catch (err) {
+        message.textContent = 'Network error. Please try again.';
+        message.className = 'message error';
+      }
+    });
+  </script>
+</body>
+</html>
