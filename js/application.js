@@ -9,26 +9,14 @@ const uploadOverlay = document.getElementById('uploadOverlay');
 
 function showUploadOverlay() {
   if (uploadOverlay) {
-    uploadOverlay.style.display = 'flex';
+    uploadOverlay.classList.add('show');
   }
 }
 
 function hideUploadOverlay() {
   if (uploadOverlay) {
-    uploadOverlay.style.display = 'none';
+    uploadOverlay.classList.remove('show');
   }
-}
-
-function setStatus(message, type) {
-  statusEl.textContent = message;
-  statusEl.className = 'status ' + (type || '');
-}
-
-function disableForm() {
-  const fields = form.querySelectorAll('input, select, textarea, button');
-  fields.forEach((field) => {
-    field.disabled = true;
-  });
 }
 
 try {
