@@ -5,6 +5,20 @@ const statusEl = document.getElementById('submitStatus');
 const submitBtn = document.getElementById('submitBtn');
 let verified = null;
 
+const uploadOverlay = document.getElementById('uploadOverlay');
+
+function showUploadOverlay() {
+  if (uploadOverlay) {
+    uploadOverlay.style.display = 'flex';
+  }
+}
+
+function hideUploadOverlay() {
+  if (uploadOverlay) {
+    uploadOverlay.style.display = 'none';
+  }
+}
+
 function setStatus(message, type) {
   statusEl.textContent = message;
   statusEl.className = 'status ' + (type || '');
@@ -38,7 +52,8 @@ form.addEventListener('submit', async (event) => {
   }
 
   submitBtn.disabled = true;
-  setStatus('Submitting application, please wait...', '');
+showUploadOverlay();
+setStatus('Uploading your application, please wait...', '');
 
   const formData = new FormData(form);
   const application = {};
@@ -86,6 +101,7 @@ form.addEventListener('submit', async (event) => {
     window.location.href = `success.html?${params.toString()}`;
 
   } catch (error) {
+    hideUploadOverlay();
     setStatus(error.message, 'bad');
     submitBtn.disabled = false;
   }
