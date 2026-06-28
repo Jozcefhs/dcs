@@ -3,9 +3,21 @@ const verifiedBox = document.getElementById('verifiedBox');
 const form = document.getElementById('applicationForm');
 const statusEl = document.getElementById('submitStatus');
 const submitBtn = document.getElementById('submitBtn');
+const uploadOverlay = document.getElementById('uploadOverlay');
+
 let verified = null;
 
-const uploadOverlay = document.getElementById('uploadOverlay');
+function setStatus(message, type) {
+  statusEl.textContent = message;
+  statusEl.className = 'status ' + (type || '');
+}
+
+function disableForm() {
+  const fields = form.querySelectorAll('input, select, textarea, button');
+  fields.forEach((field) => {
+    field.disabled = true;
+  });
+}
 
 function showUploadOverlay() {
   if (uploadOverlay) {
