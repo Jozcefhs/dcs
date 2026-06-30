@@ -3,7 +3,6 @@ const verifiedBox = document.getElementById('verifiedBox');
 const form = document.getElementById('applicationForm');
 const statusEl = document.getElementById('submitStatus');
 const submitBtn = document.getElementById('submitBtn');
-const uploadOverlay = document.getElementById('uploadOverlay');
 
 let verified = null;
 
@@ -20,12 +19,14 @@ function disableForm() {
 }
 
 function showUploadOverlay() {
+  const uploadOverlay = document.getElementById('uploadOverlay');
   if (uploadOverlay) {
     uploadOverlay.classList.add('show');
   }
 }
 
 function hideUploadOverlay() {
+  const uploadOverlay = document.getElementById('uploadOverlay');
   if (uploadOverlay) {
     uploadOverlay.classList.remove('show');
   }
@@ -52,8 +53,8 @@ form.addEventListener('submit', async (event) => {
   }
 
   submitBtn.disabled = true;
-showUploadOverlay();
-setStatus('Uploading your application, please wait...', '');
+  showUploadOverlay();
+  setStatus('Uploading your application, please wait...', '');
 
   const formData = new FormData(form);
   const application = {};
