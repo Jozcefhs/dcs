@@ -6,6 +6,22 @@ const submitBtn = document.getElementById('submitBtn');
 
 let verified = null;
 
+function isLocalDev() {
+  return ['localhost', '127.0.0.1', ''].includes(window.location.hostname) || window.location.protocol === 'file:';
+}
+
+function getDevVerification() {
+  const params = new URLSearchParams(window.location.search);
+  if (!isLocalDev() || params.get('dev') !== '1') {
+    return null;
+  }
+  return {
+    email: 'test@example.com',
+    code: 'TESTCODE',
+    receiptNo: 'DEV-TEST-RECEIPT'
+  };
+}
+
 function setStatus(message, type) {
   statusEl.textContent = message;
   statusEl.className = 'status ' + (type || '');
@@ -37,6 +53,8 @@ try {
 } catch (_) {
   verified = null;
 }
+
+verified = verified || getDevVerification();
 
 if (!verified || !verified.email || !verified.code) {
   window.location.href = 'verify.html';

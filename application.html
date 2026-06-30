@@ -25,11 +25,11 @@
           <legend>Applicant / Student Information</legend>
           <div class="grid two">
             <div>
-              <label for="surname">Surname</label>
+              <label for="surname">Surname <span class="required">*</span></label>
               <input id="surname" name="Surname" required>
             </div>
             <div>
-              <label for="firstName">First Name</label>
+              <label for="firstName">First Name <span class="required">*</span></label>
               <input id="firstName" name="FirstName" required>
             </div>
             <div>
@@ -37,7 +37,7 @@
               <input id="middleName" name="MiddleName">
             </div>
             <div>
-              <label for="gender">Gender</label>
+              <label for="gender">Gender <span class="required">*</span></label>
               <select id="gender" name="Gender" required>
                 <option value="">Select</option>
                 <option>Male</option>
@@ -45,13 +45,23 @@
               </select>
             </div>
             <div>
-              <label for="dob">Date of Birth</label>
+              <label for="dob">Date of Birth <span class="required">*</span></label>
               <input id="dob" name="DateOfBirth" type="date" required>
             </div>
             <div>
-              <label for="classApplying">Class Applying For</label>
+              <label for="religion">Religion <span class="required">*</span></label>
+              <select id="religion" name="Religion" required>
+                <option value="">Select religion</option>
+                <option>Christianity</option>
+                <option>Islam</option>
+                <option>Others</option>
+              </select>
+            </div>
+            <div>
+              <label for="classApplying">Class Applying For <span class="required">*</span></label>
               <select id="classApplying" name="ClassApplyingFor" required>
                 <option value="">Select class</option>
+                <option>Pre Nursery</option>
                 <option>Nursery 1</option>
                 <option>Nursery 2</option>
                 <option>Nursery 3</option>
@@ -80,6 +90,10 @@
               <input id="lga" name="LGA">
             </div>
             <div>
+              <label for="nin">National Identification Number (NIN)</label>
+              <input id="nin" name="NIN" minlength="11" maxlength="11" inputmode="numeric" placeholder="Optional">
+            </div>
+            <div>
               <label for="previousSchool">Previous School</label>
               <input id="previousSchool" name="PreviousSchool">
             </div>
@@ -106,6 +120,10 @@
               <input id="fatherOccupation" name="FatherOccupation">
             </div>
             <div>
+              <label for="fatherOfficeAddress">Father's Office Address</label>
+              <input id="fatherOfficeAddress" name="FatherOfficeAddress">
+            </div>
+            <div>
               <label for="motherName">Mother's Name</label>
               <input id="motherName" name="MotherName">
             </div>
@@ -122,12 +140,27 @@
               <input id="motherOccupation" name="MotherOccupation">
             </div>
             <div>
+              <label for="motherOfficeAddress">Mother's Office Address</label>
+              <input id="motherOfficeAddress" name="MotherOfficeAddress">
+            </div>
+            <div>
               <label for="guardianName">Guardian's Name, if applicable</label>
               <input id="guardianName" name="GuardianName">
             </div>
             <div>
               <label for="guardianPhone">Guardian's Phone</label>
               <input id="guardianPhone" name="GuardianPhone" type="tel">
+            </div>
+            <div>
+              <label for="livingWith">With whom is the applicant living?</label>
+              <select id="livingWith" name="LivingWith">
+                <option value="">Select</option>
+                <option>Parents</option>
+                <option>Guardian</option>
+                <option>Step parent</option>
+                <option>Single parent</option>
+                <option>Others</option>
+              </select>
             </div>
           </div>
         </fieldset>
@@ -136,7 +169,7 @@
           <legend>Contact and Residential Details</legend>
           <div class="grid two">
             <div class="full">
-              <label for="homeAddress">Residential Address</label>
+              <label for="homeAddress">Residential Address <span class="required">*</span></label>
               <textarea id="homeAddress" name="ResidentialAddress" rows="3" required></textarea>
             </div>
             <div>
@@ -180,7 +213,28 @@
           <legend>Admission Preferences</legend>
           <div class="grid two">
             <div>
-              <label for="studentType">Student Type</label>
+              <label for="classCompleted">Class Completed</label>
+              <select id="classCompleted" name="ClassCompleted">
+                <option value="">Select highest class completed</option>
+                <option>Pre Nursery</option>
+                <option>Nursery 1</option>
+                <option>Nursery 2</option>
+                <option>Nursery 3</option>
+                <option>Primary 1</option>
+                <option>Primary 2</option>
+                <option>Primary 3</option>
+                <option>Primary 4</option>
+                <option>Primary 5</option>
+                <option>Primary 6</option>
+                <option>JSS 1</option>
+                <option>JSS 2</option>
+                <option>JSS 3</option>
+                <option>SS 1</option>
+                <option>SS 2</option>
+              </select>
+            </div>
+            <div>
+              <label for="studentType">Student Type <span class="required">*</span></label>
               <select id="studentType" name="StudentType" required>
                 <option value="">Select</option>
                 <option>Day Student</option>
@@ -188,21 +242,79 @@
               </select>
             </div>
             <div>
-              <label for="session">Academic Session</label>
+              <label for="session">Academic Session <span class="required">*</span></label>
               <input id="session" name="AcademicSession" placeholder="2026/2027" required>
+            </div>
+            <div>
+              <label for="testimonial">Transfer Certificate / Testimonial</label>
+              <select id="testimonial" name="TransferCertificate">
+                <option value="">Select</option>
+                <option>Available</option>
+                <option>Not available</option>
+              </select>
             </div>
             <div class="full">
               <label for="howHeard">How did you hear about Destiny Christian Academy?</label>
               <input id="howHeard" name="HowHeard">
+            </div>
+            <div class="full">
+              <label for="reasonForChoosing">Reason for choosing Destiny Christian Academy</label>
+              <textarea id="reasonForChoosing" name="ReasonForChoosingSchool" rows="3"></textarea>
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>School Background</legend>
+          <p class="muted">This helps us know how to give the applicant any needed additional attention.</p>
+          <div class="grid two">
+            <div class="full">
+              <label>Has the applicant ever been expelled, dismissed, suspended, or refused admission to another school? <span class="required">*</span></label>
+              <div class="radio-options">
+                <label><input type="radio" name="ExpelledOrRefusedAdmission" value="Yes" required> Yes</label>
+                <label><input type="radio" name="ExpelledOrRefusedAdmission" value="No"> No</label>
+              </div>
+              <input name="ExpelledOrRefusedAdmissionDetails" placeholder="If yes, explain here">
+            </div>
+            <div class="full">
+              <label>Has the applicant ever had disciplinary difficulty at school? <span class="required">*</span></label>
+              <div class="radio-options">
+                <label><input type="radio" name="DisciplinaryDifficulty" value="Yes" required> Yes</label>
+                <label><input type="radio" name="DisciplinaryDifficulty" value="No"> No</label>
+              </div>
+              <input name="DisciplinaryDifficultyDetails" placeholder="If yes, provide details">
+            </div>
+            <div class="full">
+              <label>Does the applicant have a juvenile arrest record? <span class="required">*</span></label>
+              <div class="radio-options">
+                <label><input type="radio" name="JuvenileArrestRecord" value="Yes" required> Yes</label>
+                <label><input type="radio" name="JuvenileArrestRecord" value="No"> No</label>
+              </div>
+              <input name="JuvenileArrestRecordDetails" placeholder="If yes, explain here">
+            </div>
+            <div class="full">
+              <label>Has the applicant failed an academic subject in school? <span class="required">*</span></label>
+              <div class="radio-options">
+                <label><input type="radio" name="FailedAcademicSubject" value="Yes" required> Yes</label>
+                <label><input type="radio" name="FailedAcademicSubject" value="No"> No</label>
+              </div>
+              <input name="FailedAcademicSubjectDetails" placeholder="If yes, explain here">
             </div>
           </div>
         </fieldset>
 
         <fieldset>
           <legend>Declaration</legend>
+          <div class="terms-text">
+            <p>I declare that I am the parent or authorized guardian of the applicant and that all information provided is true to the best of my knowledge.</p>
+            <p>I pledge to comply with all admission requirements and to meet my financial obligations to the school promptly, usually before each resumption.</p>
+            <p>I understand that Destiny Christian Academy is a faith-based school operated on Biblical principles and standards, and I give permission for my child/ward to be instructed in line with the school's vision, mission, and standards.</p>
+            <p>I give permission for my child/ward to take part in school activities, including co-curricular activities and school-sponsored trips or excursions outside the school premises as scheduled by the school.</p>
+            <p>I agree to support and comply with all school regulations on behalf of the applicant and authorize the school to apply discipline in accordance with its policies.</p>
+          </div>
           <label class="check-row">
             <input type="checkbox" name="DeclarationAccepted" value="YES" required>
-            <span>I confirm that the information provided is true and complete to the best of my knowledge.</span>
+            <span>I understand and accept the terms stated on this application. <span class="required">*</span></span>
           </label>
         </fieldset>
 
