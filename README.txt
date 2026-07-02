@@ -1,29 +1,58 @@
-DCA Admissions Manager - v2.5 Stable
+DCA Admissions Portal - v2.8.0
 
 Files included:
-1. apps_script_backend.gs
-   - Paste into Google Apps Script.
-   - Confirm SHARED_SECRET matches Cloudflare GOOGLE_APPS_SCRIPT_SECRET.
-   - Deploy using Manage deployments -> Edit -> New version -> Deploy.
+1. verify.html and js/verify.js
+   - Parent verifies using the email address and verification code sent after payment.
 
-2. js/application.js
-   - Replace the existing js/application.js in the GitHub project.
+2. application.html and js/application.js
+   - Completed admission form submission.
 
-3. functions/api/submit-application.js
-   - Replace the existing Cloudflare Pages function.
+3. upload-documents.html and js/upload-documents.js
+   - Parent self-service upload page for one or many missing documents.
+   - Parents can select several files and upload them in one visit.
+   - Existing uploads are not silently replaced; parents must tick the replace option.
+   - Linked from index.html and success.html.
 
-4. success.html
-   - Add this file to the website root, same level as index.html.
+4. payments.html, payment-success.html, js/payments.js, and js/payment-success.js
+   - Parent can pay configured online fees, including Acceptance Fee.
+   - Paystack checkout is initialized from Cloudflare, not from browser JavaScript.
+   - Payment is recorded only after Paystack verification succeeds.
+
+5. functions/api/verify.js
+   - Cloudflare Pages Function for verification.
+
+6. functions/api/submit-application.js
+   - Cloudflare Pages Function for application submission.
+
+7. functions/api/upload-document.js
+   - Cloudflare Pages Function for document upload.
+
+8. functions/api/payment-options.js, functions/api/init-payment.js, and functions/api/verify-payment.js
+   - Cloudflare Pages Functions for online fee lookup, Paystack initialization, and payment verification.
+
+Required Cloudflare environment variables:
+- GOOGLE_APPS_SCRIPT_URL
+- GOOGLE_APPS_SCRIPT_SECRET
+- PAYSTACK_SECRET_KEY
+
+Backend requirement:
+- Deploy DCA_Admission_Backend_v2_8_0_Unified.gs from the Admissions Suite docs folder.
+- The backend must include uploadParentDocument, updateApplicantIntelligence, getPayableFees, recordOnlinePayment, and accounts ledger actions.
+- In the FeeItems sheet, set the Acceptance Fee amount before parents start paying online. The default amount is 0 until updated.
 
 After replacing website files:
 - Commit and push to GitHub.
 - Wait for Cloudflare Pages deployment to complete.
 - Test with a fresh unused verification code.
 
-Stable behavior:
+Expected behavior:
 - Verification code is not used up during verification.
 - Code is marked Used=YES only after successful application submission.
 - Duplicate submissions are blocked by VerificationCode, not by email.
 - Parent receives confirmation email.
 - Admissions team receives notification email.
 - Applicant sees success page with application reference.
+- Parent can later upload missing documents using verification email/code.
+- Reuploads are blocked unless the parent explicitly chooses to replace existing documents.
+- Parent can pay online fees through Paystack.
+- Verified online Acceptance Fee payments automatically mark AcceptanceFeePaid=YES and appear in the Accounts ledger.
