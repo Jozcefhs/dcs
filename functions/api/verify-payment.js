@@ -57,6 +57,7 @@ export async function onRequestPost(context) {
         FeeName: meta.feeName || 'Online Payment',
         FeeCategory: meta.feeCategory || '',
         PaymentType: meta.paymentType || '',
+        FeeItems: meta.feeItems ? JSON.stringify(meta.feeItems) : '',
         Amount: amount,
         Currency: tx.currency || 'NGN',
         Gateway: 'Paystack',

@@ -14,6 +14,8 @@ let currentCode = '';
 let currentFees = [];
 let currentBreakdown = [];
 
+const SCHOOL_FEES_TOTAL_CODE = 'SCHOOL_FEES_TOTAL';
+
 function setStatus(message, type) {
   statusEl.textContent = message || '';
   statusEl.className = 'status ' + (type || '');
@@ -29,6 +31,10 @@ function formatMoney(amount, currency) {
 
 function isWalletFee(fee) {
   return fee && (fee.FeeCode === 'WALLET_TOPUP' || String(fee.FeeCategory || '').toLowerCase() === 'wallet');
+}
+
+function isSchoolFee(fee) {
+  return fee && !isWalletFee(fee) && String(fee.FeeCategory || 'School Fee').trim().toLowerCase() === 'school fee';
 }
 
 function selectedFee() {
@@ -57,6 +63,10 @@ function renderBreakdown(breakdown) {
   const title = document.createElement('h2');
   title.textContent = 'School Fee Breakdown';
   breakdownEl.appendChild(title);
+  const note = document.createElement('p');
+  note.className = 'muted';
+  note.textContent = 'This shows how the school fee total is made up. Parents pay the total amount, not the individual components.';
+  breakdownEl.appendChild(note);
   let total = 0;
   currentBreakdown.forEach((fee) => {
     const amount = Number(String(fee.Amount || '0').replace(/,/g, ''));
@@ -80,8 +90,48 @@ function renderBreakdown(breakdown) {
   breakdownEl.appendChild(totalRow);
 }
 
+function schoolFeeTotalItem(breakdown) {
+  const items = (breakdown || []).filter(isSchoolFee);
+  if (!items.length) return null;
+  const total = items.reduce((sum, fee) => {
+    const amount = Number(String(fee.Amount || '0').replace(/,/g, ''));
+    return sum + (Number.isFinite(amount) ? amount : 0);
+  }, 0);
+  if (total <= 0) return null;
+  return {
+    FeeCode: SCHOOL_FEES_TOTAL_CODE,
+    FeeName: 'School Fees Total',
+    FeeCategory: 'School Fee',
+    Amount: total,
+    Currency: items[0].Currency || 'NGN',
+    PaymentType: 'SchoolFeesTotal',
+    Components: items.map((fee) => ({
+      FeeCode: fee.FeeCode,
+      FeeName: fee.FeeName,
+      FeeCategory: fee.FeeCategory || 'School Fee',
+      Amount: fee.Amount,
+      Currency: fee.Currency || items[0].Currency || 'NGN',
+      AcademicSession: fee.AcademicSession || '',
+      Term: fee.Term || ''
+    }))
+  };
+}
+
+function buildPayableItems(fees, breakdown) {
+  const items = [];
+  const schoolTotal = schoolFeeTotalItem(breakdown);
+  if (schoolTotal) {
+    items.push(schoolTotal);
+  }
+  (fees || []).forEach((fee) => {
+    if (isSchoolFee(fee)) return;
+    items.push(fee);
+  });
+  return items;
+}
+
 function renderFees(account, fees, breakdown) {
-  currentFees = fees || [];
+  currentFees = buildPayableItems(fees || [], breakdown || []);
   feeList.innerHTML = '';
   feePanel.hidden = false;
   accountSummary.textContent = `${account.DisplayName || 'Student'} | ${account.ApplicationReference || account.AccountRef || ''} | ${account.ClassName || ''} | ${account.StudentType || ''}`;
@@ -90,7 +140,7 @@ function renderFees(account, fees, breakdown) {
   if (!currentFees.length) {
     const empty = document.createElement('p');
     empty.className = 'muted';
-    empty.textContent = 'There are no online fees due at the moment.';
+    empty.textContent = 'There are no online payment items due at the moment.';
     feeList.appendChild(empty);
     payBtn.disabled = true;
     updateWalletAmountVisibility();
@@ -140,7 +190,7 @@ lookupForm.addEventListener('submit', async (event) => {
       throw new Error(data.message || 'Could not load payable fees.');
     }
     renderFees(data.account || {}, data.fees || [], data.schoolFeeBreakdown || []);
-    setStatus('Select a fee and continue to Paystack checkout.', 'ok');
+    setStatus('Review the payable amount and continue to Paystack checkout.', 'ok');
   } catch (error) {
     setStatus(error.message, 'bad');
   } finally {
@@ -151,7 +201,7 @@ lookupForm.addEventListener('submit', async (event) => {
 payBtn.addEventListener('click', async () => {
   const fee = selectedFee();
   if (!fee) {
-    setStatus('Select a fee to pay.', 'bad');
+    setStatus('Select a payment item to pay.', 'bad');
     return;
   }
   const walletAmount = isWalletFee(fee) ? Number(walletAmountInput.value || 0) : 0;
@@ -170,6 +220,7 @@ payBtn.addEventListener('click', async () => {
         email: currentEmail,
         code: currentCode,
         feeCode: fee.FeeCode,
+        components: fee.Components || undefined,
         amount: isWalletFee(fee) ? walletAmount : undefined
       })
     });

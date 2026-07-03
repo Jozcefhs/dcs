@@ -2,9 +2,23 @@
 // Initializes Paystack checkout from the backend so the secret key stays private.
 
 const PAYSTACK_INIT_URL = 'https://api.paystack.co/transaction/initialize';
+const SCHOOL_FEES_TOTAL_CODE = 'SCHOOL_FEES_TOTAL';
 
 function cleanReference(value) {
   return String(value || '').replace(/[^A-Za-z0-9_.=-]/g, '-');
+}
+
+function toAmount(value) {
+  const amount = Number(String(value || '0').replace(/,/g, ''));
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function isWalletFee(fee) {
+  return fee && (String(fee.FeeCode || '').trim() === 'WALLET_TOPUP' || String(fee.FeeCategory || '').trim().toLowerCase() === 'wallet');
+}
+
+function isSchoolFee(fee) {
+  return fee && !isWalletFee(fee) && String(fee.FeeCategory || 'School Fee').trim().toLowerCase() === 'school fee';
 }
 
 export async function onRequestPost(context) {
@@ -39,19 +53,41 @@ export async function onRequestPost(context) {
       return Response.json(feeData, { status: 400 });
     }
 
-    const fee = (feeData.fees || []).find((item) => String(item.FeeCode || '').trim() === feeCode);
+    let fee = (feeData.fees || []).find((item) => String(item.FeeCode || '').trim() === feeCode);
+    const schoolFeeComponents = (feeData.schoolFeeBreakdown || []).filter(isSchoolFee);
+    if (feeCode === SCHOOL_FEES_TOTAL_CODE && schoolFeeComponents.length) {
+      const total = schoolFeeComponents.reduce((sum, item) => sum + toAmount(item.Amount), 0);
+      fee = {
+        FeeCode: SCHOOL_FEES_TOTAL_CODE,
+        FeeName: 'School Fees Total',
+        FeeCategory: 'School Fee',
+        Amount: total,
+        Currency: schoolFeeComponents[0].Currency || 'NGN',
+        PaymentType: 'SchoolFeesTotal',
+        Components: schoolFeeComponents.map((item) => ({
+          FeeCode: item.FeeCode,
+          FeeName: item.FeeName,
+          FeeCategory: item.FeeCategory || 'School Fee',
+          Amount: toAmount(item.Amount),
+          Currency: item.Currency || schoolFeeComponents[0].Currency || 'NGN',
+          AcademicSession: item.AcademicSession || '',
+          Term: item.Term || ''
+        }))
+      };
+    }
     if (!fee) {
       return Response.json({ ok: false, message: 'That fee is not currently payable.' }, { status: 400 });
     }
 
-    const isWallet = feeCode === 'WALLET_TOPUP' || String(fee.FeeCategory || '').trim().toLowerCase() === 'wallet';
-    const configuredAmount = Number(String(fee.Amount || '0').replace(/,/g, ''));
+    const isWallet = isWalletFee(fee);
+    const isSchoolFeesTotal = feeCode === SCHOOL_FEES_TOTAL_CODE;
+    const configuredAmount = toAmount(fee.Amount);
     const amount = isWallet ? requestedAmount : configuredAmount;
     if (!Number.isFinite(amount) || amount <= 0) {
       return Response.json({ ok: false, message: isWallet ? 'Enter a wallet amount greater than zero.' : 'This fee amount has not been configured.' }, { status: 400 });
     }
-    const minAmount = Number(String(fee.MinAmount || '0').replace(/,/g, ''));
-    const maxAmount = Number(String(fee.MaxAmount || '0').replace(/,/g, ''));
+    const minAmount = toAmount(fee.MinAmount);
+    const maxAmount = toAmount(fee.MaxAmount);
     if (isWallet && minAmount > 0 && amount < minAmount) {
       return Response.json({ ok: false, message: `Minimum wallet top-up is ${minAmount}.` }, { status: 400 });
     }
@@ -80,7 +116,8 @@ export async function onRequestPost(context) {
           feeCode,
           feeName: fee.FeeName,
           feeCategory: fee.FeeCategory || '',
-          paymentType: isWallet ? 'Wallet' : 'Fee',
+          paymentType: isWallet ? 'Wallet' : (isSchoolFeesTotal ? 'SchoolFeesTotal' : 'Fee'),
+          feeItems: isSchoolFeesTotal ? fee.Components : undefined,
           accountRef: account.AccountRef,
           applicationReference: account.ApplicationReference,
           admissionNo: account.AdmissionNo,
