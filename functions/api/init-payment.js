@@ -14,6 +14,7 @@ export async function onRequestPost(context) {
     const email = String(body.email || '').trim().toLowerCase();
     const code = String(body.code || '').trim().toUpperCase();
     const feeCode = String(body.feeCode || '').trim();
+    const requestedAmount = Number(String(body.amount || '0').replace(/,/g, ''));
 
     if (!email || !code || !feeCode) {
       return Response.json({ ok: false, message: 'Email, verification code, and fee are required.' }, { status: 400 });
@@ -43,9 +44,19 @@ export async function onRequestPost(context) {
       return Response.json({ ok: false, message: 'That fee is not currently payable.' }, { status: 400 });
     }
 
-    const amount = Number(String(fee.Amount || '0').replace(/,/g, ''));
+    const isWallet = feeCode === 'WALLET_TOPUP' || String(fee.FeeCategory || '').trim().toLowerCase() === 'wallet';
+    const configuredAmount = Number(String(fee.Amount || '0').replace(/,/g, ''));
+    const amount = isWallet ? requestedAmount : configuredAmount;
     if (!Number.isFinite(amount) || amount <= 0) {
-      return Response.json({ ok: false, message: 'This fee amount has not been configured.' }, { status: 400 });
+      return Response.json({ ok: false, message: isWallet ? 'Enter a wallet amount greater than zero.' : 'This fee amount has not been configured.' }, { status: 400 });
+    }
+    const minAmount = Number(String(fee.MinAmount || '0').replace(/,/g, ''));
+    const maxAmount = Number(String(fee.MaxAmount || '0').replace(/,/g, ''));
+    if (isWallet && minAmount > 0 && amount < minAmount) {
+      return Response.json({ ok: false, message: `Minimum wallet top-up is ${minAmount}.` }, { status: 400 });
+    }
+    if (isWallet && maxAmount > 0 && amount > maxAmount) {
+      return Response.json({ ok: false, message: `Maximum wallet top-up is ${maxAmount}.` }, { status: 400 });
     }
 
     const account = feeData.account || {};
@@ -68,11 +79,16 @@ export async function onRequestPost(context) {
         metadata: {
           feeCode,
           feeName: fee.FeeName,
+          feeCategory: fee.FeeCategory || '',
+          paymentType: isWallet ? 'Wallet' : 'Fee',
           accountRef: account.AccountRef,
           applicationReference: account.ApplicationReference,
           admissionNo: account.AdmissionNo,
           displayName: account.DisplayName,
           className: account.ClassName,
+          studentType: account.StudentType,
+          academicSession: account.AcademicSession,
+          term: account.Term,
           verificationEmail: email
         }
       })

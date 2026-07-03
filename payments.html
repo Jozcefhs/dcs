@@ -12,7 +12,7 @@
       <div class="form-header">
         <img src="images/logo.png" alt="Destiny Christian Academy" class="logo small" onerror="this.style.display='none'">
         <div>
-          <h1>Pay Admission Fees</h1>
+          <h1>Pay School Fees</h1>
           <p class="muted">Use the same email address and verification code used for your admission application.</p>
         </div>
       </div>
@@ -30,10 +30,15 @@
 
       <section id="feePanel" class="fee-panel" hidden>
         <div class="verified-box" id="accountSummary"></div>
+        <div id="schoolFeeBreakdown" class="fee-breakdown" hidden></div>
         <fieldset>
           <legend>Available Fees</legend>
           <div id="feeList"></div>
         </fieldset>
+        <div id="walletAmountBox" hidden>
+          <label for="walletAmount">Wallet Top-up Amount</label>
+          <input id="walletAmount" type="number" min="0" step="100" inputmode="numeric">
+        </div>
         <button type="button" id="payBtn">Pay Selected Fee</button>
       </section>
 

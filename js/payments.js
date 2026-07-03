@@ -5,10 +5,14 @@ const feePanel = document.getElementById('feePanel');
 const feeList = document.getElementById('feeList');
 const accountSummary = document.getElementById('accountSummary');
 const payBtn = document.getElementById('payBtn');
+const breakdownEl = document.getElementById('schoolFeeBreakdown');
+const walletAmountBox = document.getElementById('walletAmountBox');
+const walletAmountInput = document.getElementById('walletAmount');
 
 let currentEmail = '';
 let currentCode = '';
 let currentFees = [];
+let currentBreakdown = [];
 
 function setStatus(message, type) {
   statusEl.textContent = message || '';
@@ -23,15 +27,73 @@ function formatMoney(amount, currency) {
   }).format(Number.isFinite(number) ? number : 0);
 }
 
-function renderFees(account, fees) {
+function isWalletFee(fee) {
+  return fee && (fee.FeeCode === 'WALLET_TOPUP' || String(fee.FeeCategory || '').toLowerCase() === 'wallet');
+}
+
+function selectedFee() {
+  const selected = document.querySelector('input[name="feeCode"]:checked');
+  if (!selected) return null;
+  return currentFees.find((fee) => String(fee.FeeCode) === selected.value) || null;
+}
+
+function updateWalletAmountVisibility() {
+  const fee = selectedFee();
+  const isWallet = isWalletFee(fee);
+  walletAmountBox.hidden = !isWallet;
+  if (isWallet && !walletAmountInput.value) {
+    walletAmountInput.value = fee.MinAmount || '';
+  }
+}
+
+function renderBreakdown(breakdown) {
+  currentBreakdown = breakdown || [];
+  breakdownEl.innerHTML = '';
+  if (!currentBreakdown.length) {
+    breakdownEl.hidden = true;
+    return;
+  }
+  breakdownEl.hidden = false;
+  const title = document.createElement('h2');
+  title.textContent = 'School Fee Breakdown';
+  breakdownEl.appendChild(title);
+  let total = 0;
+  currentBreakdown.forEach((fee) => {
+    const amount = Number(String(fee.Amount || '0').replace(/,/g, ''));
+    total += Number.isFinite(amount) ? amount : 0;
+    const row = document.createElement('div');
+    row.className = 'breakdown-row';
+    const name = document.createElement('span');
+    name.textContent = fee.FeeName || fee.FeeCode;
+    const value = document.createElement('strong');
+    value.textContent = formatMoney(fee.Amount, fee.Currency);
+    row.append(name, value);
+    breakdownEl.appendChild(row);
+  });
+  const totalRow = document.createElement('div');
+  totalRow.className = 'breakdown-row total';
+  const totalLabel = document.createElement('span');
+  totalLabel.textContent = 'Total';
+  const totalValue = document.createElement('strong');
+  totalValue.textContent = formatMoney(total, currentBreakdown[0].Currency || 'NGN');
+  totalRow.append(totalLabel, totalValue);
+  breakdownEl.appendChild(totalRow);
+}
+
+function renderFees(account, fees, breakdown) {
   currentFees = fees || [];
   feeList.innerHTML = '';
   feePanel.hidden = false;
-  accountSummary.textContent = `${account.DisplayName || 'Applicant'} | ${account.ApplicationReference || account.AccountRef || ''} | ${account.ClassName || ''}`;
+  accountSummary.textContent = `${account.DisplayName || 'Student'} | ${account.ApplicationReference || account.AccountRef || ''} | ${account.ClassName || ''} | ${account.StudentType || ''}`;
+  renderBreakdown(breakdown || []);
 
   if (!currentFees.length) {
-    feeList.innerHTML = '<p class="muted">There are no online fees due at the moment.</p>';
+    const empty = document.createElement('p');
+    empty.className = 'muted';
+    empty.textContent = 'There are no online fees due at the moment.';
+    feeList.appendChild(empty);
     payBtn.disabled = true;
+    updateWalletAmountVisibility();
     return;
   }
 
@@ -46,15 +108,17 @@ function renderFees(account, fees) {
     input.value = fee.FeeCode;
     input.id = id;
     input.checked = index === 0;
+    input.addEventListener('change', updateWalletAmountVisibility);
     const textWrap = document.createElement('span');
     const name = document.createElement('strong');
-    name.textContent = fee.FeeName || fee.FeeCode;
+    name.textContent = `${fee.FeeName || fee.FeeCode}${fee.FeeCategory ? ` (${fee.FeeCategory})` : ''}`;
     const amount = document.createElement('small');
-    amount.textContent = formatMoney(fee.Amount, fee.Currency);
+    amount.textContent = isWalletFee(fee) ? 'Enter amount' : formatMoney(fee.Amount, fee.Currency);
     textWrap.append(name, amount);
     row.append(input, textWrap);
     feeList.appendChild(row);
   });
+  updateWalletAmountVisibility();
 }
 
 lookupForm.addEventListener('submit', async (event) => {
@@ -75,7 +139,7 @@ lookupForm.addEventListener('submit', async (event) => {
     if (!response.ok || !data.ok) {
       throw new Error(data.message || 'Could not load payable fees.');
     }
-    renderFees(data.account || {}, data.fees || []);
+    renderFees(data.account || {}, data.fees || [], data.schoolFeeBreakdown || []);
     setStatus('Select a fee and continue to Paystack checkout.', 'ok');
   } catch (error) {
     setStatus(error.message, 'bad');
@@ -85,9 +149,14 @@ lookupForm.addEventListener('submit', async (event) => {
 });
 
 payBtn.addEventListener('click', async () => {
-  const selected = document.querySelector('input[name="feeCode"]:checked');
-  if (!selected) {
+  const fee = selectedFee();
+  if (!fee) {
     setStatus('Select a fee to pay.', 'bad');
+    return;
+  }
+  const walletAmount = isWalletFee(fee) ? Number(walletAmountInput.value || 0) : 0;
+  if (isWalletFee(fee) && (!Number.isFinite(walletAmount) || walletAmount <= 0)) {
+    setStatus('Enter the wallet amount to pay.', 'bad');
     return;
   }
 
@@ -100,7 +169,8 @@ payBtn.addEventListener('click', async () => {
       body: JSON.stringify({
         email: currentEmail,
         code: currentCode,
-        feeCode: selected.value
+        feeCode: fee.FeeCode,
+        amount: isWalletFee(fee) ? walletAmount : undefined
       })
     });
     const data = await response.json();
