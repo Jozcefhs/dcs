@@ -26,7 +26,18 @@ export async function onRequestPost(context) {
         VerificationCode: code
       })
     });
-    const data = await res.json();
+
+    const text = await res.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (_err) {
+      return Response.json({
+        ok: false,
+        message: 'Payment lookup could not read the Apps Script response. Confirm the Web App URL ends with /exec and the latest Apps Script deployment is active.'
+      }, { status: 502 });
+    }
+
     return Response.json(data, { status: data.ok ? 200 : 400 });
   } catch (err) {
     return Response.json({ ok: false, message: String(err) }, { status: 500 });
