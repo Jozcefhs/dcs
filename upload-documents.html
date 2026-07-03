@@ -67,6 +67,12 @@
         <p class="muted">Accepted files: PDF, JPG, PNG, DOC, DOCX. Maximum size per file: 8 MB.</p>
 
         <button type="submit" id="uploadBtn">Upload Selected Documents</button>
+        <div id="documentUploadProgress" class="document-progress" hidden>
+          <div class="document-progress-track">
+            <div id="documentUploadProgressFill" class="document-progress-fill"></div>
+          </div>
+          <p id="documentUploadProgressText" class="muted">Preparing upload...</p>
+        </div>
         <p id="uploadStatus" class="status" aria-live="polite"></p>
         <div id="uploadResults" class="upload-results"></div>
       </form>

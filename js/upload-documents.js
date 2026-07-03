@@ -2,6 +2,9 @@ const form = document.getElementById('uploadDocumentForm');
 const statusEl = document.getElementById('uploadStatus');
 const resultsEl = document.getElementById('uploadResults');
 const button = document.getElementById('uploadBtn');
+const progressEl = document.getElementById('documentUploadProgress');
+const progressFillEl = document.getElementById('documentUploadProgressFill');
+const progressTextEl = document.getElementById('documentUploadProgressText');
 
 const MAX_FILE_SIZE = 8 * 1024 * 1024;
 
@@ -10,11 +13,33 @@ function setStatus(message, type) {
   statusEl.className = 'status ' + (type || '');
 }
 
+function setProgress(done, total, label) {
+  if (!progressEl || !progressFillEl || !progressTextEl) return;
+  const percent = total ? Math.round((done / total) * 100) : 0;
+  progressEl.hidden = false;
+  progressFillEl.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+  progressTextEl.textContent = label || `${done} of ${total} document(s) processed`;
+}
+
+function resetProgress() {
+  if (!progressEl || !progressFillEl || !progressTextEl) return;
+  progressEl.hidden = true;
+  progressFillEl.style.width = '0%';
+  progressTextEl.textContent = 'Preparing upload...';
+}
+
 function addResult(message, type) {
   const item = document.createElement('div');
   item.className = 'upload-result ' + (type || '');
   item.textContent = message;
   resultsEl.appendChild(item);
+  return item;
+}
+
+function updateResult(item, message, type) {
+  if (!item) return;
+  item.className = 'upload-result ' + (type || '');
+  item.textContent = message;
 }
 
 function fileToBase64(file) {
@@ -50,6 +75,7 @@ form.addEventListener('submit', async (event) => {
   const uploads = selectedUploads();
 
   resultsEl.innerHTML = '';
+  resetProgress();
 
   if (!email || !code) {
     setStatus('Email and verification code are required.', 'bad');
@@ -67,14 +93,17 @@ form.addEventListener('submit', async (event) => {
 
   button.disabled = true;
   setStatus(`Uploading ${uploads.length} document(s), please wait...`, '');
+  setProgress(0, uploads.length, `Uploading 0 of ${uploads.length} document(s)...`);
 
   let successCount = 0;
   let skippedCount = 0;
   let failedCount = 0;
+  let processedCount = 0;
 
   for (const upload of uploads) {
+    const pendingRow = addResult(`${upload.label}: uploading...`, 'pending');
     try {
-      addResult(`${upload.label}: uploading...`, '');
+      setProgress(processedCount, uploads.length, `Uploading ${upload.label}...`);
       const response = await fetch('/api/upload-document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -93,17 +122,20 @@ form.addEventListener('submit', async (event) => {
       if (!response.ok || !data.ok) {
         if (data.code === 'DOCUMENT_ALREADY_UPLOADED') {
           skippedCount += 1;
-          addResult(`${upload.label}: already uploaded. Tick replace if Admissions Office requested a newer copy.`, 'bad');
+          updateResult(pendingRow, `${upload.label}: already uploaded. Tick replace if Admissions Office requested a newer copy.`, 'bad');
           continue;
         }
         throw new Error(data.message || 'Document upload failed.');
       }
 
       successCount += 1;
-      addResult(`${upload.label}: ${data.message || 'Uploaded successfully.'}`, 'ok');
+      updateResult(pendingRow, `${upload.label}: ${data.message || 'Uploaded successfully.'}`, 'ok');
     } catch (error) {
       failedCount += 1;
-      addResult(`${upload.label}: ${error.message}`, 'bad');
+      updateResult(pendingRow, `${upload.label}: ${error.message}`, 'bad');
+    } finally {
+      processedCount += 1;
+      setProgress(processedCount, uploads.length, `${processedCount} of ${uploads.length} document(s) processed`);
     }
   }
 
@@ -115,4 +147,7 @@ form.addEventListener('submit', async (event) => {
   }
 
   button.disabled = false;
+  setTimeout(() => {
+    if (!failedCount && !skippedCount) resetProgress();
+  }, 1200);
 });

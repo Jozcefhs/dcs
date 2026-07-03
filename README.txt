@@ -37,6 +37,8 @@ Required Cloudflare environment variables:
 
 Backend requirement:
 - Deploy DCA_Admission_Backend_v2_8_0_Unified.gs from the Admissions Suite docs folder.
+- In Apps Script, enable Project Settings > Show "appsscript.json" manifest file, then copy docs/appsscript.json from the Admissions Suite docs folder into the manifest.
+- Redeploy the Web App and approve the requested Google Drive permission. Parent document upload stores files in Drive.
 - The backend must include uploadParentDocument, updateApplicantIntelligence, getPayableFees, recordOnlinePayment, and accounts ledger actions.
 - In the FeeItems sheet, set the Acceptance Fee amount before parents start paying online. The default amount is 0 until updated.
 
@@ -54,5 +56,6 @@ Expected behavior:
 - Applicant sees success page with application reference.
 - Parent can later upload missing documents using verification email/code.
 - Reuploads are blocked unless the parent explicitly chooses to replace existing documents.
+- If uploads return DRIVE_AUTHORIZATION_REQUIRED, the Apps Script Web App has not been redeployed/authorized with Drive access.
 - Parent can pay online fees through Paystack.
 - Verified online Acceptance Fee payments automatically mark AcceptanceFeePaid=YES and appear in the Accounts ledger.
