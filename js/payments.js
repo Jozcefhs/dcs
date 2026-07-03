@@ -37,18 +37,63 @@ function isSchoolFee(fee) {
   return fee && !isWalletFee(fee) && String(fee.FeeCategory || 'School Fee').trim().toLowerCase() === 'school fee';
 }
 
+function isSchoolFeesTotal(fee) {
+  return fee && String(fee.FeeCode || '') === SCHOOL_FEES_TOTAL_CODE;
+}
+
+function toAmount(value) {
+  const amount = Number(String(value || '0').replace(/,/g, ''));
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function isYes(value) {
+  return ['yes', 'y', 'true', '1'].includes(String(value || '').trim().toLowerCase());
+}
+
 function selectedFee() {
   const selected = document.querySelector('input[name="feeCode"]:checked');
   if (!selected) return null;
   return currentFees.find((fee) => String(fee.FeeCode) === selected.value) || null;
 }
 
+function paymentAmountRules(fee) {
+  if (!fee) return { show: false, min: 0, max: 0, defaultAmount: '' };
+  if (isWalletFee(fee)) {
+    return {
+      show: true,
+      label: 'Wallet Top-up Amount',
+      min: toAmount(fee.MinAmount),
+      max: toAmount(fee.MaxAmount),
+      defaultAmount: fee.MinAmount || ''
+    };
+  }
+  if (isSchoolFeesTotal(fee) && isYes(fee.AllowInstallment)) {
+    const fullAmount = toAmount(fee.Amount);
+    const minAmount = toAmount(fee.MinAmount);
+    return {
+      show: true,
+      label: 'School Fee Amount to Pay Now',
+      min: minAmount,
+      max: fullAmount,
+      defaultAmount: minAmount > 0 ? minAmount : fullAmount
+    };
+  }
+  return { show: false, min: 0, max: 0, defaultAmount: '' };
+}
+
 function updateWalletAmountVisibility() {
   const fee = selectedFee();
-  const isWallet = isWalletFee(fee);
-  walletAmountBox.hidden = !isWallet;
-  if (isWallet && !walletAmountInput.value) {
-    walletAmountInput.value = fee.MinAmount || '';
+  const rules = paymentAmountRules(fee);
+  const label = walletAmountBox.querySelector('label');
+  walletAmountBox.hidden = !rules.show;
+  if (label) label.textContent = rules.label || 'Amount';
+  walletAmountInput.min = rules.min > 0 ? String(rules.min) : '0';
+  walletAmountInput.max = rules.max > 0 ? String(rules.max) : '';
+  if (rules.show && !walletAmountInput.value) {
+    walletAmountInput.value = rules.defaultAmount || '';
+  }
+  if (!rules.show) {
+    walletAmountInput.value = '';
   }
 }
 
@@ -65,7 +110,7 @@ function renderBreakdown(breakdown) {
   breakdownEl.appendChild(title);
   const note = document.createElement('p');
   note.className = 'muted';
-  note.textContent = 'This shows how the school fee total is made up. Parents pay the total amount, not the individual components.';
+  note.textContent = 'This shows how the school fee total is made up. If Accounts enabled part payment, you can enter the amount to pay now.';
   breakdownEl.appendChild(note);
   let total = 0;
   currentBreakdown.forEach((fee) => {
@@ -94,16 +139,28 @@ function schoolFeeTotalItem(breakdown) {
   const items = (breakdown || []).filter(isSchoolFee);
   if (!items.length) return null;
   const total = items.reduce((sum, fee) => {
-    const amount = Number(String(fee.Amount || '0').replace(/,/g, ''));
-    return sum + (Number.isFinite(amount) ? amount : 0);
+    return sum + toAmount(fee.Amount);
   }, 0);
   if (total <= 0) return null;
+  const nonInstallmentTotal = items.reduce((sum, fee) => {
+    return sum + (isYes(fee.AllowInstallment) ? 0 : toAmount(fee.Amount));
+  }, 0);
+  const installmentMinimum = items.reduce((sum, fee) => {
+    if (!isYes(fee.AllowInstallment)) return sum;
+    const min = toAmount(fee.MinAmount);
+    return sum + (min > 0 ? min : 0);
+  }, 0);
+  const minAmount = Math.min(total, nonInstallmentTotal + installmentMinimum);
+  const allowInstallment = minAmount > 0 && minAmount < total && items.some((fee) => isYes(fee.AllowInstallment));
   return {
     FeeCode: SCHOOL_FEES_TOTAL_CODE,
     FeeName: 'School Fees Total',
     FeeCategory: 'School Fee',
     Amount: total,
     Currency: items[0].Currency || 'NGN',
+    AllowInstallment: allowInstallment ? 'YES' : 'NO',
+    MinAmount: allowInstallment ? minAmount : '',
+    MaxAmount: total,
     PaymentType: 'SchoolFeesTotal',
     Components: items.map((fee) => ({
       FeeCode: fee.FeeCode,
@@ -112,7 +169,10 @@ function schoolFeeTotalItem(breakdown) {
       Amount: fee.Amount,
       Currency: fee.Currency || items[0].Currency || 'NGN',
       AcademicSession: fee.AcademicSession || '',
-      Term: fee.Term || ''
+      Term: fee.Term || '',
+      AllowInstallment: fee.AllowInstallment || '',
+      MinAmount: fee.MinAmount || '',
+      MaxAmount: fee.MaxAmount || ''
     }))
   };
 }
@@ -163,7 +223,13 @@ function renderFees(account, fees, breakdown) {
     const name = document.createElement('strong');
     name.textContent = `${fee.FeeName || fee.FeeCode}${fee.FeeCategory ? ` (${fee.FeeCategory})` : ''}`;
     const amount = document.createElement('small');
-    amount.textContent = isWalletFee(fee) ? 'Enter amount' : formatMoney(fee.Amount, fee.Currency);
+    if (isWalletFee(fee)) {
+      amount.textContent = 'Enter amount';
+    } else if (isSchoolFeesTotal(fee) && isYes(fee.AllowInstallment)) {
+      amount.textContent = `${formatMoney(fee.Amount, fee.Currency)} total | part payment allowed`;
+    } else {
+      amount.textContent = formatMoney(fee.Amount, fee.Currency);
+    }
     textWrap.append(name, amount);
     row.append(input, textWrap);
     feeList.appendChild(row);
@@ -204,9 +270,18 @@ payBtn.addEventListener('click', async () => {
     setStatus('Select a payment item to pay.', 'bad');
     return;
   }
-  const walletAmount = isWalletFee(fee) ? Number(walletAmountInput.value || 0) : 0;
-  if (isWalletFee(fee) && (!Number.isFinite(walletAmount) || walletAmount <= 0)) {
-    setStatus('Enter the wallet amount to pay.', 'bad');
+  const rules = paymentAmountRules(fee);
+  const enteredAmount = rules.show ? Number(walletAmountInput.value || 0) : 0;
+  if (rules.show && (!Number.isFinite(enteredAmount) || enteredAmount <= 0)) {
+    setStatus('Enter the amount to pay.', 'bad');
+    return;
+  }
+  if (rules.show && rules.min > 0 && enteredAmount < rules.min) {
+    setStatus(`Minimum amount is ${formatMoney(rules.min, fee.Currency)}.`, 'bad');
+    return;
+  }
+  if (rules.show && rules.max > 0 && enteredAmount > rules.max) {
+    setStatus(`Maximum amount is ${formatMoney(rules.max, fee.Currency)}.`, 'bad');
     return;
   }
 
@@ -221,7 +296,7 @@ payBtn.addEventListener('click', async () => {
         code: currentCode,
         feeCode: fee.FeeCode,
         components: fee.Components || undefined,
-        amount: isWalletFee(fee) ? walletAmount : undefined
+        amount: rules.show ? enteredAmount : undefined
       })
     });
     const data = await response.json();

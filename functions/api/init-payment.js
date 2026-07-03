@@ -21,6 +21,61 @@ function isSchoolFee(fee) {
   return fee && !isWalletFee(fee) && String(fee.FeeCategory || 'School Fee').trim().toLowerCase() === 'school fee';
 }
 
+function isYes(value) {
+  return ['yes', 'y', 'true', '1'].includes(String(value || '').trim().toLowerCase());
+}
+
+function schoolFeeInstallmentRules(components) {
+  const total = (components || []).reduce((sum, item) => sum + toAmount(item.Amount), 0);
+  const nonInstallmentTotal = (components || []).reduce((sum, item) => {
+    return sum + (isYes(item.AllowInstallment) ? 0 : toAmount(item.Amount));
+  }, 0);
+  const installmentMinimum = (components || []).reduce((sum, item) => {
+    if (!isYes(item.AllowInstallment)) return sum;
+    const min = toAmount(item.MinAmount);
+    return sum + (min > 0 ? min : 0);
+  }, 0);
+  const minAmount = Math.min(total, nonInstallmentTotal + installmentMinimum);
+  const allowInstallment = minAmount > 0 && minAmount < total && (components || []).some((item) => isYes(item.AllowInstallment));
+  return { total, minAmount, maxAmount: total, allowInstallment };
+}
+
+function allocateSchoolFeePayment(components, amount) {
+  let remaining = toAmount(amount);
+  const allocations = [];
+  const ordered = [
+    ...(components || []).filter((item) => !isYes(item.AllowInstallment)),
+    ...(components || []).filter((item) => isYes(item.AllowInstallment))
+  ];
+  ordered.forEach((item) => {
+    const componentAmount = toAmount(item.Amount);
+    if (componentAmount <= 0) return;
+    let payAmount = 0;
+    if (!isYes(item.AllowInstallment)) {
+      payAmount = componentAmount;
+    } else if (remaining > 0) {
+      payAmount = Math.min(componentAmount, remaining);
+    }
+    remaining -= payAmount;
+    if (payAmount > 0) {
+      allocations.push({
+        FeeCode: item.FeeCode,
+        FeeName: item.FeeName,
+        FeeCategory: item.FeeCategory || 'School Fee',
+        Amount: payAmount,
+        OriginalAmount: componentAmount,
+        Currency: item.Currency || 'NGN',
+        AcademicSession: item.AcademicSession || '',
+        Term: item.Term || '',
+        AllowInstallment: item.AllowInstallment || '',
+        MinAmount: item.MinAmount || '',
+        MaxAmount: item.MaxAmount || ''
+      });
+    }
+  });
+  return allocations;
+}
+
 export async function onRequestPost(context) {
   try {
     const { request, env } = context;
@@ -56,13 +111,16 @@ export async function onRequestPost(context) {
     let fee = (feeData.fees || []).find((item) => String(item.FeeCode || '').trim() === feeCode);
     const schoolFeeComponents = (feeData.schoolFeeBreakdown || []).filter(isSchoolFee);
     if (feeCode === SCHOOL_FEES_TOTAL_CODE && schoolFeeComponents.length) {
-      const total = schoolFeeComponents.reduce((sum, item) => sum + toAmount(item.Amount), 0);
+      const rules = schoolFeeInstallmentRules(schoolFeeComponents);
       fee = {
         FeeCode: SCHOOL_FEES_TOTAL_CODE,
         FeeName: 'School Fees Total',
         FeeCategory: 'School Fee',
-        Amount: total,
+        Amount: rules.total,
         Currency: schoolFeeComponents[0].Currency || 'NGN',
+        AllowInstallment: rules.allowInstallment ? 'YES' : 'NO',
+        MinAmount: rules.allowInstallment ? rules.minAmount : '',
+        MaxAmount: rules.total,
         PaymentType: 'SchoolFeesTotal',
         Components: schoolFeeComponents.map((item) => ({
           FeeCode: item.FeeCode,
@@ -71,7 +129,10 @@ export async function onRequestPost(context) {
           Amount: toAmount(item.Amount),
           Currency: item.Currency || schoolFeeComponents[0].Currency || 'NGN',
           AcademicSession: item.AcademicSession || '',
-          Term: item.Term || ''
+          Term: item.Term || '',
+          AllowInstallment: item.AllowInstallment || '',
+          MinAmount: item.MinAmount || '',
+          MaxAmount: item.MaxAmount || ''
         }))
       };
     }
@@ -82,9 +143,11 @@ export async function onRequestPost(context) {
     const isWallet = isWalletFee(fee);
     const isSchoolFeesTotal = feeCode === SCHOOL_FEES_TOTAL_CODE;
     const configuredAmount = toAmount(fee.Amount);
-    const amount = isWallet ? requestedAmount : configuredAmount;
+    const schoolFeeRules = isSchoolFeesTotal ? schoolFeeInstallmentRules(fee.Components || []) : null;
+    const canPartPaySchoolFees = Boolean(schoolFeeRules && schoolFeeRules.allowInstallment);
+    const amount = (isWallet || canPartPaySchoolFees) ? requestedAmount : configuredAmount;
     if (!Number.isFinite(amount) || amount <= 0) {
-      return Response.json({ ok: false, message: isWallet ? 'Enter a wallet amount greater than zero.' : 'This fee amount has not been configured.' }, { status: 400 });
+      return Response.json({ ok: false, message: (isWallet || canPartPaySchoolFees) ? 'Enter an amount greater than zero.' : 'This fee amount has not been configured.' }, { status: 400 });
     }
     const minAmount = toAmount(fee.MinAmount);
     const maxAmount = toAmount(fee.MaxAmount);
@@ -94,6 +157,18 @@ export async function onRequestPost(context) {
     if (isWallet && maxAmount > 0 && amount > maxAmount) {
       return Response.json({ ok: false, message: `Maximum wallet top-up is ${maxAmount}.` }, { status: 400 });
     }
+    if (isSchoolFeesTotal && !canPartPaySchoolFees && Math.abs(amount - configuredAmount) > 0.01) {
+      return Response.json({ ok: false, message: 'Part payment is not enabled for this school fee.' }, { status: 400 });
+    }
+    if (canPartPaySchoolFees && schoolFeeRules.minAmount > 0 && amount < schoolFeeRules.minAmount) {
+      return Response.json({ ok: false, message: `Minimum school fee payment is ${schoolFeeRules.minAmount}.` }, { status: 400 });
+    }
+    if (canPartPaySchoolFees && schoolFeeRules.maxAmount > 0 && amount > schoolFeeRules.maxAmount) {
+      return Response.json({ ok: false, message: `Maximum school fee payment is ${schoolFeeRules.maxAmount}.` }, { status: 400 });
+    }
+    const schoolFeeItems = isSchoolFeesTotal
+      ? allocateSchoolFeePayment(fee.Components || [], amount)
+      : undefined;
 
     const account = feeData.account || {};
     const origin = new URL(request.url).origin;
@@ -117,7 +192,9 @@ export async function onRequestPost(context) {
           feeName: fee.FeeName,
           feeCategory: fee.FeeCategory || '',
           paymentType: isWallet ? 'Wallet' : (isSchoolFeesTotal ? 'SchoolFeesTotal' : 'Fee'),
-          feeItems: isSchoolFeesTotal ? fee.Components : undefined,
+          feeItems: schoolFeeItems,
+          fullSchoolFeeAmount: isSchoolFeesTotal ? configuredAmount : undefined,
+          partPayment: isSchoolFeesTotal && amount < configuredAmount,
           accountRef: account.AccountRef,
           applicationReference: account.ApplicationReference,
           admissionNo: account.AdmissionNo,
