@@ -114,21 +114,25 @@ function renderBreakdown(breakdown) {
   breakdownEl.appendChild(note);
   let total = 0;
   currentBreakdown.forEach((fee) => {
-    const amount = Number(String(fee.Amount || '0').replace(/,/g, ''));
-    total += Number.isFinite(amount) ? amount : 0;
+    const amount = toAmount(fee.Amount);
+    total += amount;
     const row = document.createElement('div');
     row.className = 'breakdown-row';
     const name = document.createElement('span');
     name.textContent = fee.FeeName || fee.FeeCode;
     const value = document.createElement('strong');
-    value.textContent = formatMoney(fee.Amount, fee.Currency);
+    const paid = toAmount(fee.PaidAmount);
+    const original = toAmount(fee.OriginalAmount);
+    value.textContent = paid > 0 && original > 0
+      ? `${formatMoney(amount, fee.Currency)} balance (paid ${formatMoney(paid, fee.Currency)} of ${formatMoney(original, fee.Currency)})`
+      : formatMoney(amount, fee.Currency);
     row.append(name, value);
     breakdownEl.appendChild(row);
   });
   const totalRow = document.createElement('div');
   totalRow.className = 'breakdown-row total';
   const totalLabel = document.createElement('span');
-  totalLabel.textContent = 'Total';
+  totalLabel.textContent = 'Outstanding Balance';
   const totalValue = document.createElement('strong');
   totalValue.textContent = formatMoney(total, currentBreakdown[0].Currency || 'NGN');
   totalRow.append(totalLabel, totalValue);
@@ -145,13 +149,15 @@ function schoolFeeTotalItem(breakdown) {
   const nonInstallmentTotal = items.reduce((sum, fee) => {
     return sum + (isYes(fee.AllowInstallment) ? 0 : toAmount(fee.Amount));
   }, 0);
+  const installmentItems = items.filter((fee) => isYes(fee.AllowInstallment));
   const installmentMinimum = items.reduce((sum, fee) => {
     if (!isYes(fee.AllowInstallment)) return sum;
     const min = toAmount(fee.MinAmount);
     return sum + (min > 0 ? min : 0);
   }, 0);
-  const minAmount = Math.min(total, nonInstallmentTotal + installmentMinimum);
-  const allowInstallment = minAmount > 0 && minAmount < total && items.some((fee) => isYes(fee.AllowInstallment));
+  const minimumInstallmentPortion = installmentItems.length && installmentMinimum <= 0 ? 1 : installmentMinimum;
+  const minAmount = Math.min(total, nonInstallmentTotal + minimumInstallmentPortion);
+  const allowInstallment = installmentItems.length > 0 && minAmount < total;
   return {
     FeeCode: SCHOOL_FEES_TOTAL_CODE,
     FeeName: 'School Fees Total',
@@ -167,6 +173,9 @@ function schoolFeeTotalItem(breakdown) {
       FeeName: fee.FeeName,
       FeeCategory: fee.FeeCategory || 'School Fee',
       Amount: fee.Amount,
+      OriginalAmount: fee.OriginalAmount || fee.Amount,
+      PaidAmount: fee.PaidAmount || '',
+      BalanceAmount: fee.BalanceAmount || fee.Amount,
       Currency: fee.Currency || items[0].Currency || 'NGN',
       AcademicSession: fee.AcademicSession || '',
       Term: fee.Term || '',

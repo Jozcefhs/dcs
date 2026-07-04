@@ -27,6 +27,7 @@ function isYes(value) {
 
 function schoolFeeInstallmentRules(components) {
   const total = (components || []).reduce((sum, item) => sum + toAmount(item.Amount), 0);
+  const installmentItems = (components || []).filter((item) => isYes(item.AllowInstallment));
   const nonInstallmentTotal = (components || []).reduce((sum, item) => {
     return sum + (isYes(item.AllowInstallment) ? 0 : toAmount(item.Amount));
   }, 0);
@@ -35,8 +36,9 @@ function schoolFeeInstallmentRules(components) {
     const min = toAmount(item.MinAmount);
     return sum + (min > 0 ? min : 0);
   }, 0);
-  const minAmount = Math.min(total, nonInstallmentTotal + installmentMinimum);
-  const allowInstallment = minAmount > 0 && minAmount < total && (components || []).some((item) => isYes(item.AllowInstallment));
+  const minimumInstallmentPortion = installmentItems.length && installmentMinimum <= 0 ? 1 : installmentMinimum;
+  const minAmount = Math.min(total, nonInstallmentTotal + minimumInstallmentPortion);
+  const allowInstallment = installmentItems.length > 0 && minAmount < total;
   return { total, minAmount, maxAmount: total, allowInstallment };
 }
 
@@ -127,6 +129,9 @@ export async function onRequestPost(context) {
           FeeName: item.FeeName,
           FeeCategory: item.FeeCategory || 'School Fee',
           Amount: toAmount(item.Amount),
+          OriginalAmount: toAmount(item.OriginalAmount || item.Amount),
+          PaidAmount: toAmount(item.PaidAmount),
+          BalanceAmount: toAmount(item.BalanceAmount || item.Amount),
           Currency: item.Currency || schoolFeeComponents[0].Currency || 'NGN',
           AcademicSession: item.AcademicSession || '',
           Term: item.Term || '',
