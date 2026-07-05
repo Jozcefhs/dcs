@@ -1,9 +1,16 @@
 const statusEl = document.getElementById('confirmationStatus');
 const box = document.getElementById('confirmationBox');
+const leadEl = document.getElementById('confirmationLead');
 
 function setStatus(message, type) {
   statusEl.textContent = message || '';
   statusEl.className = 'status ' + (type || '');
+}
+
+function setLead(message) {
+  if (leadEl) {
+    leadEl.textContent = message || '';
+  }
 }
 
 function formatMoney(amount, currency) {
@@ -33,6 +40,9 @@ async function verifyPayment() {
     if (!response.ok || !data.ok) {
       throw new Error(data.message || 'Payment could not be verified.');
     }
+    setLead(isFormPurchase
+      ? 'Your admission form purchase has been confirmed.'
+      : 'Your payment has been confirmed.');
     setStatus(isFormPurchase ? 'Admission form purchased successfully.' : 'Payment verified successfully.', 'ok');
     const details = document.createElement('div');
     details.className = 'receipt-box';
@@ -77,6 +87,7 @@ async function verifyPayment() {
     }
     box.appendChild(details);
   } catch (error) {
+    setLead('We could not confirm your payment automatically.');
     setStatus(error.message, 'bad');
   }
 }
