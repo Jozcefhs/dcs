@@ -124,6 +124,8 @@ export async function onRequestPost(context) {
         MinAmount: rules.allowInstallment ? rules.minAmount : '',
         MaxAmount: rules.total,
         PaymentType: 'SchoolFeesTotal',
+        AcademicSession: schoolFeeComponents[0].AcademicSession || '',
+        Term: schoolFeeComponents[0].Term || '',
         Components: schoolFeeComponents.map((item) => ({
           FeeCode: item.FeeCode,
           FeeName: item.FeeName,

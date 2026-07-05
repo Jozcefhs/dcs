@@ -50,6 +50,15 @@ function isYes(value) {
   return ['yes', 'y', 'true', '1'].includes(String(value || '').trim().toLowerCase());
 }
 
+function termText(feeOrAccount) {
+  const term = String((feeOrAccount && feeOrAccount.Term) || '').trim();
+  const session = String((feeOrAccount && feeOrAccount.AcademicSession) || '').trim();
+  const parts = [];
+  if (term && term.toLowerCase() !== 'all') parts.push(term);
+  if (session && session.toLowerCase() !== 'all') parts.push(session);
+  return parts.join(' | ');
+}
+
 function selectedFee() {
   const selected = document.querySelector('input[name="feeCode"]:checked');
   if (!selected) return null;
@@ -108,6 +117,13 @@ function renderBreakdown(breakdown) {
   const title = document.createElement('h2');
   title.textContent = 'School Fee Breakdown';
   breakdownEl.appendChild(title);
+  const breakdownTerm = termText(currentBreakdown[0]);
+  if (breakdownTerm) {
+    const term = document.createElement('p');
+    term.className = 'muted';
+    term.textContent = `Fee period: ${breakdownTerm}`;
+    breakdownEl.appendChild(term);
+  }
   const note = document.createElement('p');
   note.className = 'muted';
   note.textContent = 'This shows how the school fee total is made up. If Accounts enabled part payment, you can enter the amount to pay now.';
@@ -119,7 +135,8 @@ function renderBreakdown(breakdown) {
     const row = document.createElement('div');
     row.className = 'breakdown-row';
     const name = document.createElement('span');
-    name.textContent = fee.FeeName || fee.FeeCode;
+    const itemTerm = termText(fee);
+    name.textContent = `${fee.FeeName || fee.FeeCode}${itemTerm ? ` - ${itemTerm}` : ''}`;
     const value = document.createElement('strong');
     const paid = toAmount(fee.PaidAmount);
     const original = toAmount(fee.OriginalAmount);
@@ -168,6 +185,8 @@ function schoolFeeTotalItem(breakdown) {
     MinAmount: allowInstallment ? minAmount : '',
     MaxAmount: total,
     PaymentType: 'SchoolFeesTotal',
+    AcademicSession: items[0].AcademicSession || '',
+    Term: items[0].Term || '',
     Components: items.map((fee) => ({
       FeeCode: fee.FeeCode,
       FeeName: fee.FeeName,
@@ -203,7 +222,8 @@ function renderFees(account, fees, breakdown) {
   currentFees = buildPayableItems(fees || [], breakdown || []);
   feeList.innerHTML = '';
   feePanel.hidden = false;
-  accountSummary.textContent = `${account.DisplayName || 'Student'} | ${account.ApplicationReference || account.AccountRef || ''} | ${account.ClassName || ''} | ${account.StudentType || ''}`;
+  const accountPeriod = termText(account);
+  accountSummary.textContent = `${account.DisplayName || 'Student'} | ${account.ApplicationReference || account.AccountRef || ''} | ${account.ClassName || ''} | ${account.StudentType || ''}${accountPeriod ? ' | ' + accountPeriod : ''}`;
   renderBreakdown(breakdown || []);
 
   if (!currentFees.length) {
@@ -230,7 +250,8 @@ function renderFees(account, fees, breakdown) {
     input.addEventListener('change', updateWalletAmountVisibility);
     const textWrap = document.createElement('span');
     const name = document.createElement('strong');
-    name.textContent = `${fee.FeeName || fee.FeeCode}${fee.FeeCategory ? ` (${fee.FeeCategory})` : ''}`;
+    const feePeriod = termText(fee);
+    name.textContent = `${fee.FeeName || fee.FeeCode}${fee.FeeCategory ? ` (${fee.FeeCategory})` : ''}${feePeriod ? ` - ${feePeriod}` : ''}`;
     const amount = document.createElement('small');
     if (isWalletFee(fee)) {
       amount.textContent = 'Enter amount';
