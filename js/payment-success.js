@@ -16,13 +16,15 @@ function formatMoney(amount, currency) {
 async function verifyPayment() {
   const params = new URLSearchParams(window.location.search);
   const reference = params.get('reference') || params.get('trxref');
+  const paymentType = params.get('type') || '';
   if (!reference) {
     setStatus('Payment reference is missing. Please contact the Admissions Office.', 'bad');
     return;
   }
 
   try {
-    const response = await fetch('/api/verify-payment', {
+    const isFormPurchase = paymentType.toLowerCase() === 'form';
+    const response = await fetch(isFormPurchase ? '/api/verify-form-payment' : '/api/verify-payment', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reference })
@@ -31,14 +33,27 @@ async function verifyPayment() {
     if (!response.ok || !data.ok) {
       throw new Error(data.message || 'Payment could not be verified.');
     }
-    setStatus('Payment verified successfully.', 'ok');
+    setStatus(isFormPurchase ? 'Admission form purchased successfully.' : 'Payment verified successfully.', 'ok');
     const details = document.createElement('div');
     details.className = 'receipt-box';
-    [
-      ['Fee', data.feeName || 'Online Payment'],
-      ['Amount', formatMoney(data.amount, data.currency)],
-      ['Reference', data.reference || reference]
-    ].forEach(([label, value]) => {
+    const rows = isFormPurchase
+      ? [
+          ['Applicant', data.applicantName || 'Admission applicant'],
+          ['Email', data.email || ''],
+          ['Receipt No.', data.receiptNo || ''],
+          ['Verification Code', data.verificationCode || ''],
+          ['Amount', formatMoney(data.amount, data.currency)],
+          ['Reference', data.reference || reference],
+          ['Code Expiry Date', data.expiryDate || '']
+        ]
+      : [
+          ['Fee', data.feeName || 'Online Payment'],
+          ['Amount', formatMoney(data.amount, data.currency)],
+          ['Reference', data.reference || reference]
+        ];
+
+    rows.forEach(([label, value]) => {
+      if (!value) return;
       const line = document.createElement('p');
       const strong = document.createElement('strong');
       strong.textContent = `${label}: `;
@@ -47,8 +62,19 @@ async function verifyPayment() {
     });
     const note = document.createElement('p');
     note.className = 'muted';
-    note.textContent = 'Your payment has been recorded with the Admissions Office.';
+    note.textContent = isFormPurchase
+      ? 'Use this email address and verification code to register. A copy has also been sent to your email.'
+      : 'Your payment has been recorded with the Admissions Office.';
     details.appendChild(note);
+    if (isFormPurchase) {
+      const link = document.createElement('p');
+      const anchor = document.createElement('a');
+      anchor.className = 'btn';
+      anchor.href = data.formLink || 'verify.html';
+      anchor.textContent = 'Register Now';
+      link.appendChild(anchor);
+      details.appendChild(link);
+    }
     box.appendChild(details);
   } catch (error) {
     setStatus(error.message, 'bad');

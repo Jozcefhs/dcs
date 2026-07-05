@@ -13,6 +13,7 @@ let currentEmail = '';
 let currentCode = '';
 let currentFees = [];
 let currentBreakdown = [];
+const debugMode = new URLSearchParams(window.location.search).get('debug') === '1';
 
 const SCHOOL_FEES_TOTAL_CODE = 'SCHOOL_FEES_TOTAL';
 
@@ -140,9 +141,15 @@ function renderBreakdown(breakdown) {
     const value = document.createElement('strong');
     const paid = toAmount(fee.PaidAmount);
     const original = toAmount(fee.OriginalAmount);
-    value.textContent = paid > 0 && original > 0
-      ? `${formatMoney(amount, fee.Currency)} balance (paid ${formatMoney(paid, fee.Currency)} of ${formatMoney(original, fee.Currency)})`
-      : formatMoney(amount, fee.Currency);
+    const acceptanceCredit = toAmount(fee.AcceptanceCreditApplied);
+    if (paid > 0 && original > 0) {
+      const paidLabel = acceptanceCredit > 0
+        ? `paid/credited ${formatMoney(paid, fee.Currency)} of ${formatMoney(original, fee.Currency)}`
+        : `paid ${formatMoney(paid, fee.Currency)} of ${formatMoney(original, fee.Currency)}`;
+      value.textContent = `${formatMoney(amount, fee.Currency)} balance (${paidLabel})`;
+    } else {
+      value.textContent = formatMoney(amount, fee.Currency);
+    }
     row.append(name, value);
     breakdownEl.appendChild(row);
   });
@@ -194,6 +201,7 @@ function schoolFeeTotalItem(breakdown) {
       Amount: fee.Amount,
       OriginalAmount: fee.OriginalAmount || fee.Amount,
       PaidAmount: fee.PaidAmount || '',
+      AcceptanceCreditApplied: fee.AcceptanceCreditApplied || '',
       BalanceAmount: fee.BalanceAmount || fee.Amount,
       Currency: fee.Currency || items[0].Currency || 'NGN',
       AcademicSession: fee.AcademicSession || '',
@@ -223,7 +231,8 @@ function renderFees(account, fees, breakdown) {
   feeList.innerHTML = '';
   feePanel.hidden = false;
   const accountPeriod = termText(account);
-  accountSummary.textContent = `${account.DisplayName || 'Student'} | ${account.ApplicationReference || account.AccountRef || ''} | ${account.ClassName || ''} | ${account.StudentType || ''}${accountPeriod ? ' | ' + accountPeriod : ''}`;
+  const debugText = debugMode && account.BillingSource ? ` | Billing Source: ${account.BillingSource}` : '';
+  accountSummary.textContent = `${account.DisplayName || 'Student'} | ${account.ApplicationReference || account.AccountRef || ''} | ${account.ClassName || ''} | ${account.StudentType || ''}${accountPeriod ? ' | ' + accountPeriod : ''}${debugText}`;
   renderBreakdown(breakdown || []);
 
   if (!currentFees.length) {

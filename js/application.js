@@ -3,8 +3,10 @@ const verifiedBox = document.getElementById('verifiedBox');
 const form = document.getElementById('applicationForm');
 const statusEl = document.getElementById('submitStatus');
 const submitBtn = document.getElementById('submitBtn');
+const classSelect = document.getElementById('classApplying');
 
 let verified = null;
+let openClassesLoaded = false;
 
 function isLocalDev() {
   return ['localhost', '127.0.0.1', ''].includes(window.location.hostname) || window.location.protocol === 'file:';
@@ -34,6 +36,38 @@ function disableForm() {
   });
 }
 
+function setClassOptions(classes) {
+  classSelect.innerHTML = '';
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = classes.length ? 'Select class' : 'No class is currently open for admission';
+  classSelect.appendChild(placeholder);
+
+  classes.forEach((className) => {
+    const option = document.createElement('option');
+    option.value = className;
+    option.textContent = className;
+    classSelect.appendChild(option);
+  });
+
+  openClassesLoaded = true;
+  submitBtn.disabled = classes.length === 0;
+}
+
+async function loadAdmissionClasses() {
+  try {
+    const response = await fetch('/api/admission-classes');
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data.message || 'Could not load available classes.');
+    }
+    setClassOptions(Array.isArray(data.classes) ? data.classes : []);
+  } catch (error) {
+    setClassOptions([]);
+    setStatus(error.message, 'bad');
+  }
+}
+
 function showUploadOverlay() {
   const uploadOverlay = document.getElementById('uploadOverlay');
   if (uploadOverlay) {
@@ -60,6 +94,7 @@ if (!verified || !verified.email || !verified.code) {
   window.location.href = 'verify.html';
 } else {
   verifiedBox.textContent = `Verified purchase: ${verified.email}${verified.receiptNo ? ' | Receipt: ' + verified.receiptNo : ''}`;
+  loadAdmissionClasses();
 }
 
 form.addEventListener('submit', async (event) => {
@@ -67,6 +102,11 @@ form.addEventListener('submit', async (event) => {
 
   if (!verified) {
     window.location.href = 'verify.html';
+    return;
+  }
+
+  if (!openClassesLoaded || !classSelect.value) {
+    setStatus('Select a class currently open for admission.', 'bad');
     return;
   }
 
