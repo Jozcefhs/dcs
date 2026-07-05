@@ -41,7 +41,8 @@ export async function onRequestGet(context) {
     return Response.json({
       ok: true,
       classes: data.openClasses || [],
-      allClasses: data.classes || []
+      allClasses: data.classes || [],
+      formAmount: data.formAmount || ''
     });
   } catch (err) {
     return Response.json({ ok: false, message: String(err) }, { status: 500 });

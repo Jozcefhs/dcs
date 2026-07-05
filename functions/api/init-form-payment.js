@@ -19,9 +19,11 @@ function normalizeClassName(value) {
   return String(value || '').trim().toLowerCase().replace(/\s*\/\s*/g, '/').replace(/\s+/g, ' ');
 }
 
-async function classIsOpen(env, className) {
-  if (!className) return false;
-  if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) return true;
+async function getAdmissionClassSetup(env, className) {
+  if (!className) return { open: false, amount: 0 };
+  if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
+    return { open: true, amount: toAmount(env.ADMISSION_FORM_AMOUNT) };
+  }
 
   const url = new URL(env.GOOGLE_APPS_SCRIPT_URL);
   url.searchParams.set('action', 'getAdmissionClasses');
@@ -30,7 +32,14 @@ async function classIsOpen(env, className) {
   const data = await response.json();
   if (!data.ok) throw new Error(data.message || 'Could not confirm available classes.');
   const wanted = normalizeClassName(className);
-  return (data.openClasses || []).some((openClass) => normalizeClassName(openClass) === wanted);
+  const matched = (data.classes || []).find((item) => {
+    return normalizeClassName(item.ClassName || item.className || item) === wanted && String(item.Active || 'YES').toUpperCase() === 'YES';
+  });
+  if (!matched) return { open: false, amount: 0 };
+  return {
+    open: true,
+    amount: toAmount(matched.FormAmount || matched.formAmount || data.formAmount || env.ADMISSION_FORM_AMOUNT)
+  };
 }
 
 export async function onRequestPost(context) {
@@ -41,7 +50,6 @@ export async function onRequestPost(context) {
     const email = String(body.email || '').trim().toLowerCase();
     const phone = String(body.phone || '').trim();
     const classApplyingFor = String(body.classApplyingFor || '').trim();
-    const amount = toAmount(env.ADMISSION_FORM_AMOUNT);
 
     if (!applicantName || !email || !classApplyingFor) {
       return Response.json({ ok: false, message: 'Applicant name, parent email, and class are required.' }, { status: 400 });
@@ -49,11 +57,13 @@ export async function onRequestPost(context) {
     if (!env.PAYSTACK_SECRET_KEY) {
       return Response.json({ ok: false, message: 'Paystack secret key is not configured.' }, { status: 500 });
     }
-    if (amount <= 0) {
-      return Response.json({ ok: false, message: 'Admission form amount is not configured. Set ADMISSION_FORM_AMOUNT in Cloudflare.' }, { status: 500 });
-    }
-    if (!(await classIsOpen(env, classApplyingFor))) {
+    const classSetup = await getAdmissionClassSetup(env, classApplyingFor);
+    if (!classSetup.open) {
       return Response.json({ ok: false, message: `Admission is not currently open for ${classApplyingFor}.` }, { status: 400 });
+    }
+    const amount = toAmount(classSetup.amount);
+    if (amount <= 0) {
+      return Response.json({ ok: false, message: 'Admission form amount is not configured. Set it from Settings > Admission Classes in the desktop app.' }, { status: 500 });
     }
 
     const origin = new URL(request.url).origin;
