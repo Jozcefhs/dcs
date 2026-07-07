@@ -1,4 +1,4 @@
-import { listCollection, requireFirestoreEnv } from '../lib/firestore.js';
+import { listCollection, requireFirestoreEnv, upsertDocument } from '../lib/firestore.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -34,6 +34,71 @@ function pick(row, keys, fallback = '') {
     }
   }
   return fallback;
+}
+
+function safeDocumentId(value) {
+  return clean(value)
+    .replace(/[\/\\?#\[\]]/g, '-')
+    .replace(/\s+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/-+/g, '-')
+    .slice(0, 140);
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function sameText(a, b) {
+  return clean(a).toLowerCase() === clean(b).toLowerCase();
+}
+
+function applicationIdFrom(data) {
+  return clean(data.ApplicationID || data.ApplicationReference || data.id || data.applicationReference);
+}
+
+function studentIdFrom(data) {
+  return clean(data.AdmissionNo || data.AdmissionNumber || data.admissionNo || data.AccountRef);
+}
+
+async function findApplication(env, id) {
+  const rows = await listCollection(env, 'applications');
+  return rows.find((row) => {
+    return sameText(row.__id, safeDocumentId(id)) ||
+      sameText(row.ApplicationReference, id) ||
+      sameText(row.ApplicationID, id) ||
+      sameText(row.applicationReference, id);
+  }) || null;
+}
+
+async function findStudent(env, admissionNo, applicationReference = '') {
+  const rows = await listCollection(env, 'students');
+  return rows.find((row) => {
+    return (admissionNo && (sameText(row.__id, safeDocumentId(admissionNo)) || sameText(row.AdmissionNo, admissionNo) || sameText(row.admissionNo, admissionNo))) ||
+      (applicationReference && (sameText(row.ApplicationReference, applicationReference) || sameText(row.applicationReference, applicationReference)));
+  }) || null;
+}
+
+async function saveApplication(env, application) {
+  const id = pick(application, ['ApplicationReference', 'ApplicationID', 'applicationReference', '__id']);
+  if (!id) {
+    const err = new Error('ApplicationReference is required.');
+    err.status = 400;
+    throw err;
+  }
+  await upsertDocument(env, 'applications', safeDocumentId(id), application);
+  return normalizeApplication(application);
+}
+
+async function saveStudent(env, student) {
+  const id = pick(student, ['AdmissionNo', 'admissionNo', 'AccountRef', '__id']);
+  if (!id) {
+    const err = new Error('AdmissionNo is required.');
+    err.status = 400;
+    throw err;
+  }
+  await upsertDocument(env, 'students', safeDocumentId(id), student);
+  return normalizeStudent(student);
 }
 
 function normalizeApplication(row) {
@@ -260,7 +325,283 @@ async function getAccountsOverview(env) {
   };
 }
 
-async function routeAction(env, action) {
+function applicationNotFound(id) {
+  const err = new Error(id ? `Application not found: ${id}` : 'ApplicationID or ApplicationReference is required.');
+  err.status = id ? 404 : 400;
+  return err;
+}
+
+async function updateApplicationStatus(env, body) {
+  const id = applicationIdFrom(body);
+  const existing = id ? await findApplication(env, id) : null;
+  if (!existing) throw applicationNotFound(id);
+  const now = nowIso();
+  const updates = {
+    Status: clean(body.Status || body.status) || pick(existing, ['Status', 'status']),
+    ReviewedBy: clean(body.ReviewedBy || body.reviewedBy) || 'Admissions Office',
+    ReviewDate: now,
+    UpdatedAt: now
+  };
+  if (body.Notes !== undefined) updates.Notes = clean(body.Notes);
+  if (body.AdmissionNo !== undefined) updates.AdmissionNo = clean(body.AdmissionNo);
+  if (body.Term !== undefined) updates.Term = clean(body.Term);
+  [
+    'AcceptanceFeePaid',
+    'AcceptanceFeePaidAt',
+    'AcceptanceFeeAmount',
+    'AcceptanceFeeMethod',
+    'AcceptanceFeeReceiptNo',
+    'AcceptanceFeeReceivedBy'
+  ].forEach((key) => {
+    if (body[key] !== undefined) updates[key] = body[key];
+  });
+  if (updates.Status === 'Paid' && !updates.AcceptanceFeePaid) updates.AcceptanceFeePaid = 'YES';
+  if (updates.AcceptanceFeePaid && !updates.AcceptanceFeePaidAt) updates.AcceptanceFeePaidAt = now;
+  const saved = await saveApplication(env, { ...existing, ...updates });
+
+  const admissionNo = updates.AdmissionNo || pick(existing, ['AdmissionNo']);
+  const student = await findStudent(env, admissionNo, pick(existing, ['ApplicationReference', 'ApplicationID']));
+  if (student && (body.AdmissionNo !== undefined || body.Term !== undefined)) {
+    const studentUpdates = { ...student, UpdatedAt: now };
+    if (body.AdmissionNo !== undefined) studentUpdates.AdmissionNo = clean(body.AdmissionNo);
+    if (body.Term !== undefined) studentUpdates.Term = clean(body.Term);
+    await saveStudent(env, studentUpdates);
+  }
+  return { ok: true, message: 'Application status updated.', application: saved };
+}
+
+async function updateApplicantNotes(env, body) {
+  const id = applicationIdFrom(body);
+  const existing = id ? await findApplication(env, id) : null;
+  if (!existing) throw applicationNotFound(id);
+  const saved = await saveApplication(env, {
+    ...existing,
+    Notes: clean(body.Notes || body.notes),
+    ReviewedBy: clean(body.ReviewedBy || body.reviewedBy) || 'Admissions Office',
+    ReviewDate: nowIso(),
+    UpdatedAt: nowIso()
+  });
+  return { ok: true, message: 'Applicant notes updated.', application: saved };
+}
+
+async function updateEntranceResult(env, body) {
+  const id = applicationIdFrom(body);
+  const existing = id ? await findApplication(env, id) : null;
+  if (!existing) throw applicationNotFound(id);
+  const resultStatus = clean(body.ResultStatus || body.resultStatus || 'Pending');
+  const updates = {
+    EnglishScore: body.EnglishScore ?? '',
+    MathematicsScore: body.MathematicsScore ?? '',
+    InterviewScore: body.InterviewScore ?? '',
+    TotalScore: body.TotalScore ?? '',
+    ResultPercentage: body.ResultPercentage ?? '',
+    ResultStatus: resultStatus,
+    ResultNotes: body.ResultNotes ?? '',
+    ResultUpdatedBy: clean(body.ResultUpdatedBy) || 'Admissions Office',
+    ResultUpdatedAt: nowIso(),
+    UpdatedAt: nowIso()
+  };
+  if (resultStatus === 'Admitted') updates.Status = 'Accepted';
+  if (resultStatus === 'Not Admitted') updates.Status = 'Rejected';
+  if (resultStatus === 'Pending') updates.Status = 'Pending';
+  const saved = await saveApplication(env, { ...existing, ...updates });
+  return { ok: true, message: 'Entrance result updated.', application: saved };
+}
+
+async function updateApplicantIntelligence(env, body) {
+  const id = applicationIdFrom(body);
+  const existing = id ? await findApplication(env, id) : null;
+  if (!existing) throw applicationNotFound(id);
+  const ignored = new Set(['Secret', 'secret', 'Action', 'action', 'ApplicationID', 'ApplicationReference']);
+  const updates = { UpdatedAt: nowIso(), IntelligenceUpdatedBy: clean(body.UpdatedBy) || 'Admissions Office' };
+  Object.entries(body || {}).forEach(([key, value]) => {
+    if (!ignored.has(key)) updates[key] = value;
+  });
+  const saved = await saveApplication(env, { ...existing, ...updates });
+  return { ok: true, message: 'Applicant intelligence updated.', application: saved };
+}
+
+function nextStudentAdmissionNo(students, session = '') {
+  const yearMatch = clean(session).match(/20(\d{2})/);
+  const yearCode = yearMatch ? yearMatch[1] : String(new Date().getFullYear()).slice(-2);
+  let maxNo = 0;
+  students.forEach((row) => {
+    const admissionNo = pick(row, ['AdmissionNo', 'admissionNo', '__id']);
+    const match = clean(admissionNo).match(/(\d+)$/);
+    if (match) maxNo = Math.max(maxNo, Number(match[1]));
+  });
+  return `DCA/${yearCode}/${String(maxNo + 1).padStart(6, '0')}`;
+}
+
+async function importStudents(env, body) {
+  const rows = Array.isArray(body.Students) ? body.Students : [];
+  if (!rows.length) {
+    const err = new Error('No student rows were supplied.');
+    err.status = 400;
+    throw err;
+  }
+  const existingStudents = await listCollection(env, 'students');
+  const importedBy = clean(body.ImportedBy || body.importedBy) || 'Admissions Office';
+  let imported = 0;
+  let skipped = 0;
+  const failures = [];
+  const savedStudents = [];
+  for (let index = 0; index < rows.length; index += 1) {
+    const input = rows[index] || {};
+    const rowNo = index + 1;
+    const applicantName = pick(input, ['ApplicantName', 'StudentName', 'Name']);
+    const classAdmitted = pick(input, ['ClassAdmitted', 'ClassName', 'Class']);
+    let admissionNo = pick(input, ['AdmissionNo', 'AdmissionNumber']);
+    const appRef = pick(input, ['ApplicationReference']);
+    if (!applicantName) {
+      skipped += 1;
+      failures.push(`Row ${rowNo}: missing student name.`);
+      continue;
+    }
+    if (!classAdmitted) {
+      skipped += 1;
+      failures.push(`Row ${rowNo}: missing class.`);
+      continue;
+    }
+    if (!admissionNo) admissionNo = nextStudentAdmissionNo([...existingStudents, ...savedStudents], input.AcademicSession || input.Session || '');
+    const duplicate = await findStudent(env, admissionNo, appRef);
+    if (duplicate) {
+      skipped += 1;
+      failures.push(`Row ${rowNo} (${admissionNo}): already exists.`);
+      continue;
+    }
+    const student = {
+      ...input,
+      EnrolledAt: input.EnrolledAt || nowIso(),
+      ApplicationReference: appRef,
+      AdmissionNo: admissionNo,
+      ApplicantName: applicantName,
+      DisplayName: applicantName,
+      ClassAdmitted: classAdmitted,
+      ClassName: classAdmitted,
+      AcademicSession: input.AcademicSession || input.Session || '',
+      Term: input.Term || '',
+      StudentType: input.StudentType || 'Day Student',
+      BillingCategory: input.BillingCategory || input['Billing Category'] || 'Regular',
+      Status: input.Status || 'Active',
+      ImportedAt: nowIso(),
+      ImportedBy: importedBy,
+      EnrolledBy: input.EnrolledBy || importedBy,
+      UpdatedAt: nowIso()
+    };
+    const saved = await saveStudent(env, student);
+    savedStudents.push(saved);
+    imported += 1;
+  }
+  return { ok: true, message: 'Student import completed.', imported, skipped, failures, students: (await listCollection(env, 'students')).map(normalizeStudent) };
+}
+
+async function promoteStudents(env, body) {
+  const targets = Array.isArray(body.Students) ? body.Students : [];
+  const newClass = clean(body.NewClass || body.newClass);
+  const session = clean(body.AcademicSession || body.Session);
+  const term = clean(body.Term);
+  const promotedBy = clean(body.PromotedBy || body.promotedBy) || 'Admissions Office';
+  if (!targets.length) throw new Error('No students were selected for promotion.');
+  if (!newClass) throw new Error('New class is required.');
+  if (!session) throw new Error('Academic session is required.');
+  let promoted = 0;
+  let skipped = 0;
+  const failures = [];
+  for (let index = 0; index < targets.length; index += 1) {
+    const target = targets[index] || {};
+    const student = await findStudent(env, pick(target, ['AdmissionNo', 'AdmissionNumber']), pick(target, ['ApplicationReference']));
+    if (!student) {
+      skipped += 1;
+      failures.push(`Selected row ${index + 1}: student not found.`);
+      continue;
+    }
+    const oldClass = pick(student, ['ClassAdmitted', 'ClassName']);
+    const line = `${nowIso()} | ${oldClass || 'Unspecified'} -> ${newClass} | ${session}${term ? ` | ${term}` : ''} | ${promotedBy}`;
+    await saveStudent(env, {
+      ...student,
+      PreviousClass: oldClass,
+      ClassAdmitted: newClass,
+      ClassName: newClass,
+      AcademicSession: session,
+      Term: term || student.Term || '',
+      PromotedAt: nowIso(),
+      PromotedBy: promotedBy,
+      PromotionHistory: student.PromotionHistory ? `${student.PromotionHistory}\n${line}` : line,
+      UpdatedAt: nowIso()
+    });
+    promoted += 1;
+  }
+  return { ok: true, message: 'Student promotion completed.', promoted, skipped, failures, students: (await listCollection(env, 'students')).map(normalizeStudent) };
+}
+
+async function enrollStudent(env, body) {
+  const id = applicationIdFrom(body);
+  const existing = id ? await findApplication(env, id) : null;
+  if (!existing) throw applicationNotFound(id);
+  if (yesNo(pick(existing, ['Enrolled'])) === 'YES' || pick(existing, ['Status']) === 'Enrolled') throw new Error('Student is already enrolled.');
+  if (pick(existing, ['ResultStatus']) !== 'Admitted') throw new Error('Entrance result is not marked Admitted.');
+  if (yesNo(pick(existing, ['OfferSent'])) !== 'YES') throw new Error('Offer of Admission has not been sent.');
+  if (yesNo(pick(existing, ['AcceptanceFeePaid'])) !== 'YES') throw new Error('Acceptance Fee has not been marked Paid.');
+  if (yesNo(pick(existing, ['AdmissionLetterSent'])) !== 'YES' && pick(existing, ['Status']) !== 'Admission Letter Sent') throw new Error('Admission Letter has not been sent.');
+  const admissionNo = pick(existing, ['AdmissionNo', 'AdmissionNumber']);
+  if (!admissionNo) throw new Error('Admission number is missing.');
+  const appRef = pick(existing, ['ApplicationReference', 'ApplicationID']);
+  if (await findStudent(env, admissionNo, appRef)) throw new Error('A student record already exists for this application or admission number.');
+  const enrolledBy = clean(body.EnrolledBy || body.enrolledBy) || 'Admissions Office';
+  const applicantName = pick(existing, ['ApplicantName', 'Name', 'DisplayName']);
+  const student = await saveStudent(env, {
+    EnrolledAt: nowIso(),
+    ApplicationReference: appRef,
+    AdmissionNo: admissionNo,
+    Surname: pick(existing, ['Surname']),
+    FirstName: pick(existing, ['FirstName']),
+    MiddleName: pick(existing, ['MiddleName']),
+    ApplicantName: applicantName,
+    DisplayName: applicantName,
+    Gender: pick(existing, ['Gender']),
+    DateOfBirth: pick(existing, ['DateOfBirth']),
+    ClassAdmitted: pick(existing, ['ClassApplyingFor', 'ClassName']),
+    ClassName: pick(existing, ['ClassApplyingFor', 'ClassName']),
+    AcademicSession: pick(existing, ['AcademicSession']),
+    Term: pick(existing, ['Term']),
+    StudentType: pick(existing, ['StudentType']),
+    BillingCategory: pick(existing, ['BillingCategory'], 'Regular'),
+    ParentName: pick(existing, ['FatherName', 'MotherName', 'GuardianName', 'ParentName']),
+    ParentPhone: pick(existing, ['FatherPhone', 'MotherPhone', 'GuardianPhone', 'ParentPhone']),
+    ParentEmail: pick(existing, ['FatherEmail', 'MotherEmail', 'VerificationEmail', 'ParentEmail']),
+    ResidentialAddress: pick(existing, ['ResidentialAddress']),
+    CityArea: pick(existing, ['CityArea']),
+    StateOfResidence: pick(existing, ['StateOfResidence']),
+    BloodGroup: pick(existing, ['BloodGroup']),
+    Genotype: pick(existing, ['Genotype']),
+    MedicalCondition: pick(existing, ['MedicalCondition']),
+    EmergencyContactName: pick(existing, ['EmergencyContactName']),
+    EmergencyContactPhone: pick(existing, ['EmergencyContactPhone']),
+    PreviousSchool: pick(existing, ['PreviousSchool']),
+    AcceptanceFeePaidAt: pick(existing, ['AcceptanceFeePaidAt']),
+    AcceptanceFeeAmount: pick(existing, ['AcceptanceFeeAmount']),
+    AcceptanceFeeMethod: pick(existing, ['AcceptanceFeeMethod']),
+    AcceptanceFeeReceiptNo: pick(existing, ['AcceptanceFeeReceiptNo']),
+    EnrolledBy: enrolledBy,
+    Status: 'Active',
+    UpdatedAt: nowIso()
+  });
+  const application = await saveApplication(env, { ...existing, Enrolled: 'YES', EnrolledAt: nowIso(), EnrolledBy: enrolledBy, Status: 'Enrolled', UpdatedAt: nowIso() });
+  return { ok: true, message: 'Student enrolled successfully.', application, student };
+}
+
+async function markApplicationFlag(env, body, flagName, dateName, message) {
+  const id = applicationIdFrom(body);
+  const existing = id ? await findApplication(env, id) : null;
+  if (!existing) throw applicationNotFound(id);
+  const updates = { [flagName]: 'YES', [dateName]: nowIso(), UpdatedAt: nowIso() };
+  if (flagName === 'AdmissionLetterSent') updates.Status = 'Admission Letter Sent';
+  const saved = await saveApplication(env, { ...existing, ...updates });
+  return { ok: true, message, application: saved };
+}
+
+async function routeAction(env, action, body = {}) {
   switch (action) {
     case 'ping':
       return {
@@ -301,6 +642,26 @@ async function routeAction(env, action) {
         message: 'Kitchen inventory loaded from Firestore.',
         inventory: (await listCollection(env, 'kitchenInventory')).map(normalizeInventory)
       };
+    case 'updateApplicationStatus':
+      return updateApplicationStatus(env, body);
+    case 'updateApplicantNotes':
+      return updateApplicantNotes(env, body);
+    case 'updateEntranceResult':
+      return updateEntranceResult(env, body);
+    case 'updateApplicantIntelligence':
+      return updateApplicantIntelligence(env, body);
+    case 'importStudents':
+      return importStudents(env, body);
+    case 'promoteStudents':
+      return promoteStudents(env, body);
+    case 'enrollStudent':
+      return enrollStudent(env, body);
+    case 'markResultSent':
+      return markApplicationFlag(env, body, 'ResultSent', 'ResultSentAt', 'Entrance result marked as sent.');
+    case 'markOfferSent':
+      return markApplicationFlag(env, body, 'OfferSent', 'OfferSentAt', 'Offer marked as sent.');
+    case 'markAdmissionLetterSent':
+      return markApplicationFlag(env, body, 'AdmissionLetterSent', 'AdmissionLetterSentAt', 'Admission letter marked as sent.');
     default: {
       const err = new Error(`Firestore backend action is not implemented yet: ${action}`);
       err.status = 400;
@@ -319,7 +680,7 @@ export async function onRequestPost(context) {
     if (!action) {
       return Response.json({ ok: false, message: 'Action is required.' }, { status: 400 });
     }
-    const data = await routeAction(env, action);
+    const data = await routeAction(env, action, body);
     return Response.json(data);
   } catch (err) {
     return Response.json({
@@ -339,7 +700,7 @@ export async function onRequestGet(context) {
       requireBackendSecret(env, {
         Secret: url.searchParams.get('secret') || url.searchParams.get('Secret')
       });
-      const data = await routeAction(env, action);
+      const data = await routeAction(env, action, {});
       return Response.json(data);
     }
     return Response.json({
