@@ -1,6 +1,9 @@
 // Cloudflare Pages Function: /api/payment-options
 // Returns unpaid online fee items for a verified application.
 
+import { getPayableFees } from './backend.js';
+import { requireFirestoreEnv } from '../lib/firestore.js';
+
 export async function onRequestPost(context) {
   try {
     const { request, env } = context;
@@ -10,6 +13,16 @@ export async function onRequestPost(context) {
 
     if (!email || !code) {
       return Response.json({ ok: false, message: 'Email and verification code are required.' }, { status: 400 });
+    }
+
+    try {
+      requireFirestoreEnv(env);
+      const firestoreData = await getPayableFees(env, { Email: email, VerificationCode: code });
+      return Response.json(firestoreData, { status: 200 });
+    } catch (firestoreErr) {
+      if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
+        return Response.json({ ok: false, message: firestoreErr.message || String(firestoreErr) }, { status: firestoreErr.status || 500 });
+      }
     }
 
     if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {

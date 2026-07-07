@@ -281,6 +281,352 @@ function requireBackendSecret(env, body) {
   }
 }
 
+function normalizeMatchText(value) {
+  return clean(value).toLowerCase();
+}
+
+function normalizeReferenceText(value) {
+  return clean(value).toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function referencesMatch(left, right) {
+  const a = normalizeReferenceText(left);
+  const b = normalizeReferenceText(right);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const aParts = a.match(/^([a-z]+)(\d+)(\d+)$/);
+  const bParts = b.match(/^([a-z]+)(\d+)(\d+)$/);
+  return Boolean(aParts && bParts && aParts[1] === bParts[1] && aParts[2] === bParts[2] && String(Number(aParts[3])) === String(Number(bParts[3])));
+}
+
+function displayNameFromApplication(app) {
+  return clean(pick(app, ['ApplicantName', 'DisplayName', 'Name'])) ||
+    [pick(app, ['Surname']), pick(app, ['FirstName']), pick(app, ['MiddleName'])].map(clean).filter(Boolean).join(' ');
+}
+
+function accountRefFromApplication(app) {
+  return clean(pick(app, ['AdmissionNo', 'AdmissionNumber', 'ApplicationReference', 'ApplicationID', '__id']));
+}
+
+function feeMatchVariants(value) {
+  const text = normalizeMatchText(value);
+  const compact = text.replace(/[^a-z0-9]/g, '');
+  const variants = {};
+  if (text) variants[text] = true;
+  if (compact) variants[compact] = true;
+  const levelMatch = text.match(/\b(jss|ss|primary|nursery|grade)\s*([0-9]+)/);
+  if (levelMatch) variants[levelMatch[1] + levelMatch[2]] = true;
+  if (text.includes('day')) variants.day = true;
+  if (text.includes('boarding') || text.includes('boarder')) variants.boarding = true;
+  return Object.keys(variants);
+}
+
+function feeFieldMatches(ruleValue, actualValue, allowBlankActual = false) {
+  const rule = normalizeMatchText(ruleValue);
+  if (!rule || rule === 'all' || rule === '*') return true;
+  if (!normalizeMatchText(actualValue) && allowBlankActual) return true;
+  if (!normalizeMatchText(actualValue)) return false;
+  const actualVariants = feeMatchVariants(actualValue);
+  const ruleVariants = [];
+  rule.split(',').forEach((part) => {
+    feeMatchVariants(part).forEach((variant) => ruleVariants.push(variant));
+  });
+  return ruleVariants.some((variant) => actualVariants.includes(variant));
+}
+
+function feeMatchesApplication(fee, app) {
+  const appClass = app.ClassApplyingFor || app.ClassAdmitted || app.ClassName || '';
+  const appType = app.StudentType || '';
+  const appBillingCategory = app.BillingCategory || 'Regular';
+  const appSession = app.AcademicSession || '';
+  const appTerm = app.Term || '';
+  return feeFieldMatches(fee.ClassName, appClass) &&
+    feeFieldMatches(fee.StudentType, appType) &&
+    feeFieldMatches(fee.BillingCategory || 'All', appBillingCategory, true) &&
+    feeFieldMatches(fee.AcademicSession, appSession, true) &&
+    feeFieldMatches(fee.Term, appTerm, true);
+}
+
+function feeBillingSpecificity(fee, app) {
+  const rule = normalizeMatchText(fee.BillingCategory || 'All');
+  const actual = normalizeMatchText(app.BillingCategory || 'Regular');
+  if (!rule || rule === 'all' || rule === '*') return 0;
+  return feeFieldMatches(fee.BillingCategory, actual || 'Regular', true) ? 2 : 0;
+}
+
+function feeOverrideKey(fee) {
+  return [
+    normalizeMatchText(fee.FeeName || fee.FeeCode || ''),
+    normalizeMatchText(fee.FeeCategory || ''),
+    normalizeMatchText(fee.ClassName || 'All'),
+    normalizeMatchText(fee.StudentType || 'All'),
+    normalizeMatchText(fee.AcademicSession || 'All'),
+    normalizeMatchText(fee.Term || 'All')
+  ].join('||');
+}
+
+function applyBillingCategoryOverrides(fees, app) {
+  const grouped = {};
+  fees.forEach((fee) => {
+    const key = feeOverrideKey(fee);
+    grouped[key] = grouped[key] || [];
+    grouped[key].push(fee);
+  });
+  const result = [];
+  Object.values(grouped).forEach((items) => {
+    const bestSpecificity = Math.max(...items.map((item) => feeBillingSpecificity(item, app)));
+    items.forEach((item) => {
+      if (feeBillingSpecificity(item, app) === bestSpecificity) result.push(item);
+    });
+  });
+  return result;
+}
+
+function isWalletFee(fee) {
+  return clean(fee && fee.FeeCode) === 'WALLET_TOPUP' || normalizeMatchText(fee && fee.FeeCategory) === 'wallet';
+}
+
+function periodKey(key, session, term) {
+  const cleanKey = clean(key);
+  if (!cleanKey) return '';
+  return [cleanKey, normalizeMatchText(session || ''), normalizeMatchText(term || '')].join('||');
+}
+
+function isPeriodSpecificFee(fee) {
+  const session = normalizeMatchText(fee.AcademicSession || '');
+  const term = normalizeMatchText(fee.Term || '');
+  return Boolean((session && session !== 'all' && session !== '*') || (term && term !== 'all' && term !== '*'));
+}
+
+function parseFeeItems(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'object') return [];
+  try {
+    const parsed = JSON.parse(String(value));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (_err) {
+    return [];
+  }
+}
+
+async function findStudentForApplication(env, app) {
+  const students = (await listCollection(env, 'students')).map(normalizeStudent);
+  const refs = [
+    accountRefFromApplication(app),
+    app.ApplicationReference,
+    app.ApplicationID,
+    app.AdmissionNo,
+    app.AdmissionNumber
+  ].map(clean).filter(Boolean);
+  let found = students.find((student) => refs.some((ref) => {
+    return referencesMatch(student.AdmissionNo, ref) ||
+      referencesMatch(student.ApplicationReference, ref) ||
+      sameText(student.AdmissionNo, ref) ||
+      sameText(student.ApplicationReference, ref);
+  }));
+  if (found) return found;
+  const appName = normalizeReferenceText(displayNameFromApplication(app));
+  const appEmail = normalizeMatchText(app.VerificationEmail || app.ParentEmail || app.Email || '');
+  if (!appName || !appEmail) return null;
+  found = students.find((student) => {
+    const studentName = normalizeReferenceText(student.DisplayName || student.ApplicantName || '');
+    const studentEmail = normalizeMatchText(student.ParentEmail || student.Email || '');
+    return studentName === appName && studentEmail === appEmail;
+  });
+  return found || null;
+}
+
+export async function getPayableFees(env, body = {}) {
+  const email = lower(body.Email || body.email);
+  const code = clean(body.VerificationCode || body.code).toUpperCase();
+  if (!email || !code) {
+    const err = new Error('Email and verification code are required.');
+    err.status = 400;
+    throw err;
+  }
+
+  const applications = (await listCollection(env, 'applications')).map(normalizeApplication);
+  const app = applications.find((row) => lower(row.VerificationEmail || row.Email || row.ParentEmail) === email && clean(row.VerificationCode).toUpperCase() === code);
+  if (!app) {
+    const err = new Error('Application not found for that email/code.');
+    err.status = 404;
+    throw err;
+  }
+
+  const accountRef = accountRefFromApplication(app);
+  const student = await findStudentForApplication(env, app);
+  const billingApp = { ...app };
+  if (student) {
+    if (student.ClassAdmitted || student.ClassName) {
+      billingApp.ClassApplyingFor = student.ClassAdmitted || student.ClassName;
+      billingApp.ClassAdmitted = student.ClassAdmitted || student.ClassName;
+    }
+    if (student.AcademicSession) billingApp.AcademicSession = student.AcademicSession;
+    if (student.Term) billingApp.Term = student.Term;
+    if (student.StudentType) billingApp.StudentType = student.StudentType;
+    if (student.BillingCategory) billingApp.BillingCategory = student.BillingCategory;
+    if (student.AdmissionNo) billingApp.AdmissionNo = student.AdmissionNo;
+    if (student.DisplayName || student.ApplicantName) billingApp.ApplicantName = student.DisplayName || student.ApplicantName;
+  }
+
+  const accountRefs = new Set([
+    accountRef,
+    app.ApplicationReference,
+    app.ApplicationID,
+    app.AdmissionNo,
+    app.AdmissionNumber,
+    billingApp.ApplicationReference,
+    billingApp.ApplicationID,
+    billingApp.AdmissionNo,
+    billingApp.AdmissionNumber
+  ].map(clean).filter(Boolean));
+  const rowMatchesAccount = (row) => {
+    return [...accountRefs].some((ref) => {
+      return sameText(row.AccountRef, ref) ||
+        sameText(row.ApplicationReference, ref) ||
+        sameText(row.AdmissionNo, ref) ||
+        referencesMatch(row.AccountRef, ref) ||
+        referencesMatch(row.ApplicationReference, ref) ||
+        referencesMatch(row.AdmissionNo, ref);
+    });
+  };
+
+  const [feeRows, paymentRows, invoiceRows] = await Promise.all([
+    listCollection(env, 'feeItems'),
+    listCollection(env, 'payments'),
+    listCollection(env, 'invoices')
+  ]);
+  const allFees = feeRows.map(normalizeFeeItem)
+    .filter((row) => yesNo(row.Active) === 'YES')
+    .sort((a, b) => asMoneyNumber(a.SortOrder) - asMoneyNumber(b.SortOrder));
+  const enrolledForBilling = Boolean(student) || yesNo(app.Enrolled) === 'YES' || normalizeMatchText(app.Status) === 'enrolled';
+  const admittedForPreEnrollment = normalizeMatchText(app.ResultStatus) === 'admitted' || normalizeMatchText(app.Status) === 'admitted';
+  const matchedFees = applyBillingCategoryOverrides(allFees.filter((fee) => {
+    const amount = asMoneyNumber(fee.Amount);
+    const category = normalizeMatchText(fee.FeeCategory || '');
+    const requiredForEnrollment = yesNo(fee.RequiredForEnrollment) === 'YES';
+    if (!isWalletFee(fee) && amount <= 0) return false;
+    if (yesNo(fee.PayableOnline || 'YES') !== 'YES') return false;
+    if (!feeMatchesApplication(fee, billingApp)) return false;
+    if (clean(fee.FeeCode) === 'ACCEPTANCE_FEE' && yesNo(app.AcceptanceFeePaid) === 'YES') return false;
+    if (!enrolledForBilling) {
+      if (!admittedForPreEnrollment) return false;
+      return category === 'admission' || requiredForEnrollment;
+    }
+    if (category === 'admission' || requiredForEnrollment) return false;
+    return true;
+  }), billingApp);
+
+  const feeBalanceMap = {};
+  const paymentCodeMap = {};
+  const paymentNameMap = {};
+  const addPaid = (map, key, amount) => {
+    const cleanKey = clean(key);
+    const paidAmount = asMoneyNumber(amount);
+    if (!cleanKey || paidAmount <= 0) return;
+    map[cleanKey] = (map[cleanKey] || 0) + paidAmount;
+  };
+  const addBalanceCredit = (key, amount, session = '', term = '') => {
+    const cleanKey = clean(key);
+    if (!cleanKey) return;
+    feeBalanceMap[cleanKey] = feeBalanceMap[cleanKey] || { credit: 0 };
+    feeBalanceMap[cleanKey].credit += asMoneyNumber(amount);
+    const scopedKey = periodKey(cleanKey, session, term);
+    feeBalanceMap[scopedKey] = feeBalanceMap[scopedKey] || { credit: 0 };
+    feeBalanceMap[scopedKey].credit += asMoneyNumber(amount);
+  };
+
+  invoiceRows.map(normalizeInvoice).filter(rowMatchesAccount).forEach((row) => {
+    if (normalizeMatchText(row.Status) === 'paid') {
+      addBalanceCredit(row.FeeCode || row.FeeName, row.Debit || row.Balance, row.AcademicSession, row.Term);
+    }
+  });
+  paymentRows.map(normalizePayment).filter(rowMatchesAccount).forEach((row) => {
+    const status = normalizeMatchText(row.Status || 'Paid');
+    if (status && status !== 'paid') return;
+    const metadata = row.metadata && typeof row.metadata === 'object' ? row.metadata : {};
+    const nested = metadata.metadata && typeof metadata.metadata === 'object' ? metadata.metadata : {};
+    const metadataItems = parseFeeItems(metadata.feeItems || metadata.FeeItems || metadata.components || metadata.Components || nested.feeItems || nested.FeeItems || nested.components || nested.Components);
+    if ((clean(row.FeeCode) === 'SCHOOL_FEES_TOTAL' || clean(metadata.paymentType || nested.paymentType) === 'SchoolFeesTotal') && metadataItems.length) {
+      metadataItems.forEach((item) => {
+        addPaid(paymentCodeMap, item.FeeCode, item.Amount);
+        addPaid(paymentNameMap, item.FeeName, item.Amount);
+        addPaid(paymentCodeMap, periodKey(item.FeeCode, item.AcademicSession || row.AcademicSession || nested.academicSession, item.Term || row.Term || nested.term), item.Amount);
+        addPaid(paymentNameMap, periodKey(item.FeeName, item.AcademicSession || row.AcademicSession || nested.academicSession, item.Term || row.Term || nested.term), item.Amount);
+      });
+      return;
+    }
+    addPaid(paymentCodeMap, row.FeeCode, row.Amount);
+    addPaid(paymentCodeMap, metadata.feeCode || metadata.componentFeeCode || nested.feeCode || nested.componentFeeCode, row.Amount);
+    addPaid(paymentNameMap, row.FeeName, row.Amount);
+    addPaid(paymentCodeMap, periodKey(row.FeeCode, row.AcademicSession || nested.academicSession, row.Term || nested.term), row.Amount);
+    addPaid(paymentCodeMap, periodKey(metadata.feeCode || metadata.componentFeeCode || nested.feeCode || nested.componentFeeCode, row.AcademicSession || nested.academicSession, row.Term || nested.term), row.Amount);
+    addPaid(paymentNameMap, periodKey(row.FeeName, row.AcademicSession || nested.academicSession, row.Term || nested.term), row.Amount);
+  });
+
+  let acceptanceCreditRemaining = enrolledForBilling && yesNo(app.AcceptanceFeePaid) === 'YES' ? asMoneyNumber(app.AcceptanceFeeAmount) : 0;
+  if (acceptanceCreditRemaining <= 0 && enrolledForBilling) {
+    acceptanceCreditRemaining = Math.max(asMoneyNumber(paymentCodeMap.ACCEPTANCE_FEE), asMoneyNumber(paymentNameMap['Acceptance Fee']));
+  }
+
+  const fees = matchedFees.map((fee) => {
+    const copy = { ...fee };
+    const originalAmount = asMoneyNumber(copy.Amount);
+    const feeCode = clean(copy.FeeCode);
+    const feeName = clean(copy.FeeName || feeCode);
+    const codePeriodKey = periodKey(feeCode, copy.AcademicSession, copy.Term);
+    const namePeriodKey = periodKey(feeName, copy.AcademicSession, copy.Term);
+    const periodSpecific = isPeriodSpecificFee(copy);
+    const scopedCodePaid = Math.max(asMoneyNumber(paymentCodeMap[codePeriodKey]), asMoneyNumber((feeBalanceMap[codePeriodKey] || {}).credit));
+    const scopedNamePaid = Math.max(asMoneyNumber(paymentNameMap[namePeriodKey]), asMoneyNumber((feeBalanceMap[namePeriodKey] || {}).credit));
+    const exactCodePaid = Math.max(scopedCodePaid, periodSpecific ? 0 : asMoneyNumber(paymentCodeMap[feeCode]), periodSpecific ? 0 : asMoneyNumber((feeBalanceMap[feeCode] || {}).credit));
+    const feeNamePaid = Math.max(scopedNamePaid, periodSpecific ? 0 : asMoneyNumber(paymentNameMap[feeName]), periodSpecific ? 0 : asMoneyNumber((feeBalanceMap[feeName] || {}).credit));
+    let paid = exactCodePaid > 0 ? exactCodePaid : feeNamePaid;
+    const acceptanceCreditApplied = (!isWalletFee(fee) && normalizeMatchText(fee.FeeCategory || 'School Fee') === 'school fee' && acceptanceCreditRemaining > 0)
+      ? Math.min(originalAmount - Math.min(originalAmount, paid), acceptanceCreditRemaining)
+      : 0;
+    if (acceptanceCreditApplied > 0) {
+      paid += acceptanceCreditApplied;
+      acceptanceCreditRemaining -= acceptanceCreditApplied;
+    }
+    const balance = isWalletFee(fee) ? originalAmount : Math.max(0, originalAmount - paid);
+    copy.OriginalAmount = originalAmount;
+    copy.PaidAmount = paid;
+    copy.AcceptanceCreditApplied = acceptanceCreditApplied;
+    copy.BalanceAmount = balance;
+    if (!isWalletFee(fee)) copy.Amount = balance;
+    if (asMoneyNumber(copy.MinAmount) > balance) copy.MinAmount = balance;
+    if (asMoneyNumber(copy.MaxAmount) <= 0 || asMoneyNumber(copy.MaxAmount) > balance) copy.MaxAmount = balance;
+    copy.PaymentType = isWalletFee(fee) ? 'Wallet' : 'Fee';
+    copy.AppliesTo = [copy.ClassName || 'All', copy.StudentType || 'All', copy.AcademicSession || 'All', copy.Term || 'All'].join(' / ');
+    return copy;
+  }).filter((fee) => isWalletFee(fee) || asMoneyNumber(fee.Amount) > 0);
+
+  const schoolFeeBreakdown = fees.filter((fee) => !isWalletFee(fee) && normalizeMatchText(fee.FeeCategory || 'School Fee') === 'school fee');
+  const schoolFeeTotal = schoolFeeBreakdown.reduce((total, fee) => total + asMoneyNumber(fee.Amount), 0);
+  return {
+    ok: true,
+    message: 'Payable fees loaded from Firestore.',
+    account: {
+      AccountRef: accountRef,
+      ApplicationReference: billingApp.ApplicationReference || app.ApplicationReference || '',
+      AdmissionNo: billingApp.AdmissionNo || billingApp.AdmissionNumber || app.AdmissionNo || app.AdmissionNumber || '',
+      DisplayName: displayNameFromApplication(billingApp),
+      ClassName: billingApp.ClassApplyingFor || billingApp.ClassAdmitted || '',
+      StudentType: billingApp.StudentType || '',
+      BillingCategory: billingApp.BillingCategory || app.BillingCategory || 'Regular',
+      AcademicSession: billingApp.AcademicSession || '',
+      Term: billingApp.Term || '',
+      Email: app.VerificationEmail || email,
+      BillingSource: student ? 'Students' : 'Applications'
+    },
+    fees,
+    schoolFeeBreakdown,
+    schoolFeeTotal
+  };
+}
+
 async function getAccountsOverview(env) {
   const [accounts, payments, invoices, feeItems] = await Promise.all([
     listCollection(env, 'accounts'),
@@ -680,6 +1026,8 @@ async function routeAction(env, action, body = {}) {
       };
     case 'getAccountsOverview':
       return getAccountsOverview(env);
+    case 'getPayableFees':
+      return getPayableFees(env, body);
     case 'getClinicRecords':
       return {
         ok: true,

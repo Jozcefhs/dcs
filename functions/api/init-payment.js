@@ -1,6 +1,9 @@
 // Cloudflare Pages Function: /api/init-payment
 // Initializes Paystack checkout from the backend so the secret key stays private.
 
+import { getPayableFees } from './backend.js';
+import { requireFirestoreEnv } from '../lib/firestore.js';
+
 const PAYSTACK_INIT_URL = 'https://api.paystack.co/transaction/initialize';
 const SCHOOL_FEES_TOTAL_CODE = 'SCHOOL_FEES_TOTAL';
 
@@ -91,21 +94,30 @@ export async function onRequestPost(context) {
       return Response.json({ ok: false, message: 'Email, verification code, and fee are required.' }, { status: 400 });
     }
 
-    if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET || !env.PAYSTACK_SECRET_KEY) {
+    if (!env.PAYSTACK_SECRET_KEY) {
       return Response.json({ ok: false, message: 'Online payment is not configured yet.' }, { status: 500 });
     }
 
-    const feeRes = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        Secret: env.GOOGLE_APPS_SCRIPT_SECRET,
-        Action: 'getPayableFees',
-        Email: email,
-        VerificationCode: code
-      })
-    });
-    const feeData = await feeRes.json();
+    let feeData = null;
+    try {
+      requireFirestoreEnv(env);
+      feeData = await getPayableFees(env, { Email: email, VerificationCode: code });
+    } catch (firestoreErr) {
+      if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
+        return Response.json({ ok: false, message: firestoreErr.message || String(firestoreErr) }, { status: firestoreErr.status || 500 });
+      }
+      const feeRes = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          Secret: env.GOOGLE_APPS_SCRIPT_SECRET,
+          Action: 'getPayableFees',
+          Email: email,
+          VerificationCode: code
+        })
+      });
+      feeData = await feeRes.json();
+    }
     if (!feeData.ok) {
       return Response.json(feeData, { status: 400 });
     }
