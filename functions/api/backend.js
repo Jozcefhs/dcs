@@ -947,7 +947,7 @@ async function markApplicationFlag(env, body, flagName, dateName, message) {
   return { ok: true, message, application: saved };
 }
 
-async function recordSale(env, body) {
+export async function recordSale(env, body) {
   const email = lower(body.Email || body.email);
   const code = clean(body.VerificationCode || body.verificationCode).toUpperCase();
   const receiptNo = clean(body.ReceiptNo || body.receiptNo);

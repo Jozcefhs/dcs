@@ -1,5 +1,8 @@
 // Cloudflare Pages Function: /api/verify-form-payment
-// Verifies a Paystack admission form purchase and records the form sale in Apps Script.
+// Verifies a Paystack admission form purchase and records the form sale.
+
+import { recordSale as recordSaleInFirestore } from './backend.js';
+import { requireFirestoreEnv } from '../lib/firestore.js';
 
 function extractMetadata(data) {
   const metadata = data && data.metadata;
@@ -41,7 +44,7 @@ function makeReceiptNo(reference) {
   return `DCA/FORM/${year}/${suffix || Date.now().toString().slice(-6)}`;
 }
 
-async function recordSale(env, payload) {
+async function recordSaleInAppsScript(env, payload) {
   const response = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -55,6 +58,26 @@ async function recordSale(env, payload) {
   return { response, data };
 }
 
+async function recordSale(env, payload) {
+  try {
+    requireFirestoreEnv(env);
+    const data = await recordSaleInFirestore(env, {
+      ...payload,
+      CreatedBy: 'Online Payment',
+      PaymentReference: payload.PaymentReference || payload.Reference || ''
+    });
+    return { response: { ok: true, status: 200 }, data };
+  } catch (firestoreErr) {
+    if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
+      return {
+        response: { ok: false, status: firestoreErr.status || 500 },
+        data: { ok: false, message: firestoreErr.message || String(firestoreErr) }
+      };
+    }
+    return recordSaleInAppsScript(env, payload);
+  }
+}
+
 export async function onRequestPost(context) {
   try {
     const { request, env } = context;
@@ -64,7 +87,7 @@ export async function onRequestPost(context) {
     if (!reference) {
       return Response.json({ ok: false, message: 'Payment reference is required.' }, { status: 400 });
     }
-    if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET || !env.PAYSTACK_SECRET_KEY) {
+    if (!env.PAYSTACK_SECRET_KEY) {
       return Response.json({ ok: false, message: 'Admission form payment verification is not configured yet.' }, { status: 500 });
     }
 
@@ -95,6 +118,7 @@ export async function onRequestPost(context) {
       AmountPaid: amount,
       FormLink: `${origin}/verify.html`,
       PaymentDate: tx.paid_at || tx.paidAt || new Date().toISOString(),
+      PaymentReference: tx.reference || reference,
       ExpiryDate: formatDateOnly(addDays(new Date(), Number.isFinite(expiryDays) && expiryDays > 0 ? expiryDays : 60)),
       Status: 'PAID',
       Used: 'NO'
