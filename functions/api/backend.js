@@ -601,6 +601,62 @@ async function markApplicationFlag(env, body, flagName, dateName, message) {
   return { ok: true, message, application: saved };
 }
 
+async function recordSale(env, body) {
+  const email = lower(body.Email || body.email);
+  const code = clean(body.VerificationCode || body.verificationCode).toUpperCase();
+  const receiptNo = clean(body.ReceiptNo || body.receiptNo);
+  if (!email || !code) {
+    const err = new Error('Email and VerificationCode are required.');
+    err.status = 400;
+    throw err;
+  }
+  const existing = await listCollection(env, 'formSales');
+  const sameReceipt = receiptNo && existing.find((row) => sameText(row.ReceiptNo, receiptNo) || sameText(row.__id, safeDocumentId(receiptNo)));
+  if (sameReceipt) {
+    return {
+      ok: true,
+      duplicate: true,
+      message: 'Sale already recorded.',
+      receiptNo: pick(sameReceipt, ['ReceiptNo']) || receiptNo,
+      verificationCode: pick(sameReceipt, ['VerificationCode']),
+      email: pick(sameReceipt, ['Email']) || email,
+      expiryDate: pick(sameReceipt, ['ExpiryDate'])
+    };
+  }
+  const sameCode = existing.find((row) => sameText(row.VerificationCode, code));
+  if (sameCode) {
+    const err = new Error('This verification code already exists. Generate a different code.');
+    err.status = 400;
+    throw err;
+  }
+  const sale = {
+    Time: body.Time || nowIso(),
+    ReceiptNo: receiptNo || `DCA-FORM-${Date.now()}`,
+    ApplicantName: clean(body.ApplicantName),
+    Email: email,
+    Phone: clean(body.Phone),
+    ClassApplyingFor: clean(body.ClassApplyingFor),
+    AmountPaid: clean(body.AmountPaid),
+    FormLink: clean(body.FormLink),
+    VerificationCode: code,
+    PaymentDate: body.PaymentDate || nowIso().slice(0, 10),
+    ExpiryDate: body.ExpiryDate || '',
+    Status: body.Status || 'PAID',
+    Used: body.Used || 'NO',
+    CreatedAt: nowIso(),
+    UpdatedAt: nowIso()
+  };
+  await upsertDocument(env, 'formSales', safeDocumentId(sale.ReceiptNo), sale);
+  return {
+    ok: true,
+    message: 'Sale saved.',
+    receiptNo: sale.ReceiptNo,
+    verificationCode: sale.VerificationCode,
+    email: sale.Email,
+    expiryDate: sale.ExpiryDate
+  };
+}
+
 async function routeAction(env, action, body = {}) {
   switch (action) {
     case 'ping':
@@ -662,6 +718,8 @@ async function routeAction(env, action, body = {}) {
       return markApplicationFlag(env, body, 'OfferSent', 'OfferSentAt', 'Offer marked as sent.');
     case 'markAdmissionLetterSent':
       return markApplicationFlag(env, body, 'AdmissionLetterSent', 'AdmissionLetterSentAt', 'Admission letter marked as sent.');
+    case 'recordSale':
+      return recordSale(env, body);
     default: {
       const err = new Error(`Firestore backend action is not implemented yet: ${action}`);
       err.status = 400;
