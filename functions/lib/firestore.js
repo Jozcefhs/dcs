@@ -1,0 +1,153 @@
+const FIRESTORE_SCOPE = 'https://www.googleapis.com/auth/datastore';
+let cachedToken = null;
+
+function base64Url(input) {
+  let bytes;
+  if (typeof input === 'string') {
+    bytes = new TextEncoder().encode(input);
+  } else {
+    bytes = new Uint8Array(input);
+  }
+  let binary = '';
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function pemToArrayBuffer(pem) {
+  const clean = String(pem || '')
+    .replace(/\\n/g, '\n')
+    .replace('-----BEGIN PRIVATE KEY-----', '')
+    .replace('-----END PRIVATE KEY-----', '')
+    .replace(/\s+/g, '');
+  const binary = atob(clean);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
+async function signJwt(env) {
+  const now = Math.floor(Date.now() / 1000);
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const claim = {
+    iss: env.FIREBASE_CLIENT_EMAIL,
+    scope: FIRESTORE_SCOPE,
+    aud: 'https://oauth2.googleapis.com/token',
+    exp: now + 3600,
+    iat: now
+  };
+  const unsigned = `${base64Url(JSON.stringify(header))}.${base64Url(JSON.stringify(claim))}`;
+  const key = await crypto.subtle.importKey(
+    'pkcs8',
+    pemToArrayBuffer(env.FIREBASE_PRIVATE_KEY),
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, new TextEncoder().encode(unsigned));
+  return `${unsigned}.${base64Url(signature)}`;
+}
+
+export function requireFirestoreEnv(env) {
+  const missing = ['FIREBASE_PROJECT_ID', 'FIREBASE_CLIENT_EMAIL', 'FIREBASE_PRIVATE_KEY']
+    .filter((key) => !String(env[key] || '').trim());
+  if (missing.length) {
+    throw new Error(`Firestore is not configured. Missing: ${missing.join(', ')}`);
+  }
+}
+
+export async function getFirestoreAccessToken(env) {
+  requireFirestoreEnv(env);
+  const now = Date.now();
+  if (cachedToken && cachedToken.expiresAt > now + 60000) {
+    return cachedToken.accessToken;
+  }
+  const assertion = await signJwt(env);
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion
+    })
+  });
+  const data = await response.json();
+  if (!response.ok || !data.access_token) {
+    throw new Error(data.error_description || data.error || 'Could not obtain Firestore access token.');
+  }
+  cachedToken = {
+    accessToken: data.access_token,
+    expiresAt: now + Number(data.expires_in || 3600) * 1000
+  };
+  return cachedToken.accessToken;
+}
+
+export function firestoreBaseUrl(env) {
+  requireFirestoreEnv(env);
+  const projectId = encodeURIComponent(env.FIREBASE_PROJECT_ID);
+  return `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`;
+}
+
+export async function firestoreRequest(env, path, options = {}) {
+  const token = await getFirestoreAccessToken(env);
+  const cleanPath = String(path || '').replace(/^\/+/, '');
+  const response = await fetch(`${firestoreBaseUrl(env)}/${cleanPath}`, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      ...(options.headers || {})
+    }
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = data && data.error && data.error.message ? data.error.message : `Firestore HTTP ${response.status}`;
+    const error = new Error(message);
+    error.status = response.status;
+    error.data = data;
+    throw error;
+  }
+  return data;
+}
+
+function fromFirestoreValue(value) {
+  if (!value || typeof value !== 'object') return '';
+  if ('stringValue' in value) return value.stringValue;
+  if ('integerValue' in value) return Number(value.integerValue);
+  if ('doubleValue' in value) return Number(value.doubleValue);
+  if ('booleanValue' in value) return Boolean(value.booleanValue);
+  if ('timestampValue' in value) return value.timestampValue;
+  if ('nullValue' in value) return '';
+  if ('arrayValue' in value) {
+    return (value.arrayValue.values || []).map(fromFirestoreValue);
+  }
+  if ('mapValue' in value) {
+    const out = {};
+    Object.entries(value.mapValue.fields || {}).forEach(([key, item]) => {
+      out[key] = fromFirestoreValue(item);
+    });
+    return out;
+  }
+  return '';
+}
+
+export function firestoreDocumentToObject(document) {
+  const out = {};
+  Object.entries((document && document.fields) || {}).forEach(([key, value]) => {
+    out[key] = fromFirestoreValue(value);
+  });
+  if (document && document.name) {
+    out.__name = document.name;
+    out.__id = document.name.split('/').pop();
+  }
+  return out;
+}
+
+export async function listCollection(env, collectionPath, query = '') {
+  const suffix = query ? `?${query}` : '';
+  const data = await firestoreRequest(env, `${collectionPath}${suffix}`);
+  return (data.documents || []).map(firestoreDocumentToObject);
+}
