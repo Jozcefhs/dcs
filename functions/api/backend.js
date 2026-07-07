@@ -262,6 +262,13 @@ async function getAccountsOverview(env) {
 
 async function routeAction(env, action) {
   switch (action) {
+    case 'ping':
+      return {
+        ok: true,
+        message: 'Firestore backend is reachable.',
+        backend: 'firestore',
+        projectId: env.FIREBASE_PROJECT_ID
+      };
     case 'getApplications':
       return {
         ok: true,
