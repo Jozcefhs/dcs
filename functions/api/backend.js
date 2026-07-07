@@ -324,8 +324,17 @@ export async function onRequestPost(context) {
 
 export async function onRequestGet(context) {
   try {
-    const { env } = context;
+    const { request, env } = context;
     requireFirestoreEnv(env);
+    const url = new URL(request.url);
+    const action = clean(url.searchParams.get('action') || url.searchParams.get('Action'));
+    if (action) {
+      requireBackendSecret(env, {
+        Secret: url.searchParams.get('secret') || url.searchParams.get('Secret')
+      });
+      const data = await routeAction(env, action);
+      return Response.json(data);
+    }
     return Response.json({
       ok: true,
       message: 'Firestore backend is reachable.',
