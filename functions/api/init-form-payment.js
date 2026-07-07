@@ -1,6 +1,9 @@
 // Cloudflare Pages Function: /api/init-form-payment
 // Starts Paystack checkout for admission form purchase.
 
+import { getAdmissionClasses } from './backend.js';
+import { requireFirestoreEnv } from '../lib/firestore.js';
+
 const PAYSTACK_INIT_URL = 'https://api.paystack.co/transaction/initialize';
 
 function cleanReference(value) {
@@ -21,6 +24,24 @@ function normalizeClassName(value) {
 
 async function getAdmissionClassSetup(env, className) {
   if (!className) return { open: false, amount: 0 };
+  try {
+    requireFirestoreEnv(env);
+    const data = await getAdmissionClasses(env);
+    const wanted = normalizeClassName(className);
+    const matched = (data.classes || []).find((item) => {
+      return normalizeClassName(item.ClassName || item.className || item) === wanted && String(item.Active || 'YES').toUpperCase() === 'YES';
+    });
+    if (matched) {
+      return {
+        open: true,
+        amount: toAmount(matched.FormAmount || matched.formAmount || data.formAmount || env.ADMISSION_FORM_AMOUNT)
+      };
+    }
+    if ((data.classes || []).length) return { open: false, amount: 0 };
+  } catch (_firestoreErr) {
+    // Fall through to Apps Script/env fallback.
+  }
+
   if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
     return { open: true, amount: toAmount(env.ADMISSION_FORM_AMOUNT) };
   }
@@ -29,7 +50,13 @@ async function getAdmissionClassSetup(env, className) {
   url.searchParams.set('action', 'getAdmissionClasses');
   url.searchParams.set('secret', env.GOOGLE_APPS_SCRIPT_SECRET);
   const response = await fetch(url.toString());
-  const data = await response.json();
+  const text = await response.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (_err) {
+    throw new Error('Could not confirm available classes because the server returned a non-JSON response.');
+  }
   if (!data.ok) throw new Error(data.message || 'Could not confirm available classes.');
   const wanted = normalizeClassName(className);
   const matched = (data.classes || []).find((item) => {

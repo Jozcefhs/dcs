@@ -28,7 +28,13 @@ function setClassOptions(classes) {
 async function loadAdmissionClasses() {
   try {
     const response = await fetch('/api/admission-classes');
-    const data = await response.json();
+    const text = await response.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (_err) {
+      throw new Error('Could not load available classes because the server returned an error page. Please try again.');
+    }
     if (!response.ok || !data.ok) {
       throw new Error(data.message || 'Could not load available classes.');
     }

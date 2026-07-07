@@ -1,5 +1,8 @@
 // Cloudflare Pages Function: /api/admission-classes
-// Returns classes currently open for admission from Apps Script.
+// Returns classes currently open for admission.
+
+import { getAdmissionClasses } from './backend.js';
+import { requireFirestoreEnv } from '../lib/firestore.js';
 
 const FALLBACK_CLASSES = [
   'Creche',
@@ -24,6 +27,22 @@ const FALLBACK_CLASSES = [
 export async function onRequestGet(context) {
   try {
     const { env } = context;
+    try {
+      requireFirestoreEnv(env);
+      const firestoreData = await getAdmissionClasses(env);
+      if ((firestoreData.openClasses || []).length || (firestoreData.classes || []).length) {
+        return Response.json({
+          ok: true,
+          classes: firestoreData.openClasses || [],
+          allClasses: firestoreData.classes || [],
+          formAmount: firestoreData.formAmount || '',
+          backend: 'firestore'
+        });
+      }
+    } catch (_firestoreErr) {
+      // Fall through to Apps Script or fallback classes.
+    }
+
     if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
       return Response.json({ ok: true, classes: FALLBACK_CLASSES, fallback: true });
     }
@@ -33,7 +52,13 @@ export async function onRequestGet(context) {
     url.searchParams.set('secret', env.GOOGLE_APPS_SCRIPT_SECRET);
 
     const response = await fetch(url.toString());
-    const data = await response.json();
+    const text = await response.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (_err) {
+      return Response.json({ ok: true, classes: FALLBACK_CLASSES, fallback: true, message: 'Admission classes fallback used because the Apps Script response was not JSON.' });
+    }
     if (!data.ok) {
       return Response.json(data, { status: 400 });
     }

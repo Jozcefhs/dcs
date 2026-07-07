@@ -1003,6 +1003,70 @@ async function recordSale(env, body) {
   };
 }
 
+function normalizeAdmissionClass(row) {
+  return {
+    ...row,
+    ClassName: pick(row, ['className', 'ClassName', '__id']),
+    FormAmount: asMoneyNumber(pick(row, ['formAmount', 'FormAmount'])),
+    Active: yesNo(pick(row, ['active', 'Active'])),
+    SortOrder: asMoneyNumber(pick(row, ['sortOrder', 'SortOrder'], 100))
+  };
+}
+
+export async function getAdmissionClasses(env) {
+  const classes = (await listCollection(env, 'settings/admission/classes'))
+    .map(normalizeAdmissionClass)
+    .sort((a, b) => asMoneyNumber(a.SortOrder) - asMoneyNumber(b.SortOrder));
+  const openClasses = classes
+    .filter((item) => yesNo(item.Active) === 'YES')
+    .map((item) => item.ClassName)
+    .filter(Boolean);
+  const pricedClass = classes.find((item) => yesNo(item.Active) === 'YES' && asMoneyNumber(item.FormAmount) > 0) ||
+    classes.find((item) => asMoneyNumber(item.FormAmount) > 0) ||
+    {};
+  return {
+    ok: true,
+    message: 'Admission classes loaded from Firestore.',
+    backend: 'firestore',
+    openClasses,
+    classes,
+    formAmount: pricedClass.FormAmount || ''
+  };
+}
+
+async function saveAdmissionClasses(env, body) {
+  const classes = Array.isArray(body.Classes || body.classes) ? (body.Classes || body.classes) : [];
+  const formAmount = asMoneyNumber(body.FormAmount || body.formAmount);
+  if (!classes.length) {
+    const err = new Error('Classes list is required.');
+    err.status = 400;
+    throw err;
+  }
+  const updatedAt = nowIso();
+  const updatedBy = clean(body.UpdatedBy || body.updatedBy) || 'Admissions Office';
+  let saved = 0;
+  for (const item of classes) {
+    const className = clean(item.ClassName || item.className || item);
+    if (!className) continue;
+    const payload = {
+      ClassName: className,
+      FormAmount: asMoneyNumber(item.FormAmount || item.formAmount || formAmount),
+      Active: yesNo(item.Active ?? item.active ?? 'NO') || 'NO',
+      SortOrder: asMoneyNumber(item.SortOrder || item.sortOrder || saved + 1),
+      UpdatedAt: updatedAt,
+      UpdatedBy: updatedBy
+    };
+    await upsertDocument(env, 'settings/admission/classes', safeDocumentId(className), payload);
+    saved += 1;
+  }
+  return {
+    ok: true,
+    message: `Admission classes saved to Firestore (${saved}).`,
+    saved,
+    ...(await getAdmissionClasses(env))
+  };
+}
+
 async function routeAction(env, action, body = {}) {
   switch (action) {
     case 'ping':
@@ -1024,6 +1088,10 @@ async function routeAction(env, action, body = {}) {
         message: 'Students loaded from Firestore.',
         students: (await listCollection(env, 'students')).map(normalizeStudent)
       };
+    case 'getAdmissionClasses':
+      return getAdmissionClasses(env);
+    case 'saveAdmissionClasses':
+      return saveAdmissionClasses(env, body);
     case 'getAccountsOverview':
       return getAccountsOverview(env);
     case 'getPayableFees':
