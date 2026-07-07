@@ -113,6 +113,86 @@ export async function firestoreRequest(env, path, options = {}) {
   return data;
 }
 
+function cleanImportValue(value) {
+  if (value === undefined || value === null) return '';
+  return typeof value === 'string' ? value.trim() : value;
+}
+
+function looksNumeric(value) {
+  if (typeof value === 'number') return Number.isFinite(value);
+  const text = String(value ?? '').trim();
+  return /^-?\d+(\.\d+)?$/.test(text);
+}
+
+function shouldKeepString(key, value) {
+  const name = String(key || '').toLowerCase();
+  const text = String(value ?? '').trim();
+  if (!text) return true;
+  if (/^0\d+/.test(text)) return true;
+  return [
+    'phone',
+    'mobile',
+    'email',
+    'code',
+    'reference',
+    'receipt',
+    'admission',
+    'application',
+    'class',
+    'term',
+    'session',
+    'id',
+    'no',
+    'number',
+    'name',
+    'status',
+    'type',
+    'category'
+  ].some((part) => name.includes(part));
+}
+
+export function toFirestoreValue(value, key = '') {
+  const cleaned = cleanImportValue(value);
+  if (cleaned === '') return { stringValue: '' };
+  if (typeof cleaned === 'boolean') return { booleanValue: cleaned };
+  if (cleaned instanceof Date && !Number.isNaN(cleaned.getTime())) {
+    return { timestampValue: cleaned.toISOString() };
+  }
+  if (Array.isArray(cleaned)) {
+    return { arrayValue: { values: cleaned.map((item) => toFirestoreValue(item)) } };
+  }
+  if (typeof cleaned === 'object') {
+    return { mapValue: { fields: objectToFirestoreFields(cleaned) } };
+  }
+  if (!shouldKeepString(key, cleaned) && looksNumeric(cleaned)) {
+    const number = Number(String(cleaned).replace(/,/g, ''));
+    if (Number.isInteger(number)) return { integerValue: String(number) };
+    return { doubleValue: number };
+  }
+  return { stringValue: String(cleaned) };
+}
+
+export function objectToFirestoreFields(data) {
+  const fields = {};
+  Object.entries(data || {}).forEach(([key, value]) => {
+    if (key && !String(key).startsWith('__')) {
+      fields[key] = toFirestoreValue(value, key);
+    }
+  });
+  return fields;
+}
+
+export async function upsertDocument(env, collectionPath, documentId, data) {
+  const cleanCollection = String(collectionPath || '').replace(/^\/+|\/+$/g, '');
+  const encodedId = encodeURIComponent(String(documentId || '').trim());
+  if (!cleanCollection) throw new Error('Collection path is required.');
+  if (!encodedId) throw new Error('Document ID is required.');
+  return firestoreRequest(env, `${cleanCollection}/${encodedId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ fields: objectToFirestoreFields(data) })
+  });
+}
+
 function fromFirestoreValue(value) {
   if (!value || typeof value !== 'object') return '';
   if ('stringValue' in value) return value.stringValue;
