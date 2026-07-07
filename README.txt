@@ -1,5 +1,6 @@
 DCA Admissions Portal - v2.8.0
 
+
 Files included:
 1. verify.html and js/verify.js
    - Parent verifies using the email address and verification code sent after payment.
