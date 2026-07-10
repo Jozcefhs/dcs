@@ -1131,10 +1131,72 @@ function normalizeAdmissionClass(row) {
   return {
     ...row,
     ClassName: pick(row, ['className', 'ClassName', '__id']),
-    Arms: pick(row, ['arms', 'Arms', 'ClassArms']),
     FormAmount: asMoneyNumber(pick(row, ['formAmount', 'FormAmount'])),
     Active: yesNo(pick(row, ['active', 'Active'])),
     SortOrder: asMoneyNumber(pick(row, ['sortOrder', 'SortOrder'], 100))
+  };
+}
+
+function normalizeSchoolClass(row) {
+  return {
+    ...row,
+    ClassName: pick(row, ['className', 'ClassName', '__id']),
+    Arms: pick(row, ['arms', 'Arms', 'ClassArms']),
+    Active: yesNo(pick(row, ['active', 'Active'])),
+    SortOrder: asMoneyNumber(pick(row, ['sortOrder', 'SortOrder'], 100))
+  };
+}
+
+export async function getSchoolClasses(env) {
+  const classes = (await listCollection(env, 'settings/academics/classes'))
+    .map(normalizeSchoolClass)
+    .sort((a, b) => asMoneyNumber(a.SortOrder) - asMoneyNumber(b.SortOrder));
+  return {
+    ok: true,
+    message: 'School classes loaded from Firestore.',
+    backend: 'firestore',
+    classes
+  };
+}
+
+async function saveSchoolClasses(env, body) {
+  const classes = Array.isArray(body.Classes || body.classes) ? (body.Classes || body.classes) : [];
+  if (!classes.length) {
+    const err = new Error('Classes list is required.');
+    err.status = 400;
+    throw err;
+  }
+  const updatedAt = nowIso();
+  const updatedBy = clean(body.UpdatedBy || body.updatedBy) || 'School Office';
+  let saved = 0;
+  const keepIds = new Set();
+  for (const item of classes) {
+    const className = clean(item.ClassName || item.className || item);
+    if (!className) continue;
+    const documentId = safeDocumentId(className);
+    const payload = {
+      ClassName: className,
+      Arms: clean(item.Arms || item.arms || item.ClassArms),
+      Active: yesNo(item.Active ?? item.active ?? 'YES') || 'YES',
+      SortOrder: asMoneyNumber(item.SortOrder || item.sortOrder || saved + 1),
+      UpdatedAt: updatedAt,
+      UpdatedBy: updatedBy
+    };
+    keepIds.add(documentId);
+    await upsertDocument(env, 'settings/academics/classes', documentId, payload);
+    saved += 1;
+  }
+  for (const existing of await listCollection(env, 'settings/academics/classes')) {
+    const existingId = clean(existing.__id || safeDocumentId(existing.ClassName || ''));
+    if (existingId && !keepIds.has(existingId)) {
+      await deleteDocument(env, 'settings/academics/classes', existingId);
+    }
+  }
+  return {
+    ok: true,
+    message: `School classes saved to Firestore (${saved}).`,
+    saved,
+    ...(await getSchoolClasses(env))
   };
 }
 
@@ -1146,18 +1208,6 @@ export async function getAdmissionClasses(env) {
     .filter((item) => yesNo(item.Active) === 'YES')
     .map((item) => item.ClassName)
     .filter(Boolean);
-  const openClassOptions = classes
-    .filter((item) => yesNo(item.Active) === 'YES')
-    .flatMap((item) => {
-      const arms = Array.isArray(item.Arms)
-        ? item.Arms
-        : clean(item.Arms).split(/[;,]/);
-      const cleanArms = arms.map((arm) => clean(arm)).filter(Boolean);
-      return cleanArms.length
-        ? cleanArms.map((arm) => `${item.ClassName} ${arm}`)
-        : [item.ClassName];
-    })
-    .filter(Boolean);
   const pricedClass = classes.find((item) => yesNo(item.Active) === 'YES' && asMoneyNumber(item.FormAmount) > 0) ||
     classes.find((item) => asMoneyNumber(item.FormAmount) > 0) ||
     {};
@@ -1166,7 +1216,7 @@ export async function getAdmissionClasses(env) {
     message: 'Admission classes loaded from Firestore.',
     backend: 'firestore',
     openClasses,
-    openClassOptions,
+    openClassOptions: openClasses,
     classes,
     formAmount: pricedClass.FormAmount || ''
   };
@@ -1183,20 +1233,28 @@ async function saveAdmissionClasses(env, body) {
   const updatedAt = nowIso();
   const updatedBy = clean(body.UpdatedBy || body.updatedBy) || 'Admissions Office';
   let saved = 0;
+  const keepIds = new Set();
   for (const item of classes) {
     const className = clean(item.ClassName || item.className || item);
     if (!className) continue;
+    const documentId = safeDocumentId(className);
     const payload = {
       ClassName: className,
-      Arms: clean(item.Arms || item.arms || item.ClassArms),
       FormAmount: asMoneyNumber(item.FormAmount || item.formAmount || formAmount),
       Active: yesNo(item.Active ?? item.active ?? 'NO') || 'NO',
       SortOrder: asMoneyNumber(item.SortOrder || item.sortOrder || saved + 1),
       UpdatedAt: updatedAt,
       UpdatedBy: updatedBy
     };
-    await upsertDocument(env, 'settings/admission/classes', safeDocumentId(className), payload);
+    keepIds.add(documentId);
+    await upsertDocument(env, 'settings/admission/classes', documentId, payload);
     saved += 1;
+  }
+  for (const existing of await listCollection(env, 'settings/admission/classes')) {
+    const existingId = clean(existing.__id || safeDocumentId(existing.ClassName || ''));
+    if (existingId && !keepIds.has(existingId)) {
+      await deleteDocument(env, 'settings/admission/classes', existingId);
+    }
   }
   return {
     ok: true,
@@ -1499,6 +1557,10 @@ async function routeAction(env, action, body = {}) {
       return getAdmissionClasses(env);
     case 'saveAdmissionClasses':
       return saveAdmissionClasses(env, body);
+    case 'getSchoolClasses':
+      return getSchoolClasses(env);
+    case 'saveSchoolClasses':
+      return saveSchoolClasses(env, body);
     case 'saveFeeItem':
       return saveFeeItem(env, body);
     case 'deleteFeeItem':

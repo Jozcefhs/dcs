@@ -30,16 +30,14 @@ export async function onRequestGet(context) {
     try {
       requireFirestoreEnv(env);
       const firestoreData = await getAdmissionClasses(env);
-      if ((firestoreData.openClasses || []).length || (firestoreData.classes || []).length) {
-        return Response.json({
-          ok: true,
-          classes: firestoreData.openClassOptions || firestoreData.openClasses || [],
-          openClasses: firestoreData.openClasses || [],
-          allClasses: firestoreData.classes || [],
-          formAmount: firestoreData.formAmount || '',
-          backend: 'firestore'
-        });
-      }
+      return Response.json({
+        ok: true,
+        classes: firestoreData.openClassOptions || firestoreData.openClasses || [],
+        openClasses: firestoreData.openClasses || [],
+        allClasses: firestoreData.classes || [],
+        formAmount: firestoreData.formAmount || '',
+        backend: 'firestore'
+      });
     } catch (_firestoreErr) {
       // Fall through to Apps Script or fallback classes.
     }
