@@ -100,6 +100,10 @@ if (!verified || !verified.email || !verified.code) {
   window.location.href = 'verify.html';
 } else {
   verifiedBox.textContent = `Verified purchase: ${verified.email}${verified.receiptNo ? ' | Receipt: ' + verified.receiptNo : ''}`;
+  const parentEmailInput = document.getElementById('parentEmail');
+  if (parentEmailInput && !parentEmailInput.value) {
+    parentEmailInput.value = verified.email || '';
+  }
   loadAdmissionClasses();
 }
 

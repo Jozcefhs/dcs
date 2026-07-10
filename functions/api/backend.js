@@ -1,4 +1,4 @@
-import { listCollection, requireFirestoreEnv, upsertDocument } from '../lib/firestore.js';
+import { deleteDocument, listCollection, requireFirestoreEnv, upsertDocument } from '../lib/firestore.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -235,6 +235,7 @@ function normalizeFeeItem(row) {
     AllowInstallment: yesNo(pick(row, ['allowInstallment', 'AllowInstallment'])),
     MinAmount: asMoneyNumber(pick(row, ['minAmount', 'MinAmount'])),
     MaxAmount: asMoneyNumber(pick(row, ['maxAmount', 'MaxAmount'])),
+    DueDate: toDisplayDate(pick(row, ['dueDate', 'DueDate', 'PaymentDueDate', 'paymentDueDate'])),
     RequiredForEnrollment: yesNo(pick(row, ['requiredForEnrollment', 'RequiredForEnrollment'])),
     Active: yesNo(pick(row, ['active', 'Active'])),
     SortOrder: asMoneyNumber(pick(row, ['sortOrder', 'SortOrder'], 100))
@@ -498,6 +499,7 @@ async function findStudentForApplication(env, app) {
 export async function getPayableFees(env, body = {}) {
   const email = lower(body.Email || body.email);
   const code = clean(body.VerificationCode || body.code).toUpperCase();
+  const requestedAccountRef = clean(body.AccountRef || body.accountRef || body.AdmissionNo || body.admissionNo);
   if (!email || !code) {
     const err = new Error('Email and verification code are required.');
     err.status = 400;
@@ -512,8 +514,22 @@ export async function getPayableFees(env, body = {}) {
     throw err;
   }
 
-  const accountRef = accountRefFromApplication(app);
-  const student = await findStudentForApplication(env, app);
+  let accountRef = accountRefFromApplication(app);
+  let student = requestedAccountRef ? await findStudentByAccountRef(env, requestedAccountRef) : null;
+  if (student) {
+    const parentEmailMatches = lower(student.ParentEmail || student.Email) === email;
+    const studentAppRef = clean(student.ApplicationReference);
+    const linkedApplication = studentAppRef ? applications.find((row) => sameText(row.ApplicationReference || row.ApplicationID || row.__id, studentAppRef)) : null;
+    const linkedEmailMatches = linkedApplication && [linkedApplication.VerificationEmail, linkedApplication.ParentEmail, linkedApplication.Email]
+      .some((value) => lower(value) === email);
+    if (!parentEmailMatches && !linkedEmailMatches) {
+      const err = new Error('The selected student is not linked to this parent email.');
+      err.status = 403;
+      throw err;
+    }
+  }
+  if (!student) student = await findStudentForApplication(env, app);
+  if (student) accountRef = student.AdmissionNo || student.AccountRef || student.ApplicationReference || accountRef;
   const billingApp = { ...app };
   if (student) {
     if (student.ClassAdmitted || student.ClassName) {
@@ -982,7 +998,7 @@ async function enrollStudent(env, body) {
     BillingCategory: pick(existing, ['BillingCategory'], 'Regular'),
     ParentName: pick(existing, ['FatherName', 'MotherName', 'GuardianName', 'ParentName']),
     ParentPhone: pick(existing, ['FatherPhone', 'MotherPhone', 'GuardianPhone', 'ParentPhone']),
-    ParentEmail: pick(existing, ['FatherEmail', 'MotherEmail', 'VerificationEmail', 'ParentEmail']),
+    ParentEmail: pick(existing, ['ParentEmail', 'VerificationEmail', 'FatherEmail', 'MotherEmail']),
     ResidentialAddress: pick(existing, ['ResidentialAddress']),
     CityArea: pick(existing, ['CityArea']),
     StateOfResidence: pick(existing, ['StateOfResidence']),
@@ -1178,6 +1194,53 @@ async function saveAdmissionClasses(env, body) {
     saved,
     ...(await getAdmissionClasses(env))
   };
+}
+
+async function saveFeeItem(env, body) {
+  const feeCode = clean(body.FeeCode || body.feeCode);
+  if (!feeCode) {
+    const err = new Error('FeeCode is required.');
+    err.status = 400;
+    throw err;
+  }
+  const existing = (await listCollection(env, 'feeItems')).find((row) => sameText(row.FeeCode, feeCode) || sameText(row.__id, safeDocumentId(feeCode))) || {};
+  const payload = {
+    ...existing,
+    FeeCode: feeCode,
+    FeeName: clean(body.FeeName || body.feeName),
+    FeeCategory: clean(body.FeeCategory || body.feeCategory) || 'School Fee',
+    ClassName: clean(body.ClassName || body.className) || 'All',
+    StudentType: clean(body.StudentType || body.studentType) || 'All',
+    BillingCategory: clean(body.BillingCategory || body.billingCategory) || 'All',
+    AcademicSession: clean(body.AcademicSession || body.academicSession) || 'All',
+    Term: clean(body.Term || body.term) || 'All',
+    Amount: asMoneyNumber(body.Amount || body.amount),
+    Currency: clean(body.Currency || body.currency) || 'NGN',
+    PayableOnline: yesNo(body.PayableOnline ?? body.payableOnline ?? 'YES') || 'YES',
+    AllowInstallment: yesNo(body.AllowInstallment ?? body.allowInstallment ?? 'NO') || 'NO',
+    MinAmount: asMoneyNumber(body.MinAmount || body.minAmount),
+    MaxAmount: asMoneyNumber(body.MaxAmount || body.maxAmount),
+    DueDate: clean(body.DueDate || body.dueDate || body.PaymentDueDate || body.paymentDueDate),
+    RequiredForEnrollment: yesNo(body.RequiredForEnrollment ?? body.requiredForEnrollment ?? 'NO') || 'NO',
+    Active: yesNo(body.Active ?? body.active ?? 'YES') || 'YES',
+    SortOrder: asMoneyNumber(body.SortOrder || body.sortOrder || 100),
+    Notes: clean(body.Notes || body.notes),
+    CreatedAt: existing.CreatedAt || nowIso(),
+    UpdatedAt: nowIso()
+  };
+  await upsertDocument(env, 'feeItems', safeDocumentId(feeCode), payload);
+  return { ok: true, message: 'Fee item saved to Firestore.', fee: normalizeFeeItem(payload) };
+}
+
+async function deleteFeeItem(env, body) {
+  const feeCode = clean(body.FeeCode || body.feeCode);
+  if (!feeCode) {
+    const err = new Error('FeeCode is required.');
+    err.status = 400;
+    throw err;
+  }
+  await deleteDocument(env, 'feeItems', safeDocumentId(feeCode));
+  return { ok: true, message: 'Fee item deleted from Firestore.' };
 }
 
 function ledgerDocumentId(prefix = 'LED') {
@@ -1426,6 +1489,10 @@ async function routeAction(env, action, body = {}) {
       return getAdmissionClasses(env);
     case 'saveAdmissionClasses':
       return saveAdmissionClasses(env, body);
+    case 'saveFeeItem':
+      return saveFeeItem(env, body);
+    case 'deleteFeeItem':
+      return deleteFeeItem(env, body);
     case 'getWalletCardAccount':
       return getWalletCardAccount(env, body);
     case 'saveWalletCard':

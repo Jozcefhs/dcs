@@ -88,6 +88,7 @@ export async function onRequestPost(context) {
     const email = String(body.email || '').trim().toLowerCase();
     const code = String(body.code || '').trim().toUpperCase();
     const feeCode = String(body.feeCode || '').trim();
+    const accountRef = String(body.accountRef || body.AccountRef || '').trim();
     const requestedAmount = Number(String(body.amount || '0').replace(/,/g, ''));
 
     if (!email || !code || !feeCode) {
@@ -101,7 +102,7 @@ export async function onRequestPost(context) {
     let feeData = null;
     try {
       requireFirestoreEnv(env);
-      feeData = await getPayableFees(env, { Email: email, VerificationCode: code });
+      feeData = await getPayableFees(env, { Email: email, VerificationCode: code, AccountRef: accountRef });
     } catch (firestoreErr) {
       if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
         return Response.json({ ok: false, message: firestoreErr.message || String(firestoreErr) }, { status: firestoreErr.status || 500 });
@@ -113,7 +114,8 @@ export async function onRequestPost(context) {
           Secret: env.GOOGLE_APPS_SCRIPT_SECRET,
           Action: 'getPayableFees',
           Email: email,
-          VerificationCode: code
+          VerificationCode: code,
+          AccountRef: accountRef
         })
       });
       feeData = await feeRes.json();

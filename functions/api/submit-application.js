@@ -49,6 +49,10 @@ async function submitToFirestore(env, email, code, receiptNo, application) {
   const applications = await listCollection(env, 'applications');
   const reference = nextApplicationReference(applications);
   const now = new Date().toISOString();
+  const parentEmail = lower(application.ParentEmail || application.parentEmail || email);
+  if (!parentEmail) {
+    return { ok: false, message: 'Parent Dashboard Email is required.' };
+  }
   const app = {
     ...application,
     ApplicationReference: reference,
@@ -58,6 +62,7 @@ async function submitToFirestore(env, email, code, receiptNo, application) {
     VerificationEmail: email,
     VerificationCode: code,
     Email: email,
+    ParentEmail: parentEmail,
     ReceiptNo: receiptNo || clean(sale.ReceiptNo),
     ClassApplyingFor: clean(application.ClassApplyingFor || sale.ClassApplyingFor),
     Status: 'Submitted',
@@ -90,9 +95,13 @@ export async function onRequestPost(context) {
 
     const email = String(verification.email || '').trim().toLowerCase();
     const code = String(verification.code || '').trim().toUpperCase();
+    application.ParentEmail = String(application.ParentEmail || '').trim().toLowerCase();
 
     if (!email || !code) {
       return Response.json({ ok: false, message: 'Verification information is missing. Please verify again.' }, { status: 400 });
+    }
+    if (!application.ParentEmail) {
+      return Response.json({ ok: false, message: 'Parent Dashboard Email is required.' }, { status: 400 });
     }
 
     try {

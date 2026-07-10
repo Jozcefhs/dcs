@@ -4,6 +4,9 @@ const dashboardContent = document.getElementById('dashboardContent');
 const childrenList = document.getElementById('childrenList');
 const walletSummary = document.getElementById('walletSummary');
 const walletLedger = document.getElementById('walletLedger');
+const dueNotifications = document.getElementById('dueNotifications');
+const payableItems = document.getElementById('payableItems');
+const paymentRecords = document.getElementById('paymentRecords');
 const clinicRecords = document.getElementById('clinicRecords');
 const restrictionForm = document.getElementById('restrictionForm');
 const walletStatus = document.getElementById('walletStatus');
@@ -86,6 +89,95 @@ function renderWallet(child) {
   });
 }
 
+function isYes(value) {
+  return ['yes', 'y', 'true', '1'].includes(String(value || '').trim().toLowerCase());
+}
+
+function renderDueNotifications(child) {
+  const records = dashboard.dueNotifications?.[child.AccountRef] || [];
+  dueNotifications.innerHTML = records.length ? '' : '<p class="muted">No payment due date notifications at the moment.</p>';
+  records.forEach((record) => {
+    const item = document.createElement('div');
+    item.className = 'activity-item';
+    item.innerHTML = `
+      <strong>${record.FeeName || record.FeeCode || 'Payment due'}</strong>
+      <span>${record.DueStatus || 'Due date set'} | ${record.DueDate || ''} | ${money(record.Amount)}</span>
+      <small>${[record.AcademicSession, record.Term].filter(Boolean).join(' | ')}</small>
+    `;
+    dueNotifications.appendChild(item);
+  });
+}
+
+function paymentAmountFor(fee) {
+  const amount = Number(String(fee.Amount || '0').replace(/,/g, ''));
+  if (!isYes(fee.AllowInstallment)) return amount;
+  const min = Number(String(fee.MinAmount || '0').replace(/,/g, ''));
+  const defaultAmount = Number.isFinite(min) && min > 0 ? min : amount;
+  const entered = window.prompt(`Enter amount to pay for ${fee.FeeName || fee.FeeCode}`, String(defaultAmount));
+  if (entered === null) return null;
+  const value = Number(String(entered || '0').replace(/,/g, ''));
+  if (!Number.isFinite(value) || value <= 0) {
+    setStatus('Enter a valid amount.', 'bad');
+    return null;
+  }
+  if (Number.isFinite(min) && min > 0 && value < min) {
+    setStatus(`Minimum amount is ${money(min)}.`, 'bad');
+    return null;
+  }
+  if (Number.isFinite(amount) && amount > 0 && value > amount) {
+    setStatus(`Maximum amount is ${money(amount)}.`, 'bad');
+    return null;
+  }
+  return value;
+}
+
+async function payItem(child, fee) {
+  const amount = paymentAmountFor(fee);
+  if (amount === null) return;
+  try {
+    setStatus('Starting secure checkout...', '');
+    const response = await fetch('/api/init-payment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...authPayload(),
+        accountRef: child.AccountRef,
+        feeCode: fee.FeeCode,
+        components: fee.Components || undefined,
+        amount: isYes(fee.AllowInstallment) ? amount : undefined
+      })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data.message || 'Could not initialize payment.');
+    }
+    window.location.href = data.authorizationUrl;
+  } catch (error) {
+    setStatus(error.message, 'bad');
+  }
+}
+
+function renderPayableItems(child) {
+  const records = dashboard.payableItems?.[child.AccountRef] || [];
+  payableItems.innerHTML = records.length ? '' : '<p class="muted">There are no online payment items due at the moment.</p>';
+  records.forEach((fee) => {
+    const item = document.createElement('div');
+    item.className = 'activity-item payment-action';
+    const period = [fee.AcademicSession, fee.Term].filter(Boolean).join(' | ');
+    item.innerHTML = `
+      <strong>${fee.FeeName || fee.FeeCode}</strong>
+      <span>${money(fee.Amount)}${period ? ' | ' + period : ''}${fee.DueDate ? ' | Due: ' + fee.DueDate : ''}</span>
+      <small>${fee.FeeCategory || ''}${isYes(fee.AllowInstallment) ? ' | Part payment allowed' : ''}</small>
+    `;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = 'Pay Now';
+    button.addEventListener('click', () => payItem(child, fee));
+    item.appendChild(button);
+    payableItems.appendChild(item);
+  });
+}
+
 function renderClinic(child) {
   const records = dashboard.clinicVisits?.[child.AccountRef] || [];
   clinicRecords.innerHTML = records.length ? '' : '<p class="muted">No clinic visits found.</p>';
@@ -101,6 +193,24 @@ function renderClinic(child) {
   });
 }
 
+function renderPayments(child) {
+  const records = dashboard.paymentRecords?.[child.AccountRef] || [];
+  paymentRecords.innerHTML = records.length ? '' : '<p class="muted">No payment records found.</p>';
+  records.slice(0, 40).forEach((record) => {
+    const isCredit = Number(record.Credit || record.Amount || 0) > 0 && Number(record.Debit || 0) === 0;
+    const amount = record.Amount || record.Credit || record.Debit || 0;
+    const period = [record.AcademicSession, record.Term].filter(Boolean).join(' | ');
+    const item = document.createElement('div');
+    item.className = 'activity-item';
+    item.innerHTML = `
+      <strong>${record.Description || record.FeeName || record.FeeCode || record.RecordType || 'Payment record'}</strong>
+      <span>${record.Date || ''}${period ? ' | ' + period : ''} | ${isCredit ? '+' : ''}${money(amount)}</span>
+      <small>${record.RecordType || ''}${record.Status ? ' | Status: ' + record.Status : ''}${record.Reference ? ' | Ref: ' + record.Reference : ''}</small>
+    `;
+    paymentRecords.appendChild(item);
+  });
+}
+
 function renderDashboard() {
   const children = dashboard?.children || [];
   if (!selectedAccountRef && children.length) {
@@ -109,7 +219,10 @@ function renderDashboard() {
   renderChildren();
   const child = selectedChild();
   if (!child) return;
+  renderDueNotifications(child);
+  renderPayableItems(child);
   renderWallet(child);
+  renderPayments(child);
   renderClinic(child);
 }
 

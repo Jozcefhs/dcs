@@ -193,6 +193,16 @@ export async function upsertDocument(env, collectionPath, documentId, data) {
   });
 }
 
+export async function deleteDocument(env, collectionPath, documentId) {
+  const cleanCollection = String(collectionPath || '').replace(/^\/+|\/+$/g, '');
+  const encodedId = encodeURIComponent(String(documentId || '').trim());
+  if (!cleanCollection) throw new Error('Collection path is required.');
+  if (!encodedId) throw new Error('Document ID is required.');
+  return firestoreRequest(env, `${cleanCollection}/${encodedId}`, {
+    method: 'DELETE'
+  });
+}
+
 function fromFirestoreValue(value) {
   if (!value || typeof value !== 'object') return '';
   if ('stringValue' in value) return value.stringValue;
