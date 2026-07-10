@@ -33,7 +33,8 @@ export async function onRequestGet(context) {
       if ((firestoreData.openClasses || []).length || (firestoreData.classes || []).length) {
         return Response.json({
           ok: true,
-          classes: firestoreData.openClasses || [],
+          classes: firestoreData.openClassOptions || firestoreData.openClasses || [],
+          openClasses: firestoreData.openClasses || [],
           allClasses: firestoreData.classes || [],
           formAmount: firestoreData.formAmount || '',
           backend: 'firestore'
@@ -65,7 +66,8 @@ export async function onRequestGet(context) {
 
     return Response.json({
       ok: true,
-      classes: data.openClasses || [],
+      classes: data.openClassOptions || data.openClasses || [],
+      openClasses: data.openClasses || [],
       allClasses: data.classes || [],
       formAmount: data.formAmount || ''
     });

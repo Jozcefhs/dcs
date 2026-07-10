@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Parent Dashboard</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <main class="page-wrap">
+    <section class="card dashboard-card">
+      <div class="form-header">
+        <img src="images/logo.png" alt="Destiny Christian Academy" class="logo small" onerror="this.style.display='none'">
+        <div>
+          <h1>Parent Dashboard</h1>
+          <p class="muted">Monitor wallet spending, clinic visits, and student activity.</p>
+        </div>
+      </div>
+
+      <form id="parentLoginForm" class="dashboard-login" autocomplete="on">
+        <div class="grid two">
+          <div>
+            <label for="parentEmail">Parent Email <span class="required">*</span></label>
+            <input id="parentEmail" type="email" required>
+          </div>
+          <div>
+            <label for="verificationCode">Verification Code <span class="required">*</span></label>
+            <input id="verificationCode" required>
+          </div>
+        </div>
+        <button type="submit" id="loadDashboardBtn">Open Dashboard</button>
+        <p id="parentStatus" class="status"></p>
+      </form>
+
+      <section id="dashboardContent" hidden>
+        <div id="childrenList" class="child-list"></div>
+
+        <div class="dashboard-grid">
+          <section class="panel">
+            <h2>Wallet Activity</h2>
+            <div id="walletSummary" class="metric-row"></div>
+            <div id="walletLedger" class="activity-list"></div>
+          </section>
+
+          <section class="panel">
+            <h2>Wallet Restrictions</h2>
+            <form id="restrictionForm">
+              <label for="walletStatus">Wallet Card Status</label>
+              <select id="walletStatus">
+                <option>Active</option>
+                <option>Blocked</option>
+              </select>
+
+              <label for="txnLimit">Maximum Per Purchase</label>
+              <input id="txnLimit" inputmode="decimal" placeholder="Example: 1000">
+
+              <label for="dailyLimit">Maximum Per Day</label>
+              <input id="dailyLimit" inputmode="decimal" placeholder="Example: 3000">
+
+              <label for="pinThreshold">Require PIN From</label>
+              <input id="pinThreshold" inputmode="decimal" placeholder="Example: 500">
+
+              <button type="submit" id="saveRestrictionBtn">Save Restriction</button>
+            </form>
+          </section>
+
+          <section class="panel full-panel">
+            <h2>Clinic Visits</h2>
+            <div id="clinicRecords" class="activity-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <p><a href="index.html">Return to admission portal</a></p>
+    </section>
+  </main>
+
+  <script src="js/parent-dashboard.js"></script>
+</body>
+</html>

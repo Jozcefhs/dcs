@@ -192,7 +192,10 @@ function normalizeStudent(row) {
     WalletTxnLimit: asMoneyNumber(pick(row, ['walletTxnLimit', 'WalletTxnLimit'])),
     WalletPinThreshold: asMoneyNumber(pick(row, ['walletPinThreshold', 'WalletPinThreshold'])),
     WalletUpdatedAt: toDisplayDate(pick(row, ['walletUpdatedAt', 'WalletUpdatedAt'])),
-    Status: pick(row, ['status', 'Status'], 'Active')
+    Status: pick(row, ['status', 'Status'], 'Active'),
+    StatusReason: pick(row, ['statusReason', 'StatusReason', 'WithdrawalReason', 'LeaveReason']),
+    StatusEffectiveDate: toDisplayDate(pick(row, ['statusEffectiveDate', 'StatusEffectiveDate'])),
+    ExpectedReturnDate: toDisplayDate(pick(row, ['expectedReturnDate', 'ExpectedReturnDate']))
   };
 }
 
@@ -920,6 +923,12 @@ async function promoteStudents(env, body) {
       failures.push(`Selected row ${index + 1}: student not found.`);
       continue;
     }
+    const currentStatus = normalizeMatchText(pick(student, ['Status'], 'Active'));
+    if (['withdrawn', 'expelled', 'graduated'].includes(currentStatus)) {
+      skipped += 1;
+      failures.push(`Selected row ${index + 1}: ${pick(student, ['DisplayName', 'ApplicantName', 'AdmissionNo']) || 'student'} is ${pick(student, ['Status'])} and was not moved.`);
+      continue;
+    }
     const oldClass = pick(student, ['ClassAdmitted', 'ClassName']);
     const line = `${nowIso()} | ${oldClass || 'Unspecified'} -> ${newClass} | ${session}${term ? ` | ${term}` : ''} | ${promotedBy}`;
     await saveStudent(env, {
@@ -1061,10 +1070,42 @@ export async function recordSale(env, body) {
   };
 }
 
+function normalizeFormSale(row) {
+  return {
+    ...row,
+    Time: pick(row, ['Time', 'Timestamp', 'CreatedAt']),
+    ReceiptNo: pick(row, ['ReceiptNo', 'receiptNo', '__id']),
+    ApplicantName: pick(row, ['ApplicantName', 'applicantName']),
+    Email: lower(pick(row, ['Email', 'email'])),
+    Phone: pick(row, ['Phone', 'phone']),
+    ClassApplyingFor: pick(row, ['ClassApplyingFor', 'classApplyingFor', 'ClassName']),
+    AmountPaid: pick(row, ['AmountPaid', 'amountPaid', 'Amount']),
+    FormLink: pick(row, ['FormLink', 'formLink']),
+    VerificationCode: clean(pick(row, ['VerificationCode', 'verificationCode'])).toUpperCase(),
+    PaymentDate: toDisplayDate(pick(row, ['PaymentDate', 'paymentDate'])),
+    ExpiryDate: toDisplayDate(pick(row, ['ExpiryDate', 'expiryDate'])),
+    Status: pick(row, ['Status', 'status'], 'PAID'),
+    Used: yesNo(pick(row, ['Used', 'used']))
+  };
+}
+
+async function getFormSales(env) {
+  const sales = (await listCollection(env, 'formSales'))
+    .map(normalizeFormSale)
+    .sort((a, b) => clean(b.Time || b.PaymentDate).localeCompare(clean(a.Time || a.PaymentDate)));
+  return {
+    ok: true,
+    message: 'Form purchases loaded from Firestore.',
+    backend: 'firestore',
+    sales
+  };
+}
+
 function normalizeAdmissionClass(row) {
   return {
     ...row,
     ClassName: pick(row, ['className', 'ClassName', '__id']),
+    Arms: pick(row, ['arms', 'Arms', 'ClassArms']),
     FormAmount: asMoneyNumber(pick(row, ['formAmount', 'FormAmount'])),
     Active: yesNo(pick(row, ['active', 'Active'])),
     SortOrder: asMoneyNumber(pick(row, ['sortOrder', 'SortOrder'], 100))
@@ -1079,6 +1120,18 @@ export async function getAdmissionClasses(env) {
     .filter((item) => yesNo(item.Active) === 'YES')
     .map((item) => item.ClassName)
     .filter(Boolean);
+  const openClassOptions = classes
+    .filter((item) => yesNo(item.Active) === 'YES')
+    .flatMap((item) => {
+      const arms = Array.isArray(item.Arms)
+        ? item.Arms
+        : clean(item.Arms).split(/[;,]/);
+      const cleanArms = arms.map((arm) => clean(arm)).filter(Boolean);
+      return cleanArms.length
+        ? cleanArms.map((arm) => `${item.ClassName} ${arm}`)
+        : [item.ClassName];
+    })
+    .filter(Boolean);
   const pricedClass = classes.find((item) => yesNo(item.Active) === 'YES' && asMoneyNumber(item.FormAmount) > 0) ||
     classes.find((item) => asMoneyNumber(item.FormAmount) > 0) ||
     {};
@@ -1087,6 +1140,7 @@ export async function getAdmissionClasses(env) {
     message: 'Admission classes loaded from Firestore.',
     backend: 'firestore',
     openClasses,
+    openClassOptions,
     classes,
     formAmount: pricedClass.FormAmount || ''
   };
@@ -1108,6 +1162,7 @@ async function saveAdmissionClasses(env, body) {
     if (!className) continue;
     const payload = {
       ClassName: className,
+      Arms: clean(item.Arms || item.arms || item.ClassArms),
       FormAmount: asMoneyNumber(item.FormAmount || item.formAmount || formAmount),
       Active: yesNo(item.Active ?? item.active ?? 'NO') || 'NO',
       SortOrder: asMoneyNumber(item.SortOrder || item.sortOrder || saved + 1),
@@ -1316,6 +1371,36 @@ async function updateStudentBillingCategory(env, body) {
   return { ok: true, message: 'Billing category updated.', student: saved };
 }
 
+async function updateStudentStatus(env, body) {
+  const accountRef = clean(body.AccountRef || body.accountRef || body.AdmissionNo || body.admissionNo);
+  const status = clean(body.Status || body.status);
+  const allowed = ['Active', 'On Leave', 'Suspended', 'Withdrawn', 'Expelled', 'Graduated'];
+  if (!accountRef) {
+    const err = new Error('Account/admission number is required.');
+    err.status = 400;
+    throw err;
+  }
+  const normalizedStatus = allowed.find((item) => item.toLowerCase() === status.toLowerCase());
+  if (!normalizedStatus) {
+    const err = new Error('Select a valid student status.');
+    err.status = 400;
+    throw err;
+  }
+  const student = await findStudentByAccountRef(env, accountRef);
+  if (!student) throw applicationNotFound(accountRef);
+  const saved = await saveStudent(env, {
+    ...student,
+    Status: normalizedStatus,
+    StatusReason: clean(body.StatusReason || body.statusReason || body.Reason || body.reason),
+    StatusEffectiveDate: clean(body.StatusEffectiveDate || body.statusEffectiveDate) || nowIso().slice(0, 10),
+    ExpectedReturnDate: clean(body.ExpectedReturnDate || body.expectedReturnDate),
+    StatusUpdatedBy: clean(body.UpdatedBy || body.updatedBy) || 'School Office',
+    StatusUpdatedAt: nowIso(),
+    UpdatedAt: nowIso()
+  });
+  return { ok: true, message: 'Student status updated.', student: saved };
+}
+
 async function routeAction(env, action, body = {}) {
   switch (action) {
     case 'ping':
@@ -1349,6 +1434,8 @@ async function routeAction(env, action, body = {}) {
       return recordWalletPurchase(env, body);
     case 'updateStudentBillingCategory':
       return updateStudentBillingCategory(env, body);
+    case 'updateStudentStatus':
+      return updateStudentStatus(env, body);
     case 'getAccountsOverview':
       return getAccountsOverview(env);
     case 'getPayableFees':
@@ -1393,6 +1480,8 @@ async function routeAction(env, action, body = {}) {
       return markApplicationFlag(env, body, 'AdmissionLetterSent', 'AdmissionLetterSentAt', 'Admission letter marked as sent.');
     case 'recordSale':
       return recordSale(env, body);
+    case 'getFormSales':
+      return getFormSales(env);
     default: {
       const err = new Error(`Firestore backend action is not implemented yet: ${action}`);
       err.status = 400;

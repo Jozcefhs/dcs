@@ -22,6 +22,16 @@ function normalizeClassName(value) {
   return String(value || '').trim().toLowerCase().replace(/\s*\/\s*/g, '/').replace(/\s+/g, ' ');
 }
 
+function classOptionsForItem(item) {
+  const className = String(item.ClassName || item.className || item || '').trim();
+  if (!className) return [];
+  const arms = Array.isArray(item.Arms || item.arms || item.ClassArms)
+    ? (item.Arms || item.arms || item.ClassArms)
+    : String(item.Arms || item.arms || item.ClassArms || '').split(/[;,]/);
+  const cleanArms = arms.map((arm) => String(arm || '').trim()).filter(Boolean);
+  return cleanArms.length ? cleanArms.map((arm) => `${className} ${arm}`) : [className];
+}
+
 async function getAdmissionClassSetup(env, className) {
   if (!className) return { open: false, amount: 0 };
   try {
@@ -29,7 +39,8 @@ async function getAdmissionClassSetup(env, className) {
     const data = await getAdmissionClasses(env);
     const wanted = normalizeClassName(className);
     const matched = (data.classes || []).find((item) => {
-      return normalizeClassName(item.ClassName || item.className || item) === wanted && String(item.Active || 'YES').toUpperCase() === 'YES';
+      return classOptionsForItem(item).some((option) => normalizeClassName(option) === wanted) &&
+        String(item.Active || 'YES').toUpperCase() === 'YES';
     });
     if (matched) {
       return {
@@ -60,7 +71,8 @@ async function getAdmissionClassSetup(env, className) {
   if (!data.ok) throw new Error(data.message || 'Could not confirm available classes.');
   const wanted = normalizeClassName(className);
   const matched = (data.classes || []).find((item) => {
-    return normalizeClassName(item.ClassName || item.className || item) === wanted && String(item.Active || 'YES').toUpperCase() === 'YES';
+    return classOptionsForItem(item).some((option) => normalizeClassName(option) === wanted) &&
+      String(item.Active || 'YES').toUpperCase() === 'YES';
   });
   if (!matched) return { open: false, amount: 0 };
   return {
