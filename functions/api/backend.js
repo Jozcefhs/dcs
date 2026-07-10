@@ -53,6 +53,12 @@ function sameText(a, b) {
   return clean(a).toLowerCase() === clean(b).toLowerCase();
 }
 
+async function sha256Hex(value) {
+  const bytes = new TextEncoder().encode(String(value || ''));
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 function applicationIdFrom(data) {
   return clean(data.ApplicationID || data.ApplicationReference || data.id || data.applicationReference);
 }
@@ -76,6 +82,26 @@ async function findStudent(env, admissionNo, applicationReference = '') {
   return rows.find((row) => {
     return (admissionNo && (sameText(row.__id, safeDocumentId(admissionNo)) || sameText(row.AdmissionNo, admissionNo) || sameText(row.admissionNo, admissionNo))) ||
       (applicationReference && (sameText(row.ApplicationReference, applicationReference) || sameText(row.applicationReference, applicationReference)));
+  }) || null;
+}
+
+async function findStudentByWalletCard(env, cardId) {
+  const wanted = clean(cardId).toUpperCase();
+  if (!wanted) return null;
+  const rows = await listCollection(env, 'students');
+  return rows.map(normalizeStudent).find((row) => clean(row.WalletCardId).toUpperCase() === wanted) || null;
+}
+
+async function findStudentByAccountRef(env, accountRef) {
+  const wanted = clean(accountRef);
+  if (!wanted) return null;
+  const rows = await listCollection(env, 'students');
+  return rows.map(normalizeStudent).find((row) => {
+    return referencesMatch(row.AdmissionNo, wanted) ||
+      referencesMatch(row.ApplicationReference, wanted) ||
+      sameText(row.AdmissionNo, wanted) ||
+      sameText(row.ApplicationReference, wanted) ||
+      sameText(row.AccountRef, wanted);
   }) || null;
 }
 
@@ -160,6 +186,12 @@ function normalizeStudent(row) {
     ParentPhone: pick(row, ['parentPhone', 'ParentPhone']),
     WalletCardId: pick(row, ['walletCardId', 'WalletCardId']),
     WalletCardStatus: pick(row, ['walletCardStatus', 'WalletCardStatus']),
+    WalletPinHash: pick(row, ['walletPinHash', 'WalletPinHash']),
+    WalletPinSetAt: toDisplayDate(pick(row, ['walletPinSetAt', 'WalletPinSetAt'])),
+    WalletDailyLimit: asMoneyNumber(pick(row, ['walletDailyLimit', 'WalletDailyLimit'])),
+    WalletTxnLimit: asMoneyNumber(pick(row, ['walletTxnLimit', 'WalletTxnLimit'])),
+    WalletPinThreshold: asMoneyNumber(pick(row, ['walletPinThreshold', 'WalletPinThreshold'])),
+    WalletUpdatedAt: toDisplayDate(pick(row, ['walletUpdatedAt', 'WalletUpdatedAt'])),
     Status: pick(row, ['status', 'Status'], 'Active')
   };
 }
@@ -237,6 +269,29 @@ function normalizePayment(row) {
     Reference: pick(row, ['reference', 'Reference']),
     Date: toDisplayDate(pick(row, ['paidAt', 'Date'])),
     RecordedBy: pick(row, ['recordedBy', 'RecordedBy'])
+  };
+}
+
+function normalizeLedger(row) {
+  return {
+    ...row,
+    LedgerNo: pick(row, ['ledgerNo', 'LedgerNo', 'LedgerId', 'LedgerID', '__id']),
+    Date: toDisplayDate(pick(row, ['date', 'Date', 'createdAt', 'CreatedAt'])),
+    AccountRef: pick(row, ['accountRef', 'AccountRef']),
+    ApplicationReference: pick(row, ['applicationReference', 'ApplicationReference']),
+    AdmissionNo: pick(row, ['admissionNo', 'AdmissionNo']),
+    DisplayName: pick(row, ['displayName', 'DisplayName']),
+    ClassName: pick(row, ['className', 'ClassName']),
+    EntryType: pick(row, ['entryType', 'EntryType']),
+    FeeCategory: pick(row, ['feeCategory', 'FeeCategory']),
+    Description: pick(row, ['description', 'Description']),
+    Debit: asMoneyNumber(pick(row, ['debit', 'Debit'])),
+    Credit: asMoneyNumber(pick(row, ['credit', 'Credit'])),
+    Currency: pick(row, ['currency', 'Currency'], 'NGN'),
+    Reference: pick(row, ['reference', 'Reference']),
+    RecordedBy: pick(row, ['recordedBy', 'RecordedBy']),
+    Source: pick(row, ['source', 'Source']),
+    Metadata: pick(row, ['metadata', 'Metadata'])
   };
 }
 
@@ -628,15 +683,18 @@ export async function getPayableFees(env, body = {}) {
 }
 
 async function getAccountsOverview(env) {
-  const [accounts, payments, invoices, feeItems] = await Promise.all([
+  const [accounts, payments, invoices, feeItems, storedLedger] = await Promise.all([
     listCollection(env, 'accounts'),
     listCollection(env, 'payments'),
     listCollection(env, 'invoices'),
-    listCollection(env, 'feeItems')
+    listCollection(env, 'feeItems'),
+    listCollection(env, 'ledger')
   ]);
   const normalizedPayments = payments.map(normalizePayment);
   const normalizedInvoices = invoices.map(normalizeInvoice);
+  const normalizedStoredLedger = storedLedger.map(normalizeLedger);
   const ledger = [
+    ...normalizedStoredLedger,
     ...normalizedInvoices.map((row) => ({
       AccountRef: row.AccountRef,
       Date: row.Date,
@@ -1067,6 +1125,197 @@ async function saveAdmissionClasses(env, body) {
   };
 }
 
+function ledgerDocumentId(prefix = 'LED') {
+  return `${prefix}-${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+}
+
+function sameDayIso(value, today = new Date()) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+  return date.getFullYear() === today.getFullYear() &&
+    date.getMonth() === today.getMonth() &&
+    date.getDate() === today.getDate();
+}
+
+async function walletBalanceForAccount(env, accountRef) {
+  const rows = (await listCollection(env, 'ledger')).map(normalizeLedger);
+  return rows.filter((row) => {
+    if (!sameText(row.AccountRef, accountRef) && !referencesMatch(row.AccountRef, accountRef)) return false;
+    return normalizeMatchText(row.FeeCategory) === 'wallet' || normalizeMatchText(row.EntryType).startsWith('wallet');
+  }).reduce((balance, row) => balance + asMoneyNumber(row.Credit) - asMoneyNumber(row.Debit), 0);
+}
+
+async function walletSpentTodayForAccount(env, accountRef) {
+  const rows = (await listCollection(env, 'ledger')).map(normalizeLedger);
+  return rows.filter((row) => {
+    if (!sameText(row.AccountRef, accountRef) && !referencesMatch(row.AccountRef, accountRef)) return false;
+    return normalizeMatchText(row.EntryType) === 'wallet purchase' && sameDayIso(row.Date || row.createdAt);
+  }).reduce((total, row) => total + asMoneyNumber(row.Debit), 0);
+}
+
+async function walletAccountPayload(env, student) {
+  const normalized = normalizeStudent(student || {});
+  const accountRef = normalized.AdmissionNo || normalized.ApplicationReference || normalized.AccountRef || '';
+  return {
+    AccountRef: accountRef,
+    ApplicationReference: normalized.ApplicationReference || '',
+    AdmissionNo: normalized.AdmissionNo || '',
+    DisplayName: normalized.DisplayName || normalized.ApplicantName || '',
+    ClassName: normalized.ClassName || normalized.ClassAdmitted || '',
+    StudentType: normalized.StudentType || '',
+    BillingCategory: normalized.BillingCategory || 'Regular',
+    WalletCardId: normalized.WalletCardId || '',
+    WalletCardStatus: normalized.WalletCardStatus || 'Active',
+    WalletDailyLimit: normalized.WalletDailyLimit || '',
+    WalletTxnLimit: normalized.WalletTxnLimit || '',
+    WalletPinThreshold: normalized.WalletPinThreshold || '',
+    WalletBalance: await walletBalanceForAccount(env, accountRef),
+    WalletSpentToday: await walletSpentTodayForAccount(env, accountRef)
+  };
+}
+
+async function getWalletCardAccount(env, body) {
+  const cardId = clean(body.WalletCardId || body.CardId || body.cardId).toUpperCase();
+  const accountRef = clean(body.AccountRef || body.accountRef || body.AdmissionNo || body.admissionNo);
+  const student = cardId ? await findStudentByWalletCard(env, cardId) : await findStudentByAccountRef(env, accountRef);
+  if (!student) {
+    const err = new Error('Student wallet card/account not found. Enroll the student first, then assign a wallet card.');
+    err.status = 404;
+    throw err;
+  }
+  return { ok: true, message: 'Wallet account loaded.', account: await walletAccountPayload(env, student) };
+}
+
+async function saveWalletCard(env, body) {
+  const accountRef = clean(body.AccountRef || body.accountRef || body.AdmissionNo || body.admissionNo);
+  const cardId = clean(body.WalletCardId || body.CardId || body.cardId).toUpperCase();
+  if (!accountRef) {
+    const err = new Error('Account/admission number is required.');
+    err.status = 400;
+    throw err;
+  }
+  if (!cardId) {
+    const err = new Error('Wallet card ID is required.');
+    err.status = 400;
+    throw err;
+  }
+  const student = await findStudentByAccountRef(env, accountRef);
+  if (!student) throw applicationNotFound(accountRef);
+  const duplicate = await findStudentByWalletCard(env, cardId);
+  if (duplicate && !sameText(duplicate.AdmissionNo, student.AdmissionNo)) {
+    const err = new Error('This wallet card is already assigned to another student.');
+    err.status = 400;
+    throw err;
+  }
+  const updates = {
+    ...student,
+    WalletCardId: cardId,
+    WalletCardStatus: clean(body.WalletCardStatus || body.CardStatus || 'Active') || 'Active',
+    WalletDailyLimit: body.WalletDailyLimit ?? student.WalletDailyLimit ?? '',
+    WalletTxnLimit: body.WalletTxnLimit ?? student.WalletTxnLimit ?? '',
+    WalletPinThreshold: body.WalletPinThreshold ?? student.WalletPinThreshold ?? '',
+    WalletUpdatedAt: nowIso()
+  };
+  const pin = clean(body.WalletPin || body.Pin);
+  if (pin) {
+    updates.WalletPinHash = await sha256Hex(`${clean(env.BACKEND_SHARED_SECRET || env.GOOGLE_APPS_SCRIPT_SECRET)}:${pin}`);
+    updates.WalletPinSetAt = nowIso();
+  }
+  const saved = await saveStudent(env, updates);
+  return { ok: true, message: 'Wallet card saved.', account: await walletAccountPayload(env, saved) };
+}
+
+async function recordWalletPurchase(env, body) {
+  const cardId = clean(body.WalletCardId || body.CardId || body.cardId).toUpperCase();
+  const accountRef = clean(body.AccountRef || body.accountRef || body.AdmissionNo || body.admissionNo);
+  const amount = asMoneyNumber(body.Amount || body.amount);
+  if (amount <= 0) {
+    const err = new Error('Enter a wallet purchase amount greater than zero.');
+    err.status = 400;
+    throw err;
+  }
+  const student = cardId ? await findStudentByWalletCard(env, cardId) : await findStudentByAccountRef(env, accountRef);
+  if (!student) {
+    const err = new Error('Student wallet card/account not found.');
+    err.status = 404;
+    throw err;
+  }
+  const account = await walletAccountPayload(env, student);
+  if (['blocked', 'inactive'].includes(normalizeMatchText(account.WalletCardStatus || 'Active'))) {
+    const err = new Error('This wallet card is blocked.');
+    err.status = 400;
+    throw err;
+  }
+  if (amount > asMoneyNumber(account.WalletBalance)) {
+    const err = new Error('Insufficient wallet balance.');
+    err.status = 400;
+    throw err;
+  }
+  const txnLimit = asMoneyNumber(account.WalletTxnLimit);
+  if (txnLimit > 0 && amount > txnLimit) {
+    const err = new Error('This purchase exceeds the wallet transaction limit.');
+    err.status = 400;
+    throw err;
+  }
+  const dailyLimit = asMoneyNumber(account.WalletDailyLimit);
+  if (dailyLimit > 0 && asMoneyNumber(account.WalletSpentToday) + amount > dailyLimit) {
+    const err = new Error('This purchase would exceed the daily wallet limit.');
+    err.status = 400;
+    throw err;
+  }
+  const pinThreshold = asMoneyNumber(account.WalletPinThreshold);
+  const savedPinHash = clean(student.WalletPinHash);
+  if (savedPinHash && pinThreshold > 0 && amount >= pinThreshold) {
+    const suppliedPin = clean(body.WalletPin || body.Pin);
+    const suppliedHash = await sha256Hex(`${clean(env.BACKEND_SHARED_SECRET || env.GOOGLE_APPS_SCRIPT_SECRET)}:${suppliedPin}`);
+    if (!suppliedPin || suppliedHash !== savedPinHash) {
+      const err = new Error('Invalid wallet PIN.');
+      err.status = 400;
+      throw err;
+    }
+  }
+  const ledgerNo = ledgerDocumentId('WALLET');
+  const entry = {
+    LedgerNo: ledgerNo,
+    Date: nowIso(),
+    AccountRef: account.AccountRef,
+    ApplicationReference: account.ApplicationReference,
+    AdmissionNo: account.AdmissionNo,
+    DisplayName: account.DisplayName,
+    ClassName: account.ClassName,
+    EntryType: 'Wallet Purchase',
+    FeeCategory: 'Wallet',
+    Description: clean(body.Description || body.description) || 'Wallet purchase',
+    Debit: amount,
+    Credit: 0,
+    Currency: 'NGN',
+    Reference: clean(body.Reference || body.reference) || ledgerNo,
+    RecordedBy: clean(body.RecordedBy || body.recordedBy) || 'Wallet POS',
+    Source: clean(body.Terminal || body.terminal) || 'Wallet POS',
+    Metadata: JSON.stringify({
+      walletCardId: cardId || account.WalletCardId,
+      department: clean(body.Department || body.department)
+    })
+  };
+  await upsertDocument(env, 'ledger', safeDocumentId(ledgerNo), entry);
+  return {
+    ok: true,
+    message: 'Wallet purchase recorded.',
+    ledger: entry,
+    balance: await walletBalanceForAccount(env, account.AccountRef),
+    account: await walletAccountPayload(env, student)
+  };
+}
+
+async function updateStudentBillingCategory(env, body) {
+  const accountRef = clean(body.AccountRef || body.accountRef || body.AdmissionNo || body.admissionNo);
+  const category = clean(body.BillingCategory || body.billingCategory) || 'Regular';
+  const student = await findStudentByAccountRef(env, accountRef);
+  if (!student) throw applicationNotFound(accountRef);
+  const saved = await saveStudent(env, { ...student, BillingCategory: category, UpdatedAt: nowIso() });
+  return { ok: true, message: 'Billing category updated.', student: saved };
+}
+
 async function routeAction(env, action, body = {}) {
   switch (action) {
     case 'ping':
@@ -1092,6 +1341,14 @@ async function routeAction(env, action, body = {}) {
       return getAdmissionClasses(env);
     case 'saveAdmissionClasses':
       return saveAdmissionClasses(env, body);
+    case 'getWalletCardAccount':
+      return getWalletCardAccount(env, body);
+    case 'saveWalletCard':
+      return saveWalletCard(env, body);
+    case 'recordWalletPurchase':
+      return recordWalletPurchase(env, body);
+    case 'updateStudentBillingCategory':
+      return updateStudentBillingCategory(env, body);
     case 'getAccountsOverview':
       return getAccountsOverview(env);
     case 'getPayableFees':
