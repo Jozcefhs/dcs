@@ -44,6 +44,15 @@ function makeReceiptNo(reference) {
   return `DCA/FORM/${year}/${suffix || Date.now().toString().slice(-6)}`;
 }
 
+function formatNairaAmount(value) {
+  const number = Number(String(value || '0').replace(/[₦\s,]/g, ''));
+  if (!Number.isFinite(number) || number <= 0) return String(value || '').trim();
+  return `₦${number.toLocaleString('en-NG', {
+    minimumFractionDigits: Number.isInteger(number) ? 0 : 2,
+    maximumFractionDigits: 2
+  })}`;
+}
+
 async function recordSaleInAppsScript(env, payload) {
   const response = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
     method: 'POST',
@@ -107,6 +116,7 @@ export async function onRequestPost(context) {
 
     const origin = new URL(request.url).origin;
     const amount = Number(tx.amount || 0) / 100;
+    const amountPaid = formatNairaAmount(amount);
     const expiryDays = Number(env.ADMISSION_FORM_EXPIRY_DAYS || 60);
     const receiptNo = makeReceiptNo(tx.reference || reference);
     const basePayload = {
@@ -115,7 +125,7 @@ export async function onRequestPost(context) {
       Email: (tx.customer && tx.customer.email) || meta.email || '',
       Phone: meta.phone || '',
       ClassApplyingFor: meta.classApplyingFor || '',
-      AmountPaid: amount,
+      AmountPaid: amountPaid,
       FormLink: `${origin}/verify.html`,
       PaymentDate: tx.paid_at || tx.paidAt || new Date().toISOString(),
       PaymentReference: tx.reference || reference,

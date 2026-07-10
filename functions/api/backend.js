@@ -13,6 +13,16 @@ function asMoneyNumber(value) {
   return Number.isFinite(number) ? number : 0;
 }
 
+function formatNairaAmount(value) {
+  const text = clean(value);
+  const number = Number(text.replace(/[₦\s,]/g, ''));
+  if (!Number.isFinite(number) || number <= 0) return text;
+  return `₦${number.toLocaleString('en-NG', {
+    minimumFractionDigits: Number.isInteger(number) ? 0 : 2,
+    maximumFractionDigits: 2
+  })}`;
+}
+
 function yesNo(value) {
   if (typeof value === 'boolean') return value ? 'YES' : 'NO';
   const text = lower(value);
@@ -1065,7 +1075,7 @@ export async function recordSale(env, body) {
     Email: email,
     Phone: clean(body.Phone),
     ClassApplyingFor: clean(body.ClassApplyingFor),
-    AmountPaid: clean(body.AmountPaid),
+    AmountPaid: formatNairaAmount(body.AmountPaid),
     FormLink: clean(body.FormLink),
     VerificationCode: code,
     PaymentDate: body.PaymentDate || nowIso().slice(0, 10),
