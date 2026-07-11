@@ -558,6 +558,21 @@ async function getAppsScriptAccountsOverview(env) {
   }
 }
 
+async function getAppsScriptApplications(env) {
+  if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) return [];
+  const url = new URL(env.GOOGLE_APPS_SCRIPT_URL);
+  url.searchParams.set('secret', env.GOOGLE_APPS_SCRIPT_SECRET);
+  url.searchParams.set('action', 'getApplications');
+  try {
+    const response = await fetch(url.toString());
+    const text = await response.text();
+    const data = JSON.parse(text);
+    return data && data.ok && Array.isArray(data.applications) ? data.applications : [];
+  } catch (_err) {
+    return [];
+  }
+}
+
 export async function getPayableFees(env, body = {}) {
   const email = lower(body.Email || body.email);
   const code = clean(body.VerificationCode || body.code).toUpperCase();
@@ -568,7 +583,11 @@ export async function getPayableFees(env, body = {}) {
     throw err;
   }
 
-  const applications = (await listCollection(env, 'applications')).map(normalizeApplication);
+  const [firestoreApplications, sheetApplications] = await Promise.all([
+    listCollection(env, 'applications').catch(() => []),
+    getAppsScriptApplications(env)
+  ]);
+  const applications = [...firestoreApplications, ...sheetApplications].map(normalizeApplication);
   const loginApp = applications.find((row) => lower(row.VerificationEmail || row.Email || row.ParentEmail) === email && clean(row.VerificationCode).toUpperCase() === code);
   if (!loginApp) {
     const err = new Error('Application not found for that email/code.');
