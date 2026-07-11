@@ -585,15 +585,21 @@ export async function getPayableFees(env, body = {}) {
     .filter((row) => yesNo(row.Active) === 'YES')
     .sort((a, b) => asMoneyNumber(a.SortOrder) - asMoneyNumber(b.SortOrder));
   const enrolledForBilling = Boolean(student) || yesNo(app.Enrolled) === 'YES' || normalizeMatchText(app.Status) === 'enrolled';
-  const admittedForPreEnrollment = normalizeMatchText(app.ResultStatus) === 'admitted' || normalizeMatchText(app.Status) === 'admitted';
+  const applicationStatus = normalizeMatchText(app.Status);
+  const resultStatus = normalizeMatchText(app.ResultStatus);
+  const admittedForPreEnrollment = resultStatus === 'admitted' || ['admitted', 'accepted', 'admission letter sent'].includes(applicationStatus);
   const matchedFees = applyBillingCategoryOverrides(allFees.filter((fee) => {
     const amount = asMoneyNumber(fee.Amount);
     const category = normalizeMatchText(fee.FeeCategory || '');
     const requiredForEnrollment = yesNo(fee.RequiredForEnrollment) === 'YES';
+    const isAcceptanceFee = clean(fee.FeeCode).toUpperCase() === 'ACCEPTANCE_FEE' || normalizeMatchText(fee.FeeName) === 'acceptance fee';
     if (!isWalletFee(fee) && amount <= 0) return false;
     if (yesNo(fee.PayableOnline || 'YES') !== 'YES') return false;
     if (!feeMatchesApplication(fee, billingApp)) return false;
-    if (clean(fee.FeeCode) === 'ACCEPTANCE_FEE' && yesNo(app.AcceptanceFeePaid) === 'YES') return false;
+    if (isAcceptanceFee) {
+      if (yesNo(app.AcceptanceFeePaid) === 'YES') return false;
+      return admittedForPreEnrollment;
+    }
     if (!enrolledForBilling) {
       if (!admittedForPreEnrollment) return false;
       return category === 'admission' || requiredForEnrollment;
