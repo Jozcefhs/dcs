@@ -384,6 +384,35 @@ function buildPayableItems(fees, breakdown) {
   return items;
 }
 
+function paymentGroupKey(entry) {
+  return [
+    clean(entry.Reference || entry.GatewayReference || entry.TransactionReference || entry.PaymentNo || ''),
+    clean(entry.Date || ''),
+    clean(entry.AccountRef || ''),
+    clean(entry.Method || entry.Gateway || entry.Source || '')
+  ].join('||');
+}
+
+function groupedLedgerPayments(entries) {
+  const groups = {};
+  (entries || []).forEach((entry) => {
+    const credit = asMoneyNumber(entry.Credit);
+    if (credit <= 0) return;
+    const key = paymentGroupKey(entry) || `${clean(entry.Date)}||${clean(entry.AccountRef)}||${clean(entry.RecordedBy)}`;
+    groups[key] = groups[key] || {
+      ...entry,
+      RecordType: 'Payment',
+      Description: lower(entry.FeeCategory) === 'school fee' || lower(entry.FeeName).includes('tuition') ? 'School Fees' : (entry.Description || entry.FeeName || entry.FeeCode || 'Payment'),
+      Amount: 0,
+      Credit: 0,
+      Status: entry.Status || 'Paid'
+    };
+    groups[key].Amount += credit;
+    groups[key].Credit += credit;
+  });
+  return Object.values(groups);
+}
+
 async function getAppsScriptAccountsOverview(env) {
   if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) return null;
   try {
@@ -459,13 +488,6 @@ async function getDashboard(env, body) {
     }).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
     child.WalletBalance = walletBalance(walletEntries);
     walletActivity[child.AccountRef] = walletEntries;
-    const invoiceEntries = invoices.filter((entry) => anyKeyMatches(entry.AccountRef, keys)).map((entry) => ({
-      ...entry,
-      RecordType: 'Invoice',
-      Amount: entry.Debit,
-      Description: entry.FeeName || entry.FeeCode || 'Fee invoice',
-      Status: entry.Status || (entry.Balance > 0 ? 'Outstanding' : 'Paid')
-    }));
     const paymentEntries = payments.filter((entry) => anyKeyMatches(entry.AccountRef, keys)).map((entry) => ({
       ...entry,
       RecordType: 'Payment',
@@ -473,17 +495,12 @@ async function getDashboard(env, body) {
       Credit: entry.Amount,
       Status: entry.Status || 'Paid'
     }));
-    const ledgerEntries = ledger.filter((entry) => {
+    const ledgerPaymentEntries = groupedLedgerPayments(ledger.filter((entry) => {
       return anyKeyMatches(entry.AccountRef, keys) &&
         lower(entry.FeeCategory) !== 'wallet';
-    }).map((entry) => ({
-      ...entry,
-      RecordType: entry.Credit > 0 ? 'Ledger Credit' : 'Ledger Debit',
-      Amount: entry.Debit || entry.Credit,
-      Description: entry.Description || entry.FeeName || entry.FeeCode || entry.EntryType || 'Ledger entry',
-      Status: entry.Status || (entry.Credit > 0 ? 'Paid' : (entry.Balance > 0 ? 'Outstanding' : 'Posted'))
     }));
-    paymentRecords[child.AccountRef] = [...invoiceEntries, ...paymentEntries, ...ledgerEntries]
+    const visiblePayments = paymentEntries.length ? paymentEntries : ledgerPaymentEntries;
+    paymentRecords[child.AccountRef] = visiblePayments
       .sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
     try {
       const payable = await getPayableFees(env, { Email: email, VerificationCode: code, AccountRef: child.AccountRef });

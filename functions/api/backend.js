@@ -115,6 +115,18 @@ async function findStudentByAccountRef(env, accountRef) {
   }) || null;
 }
 
+function findStudentByAccountRefInRows(rows, accountRef) {
+  const wanted = clean(accountRef);
+  if (!wanted) return null;
+  return (rows || []).map(normalizeStudent).find((row) => {
+    return referencesMatch(row.AdmissionNo, wanted) ||
+      referencesMatch(row.ApplicationReference, wanted) ||
+      sameText(row.AdmissionNo, wanted) ||
+      sameText(row.ApplicationReference, wanted) ||
+      sameText(row.AccountRef, wanted);
+  }) || null;
+}
+
 async function saveApplication(env, application) {
   const id = pick(application, ['ApplicationReference', 'ApplicationID', 'applicationReference', '__id']);
   if (!id) {
@@ -573,6 +585,44 @@ async function getAppsScriptApplications(env) {
   }
 }
 
+async function getAppsScriptStudents(env) {
+  if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) return [];
+  try {
+    const response = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        Secret: env.GOOGLE_APPS_SCRIPT_SECRET,
+        Action: 'getStudents'
+      })
+    });
+    const text = await response.text();
+    const data = JSON.parse(text);
+    return data && data.ok && Array.isArray(data.students) ? data.students : [];
+  } catch (_err) {
+    return [];
+  }
+}
+
+async function getAppsScriptFormSales(env) {
+  if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) return [];
+  try {
+    const response = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        Secret: env.GOOGLE_APPS_SCRIPT_SECRET,
+        Action: 'getFormSales'
+      })
+    });
+    const text = await response.text();
+    const data = JSON.parse(text);
+    return data && data.ok && Array.isArray(data.sales) ? data.sales : [];
+  } catch (_err) {
+    return [];
+  }
+}
+
 export async function getPayableFees(env, body = {}) {
   const email = lower(body.Email || body.email);
   const code = clean(body.VerificationCode || body.code).toUpperCase();
@@ -583,21 +633,31 @@ export async function getPayableFees(env, body = {}) {
     throw err;
   }
 
-  const [firestoreApplications, sheetApplications] = await Promise.all([
+  const [firestoreApplications, sheetApplications, firestoreStudents, sheetStudents, firestoreSales, sheetSales] = await Promise.all([
     listCollection(env, 'applications').catch(() => []),
-    getAppsScriptApplications(env)
+    getAppsScriptApplications(env),
+    listCollection(env, 'students').catch(() => []),
+    getAppsScriptStudents(env),
+    listCollection(env, 'formSales').catch(() => []),
+    getAppsScriptFormSales(env)
   ]);
   const applications = [...firestoreApplications, ...sheetApplications].map(normalizeApplication);
+  const students = [...firestoreStudents, ...sheetStudents].map(normalizeStudent);
+  const sales = [...firestoreSales, ...sheetSales];
   const loginApp = applications.find((row) => lower(row.VerificationEmail || row.Email || row.ParentEmail) === email && clean(row.VerificationCode).toUpperCase() === code);
-  if (!loginApp) {
+  const saleMatch = sales.some((row) => {
+    return lower(pick(row, ['Email', 'email'])) === email &&
+      clean(pick(row, ['VerificationCode', 'verificationCode'])).toUpperCase() === code;
+  });
+  if (!loginApp && !saleMatch) {
     const err = new Error('Application not found for that email/code.');
     err.status = 404;
     throw err;
   }
 
   let app = loginApp;
-  let accountRef = requestedAccountRef || accountRefFromApplication(loginApp);
-  let student = requestedAccountRef ? await findStudentByAccountRef(env, requestedAccountRef) : null;
+  let accountRef = requestedAccountRef || accountRefFromApplication(loginApp || {});
+  let student = requestedAccountRef ? findStudentByAccountRefInRows(students, requestedAccountRef) : null;
   let selectedApplication = null;
   if (requestedAccountRef) {
     selectedApplication = applications.find((row) => {
@@ -630,6 +690,30 @@ export async function getPayableFees(env, body = {}) {
       throw err;
     }
     app = selectedApplication;
+  }
+  if (!app && student) {
+    app = {
+      ApplicationReference: student.ApplicationReference || student.AdmissionNo || student.AccountRef,
+      ApplicationID: student.ApplicationReference || student.AdmissionNo || student.AccountRef,
+      ApplicantName: student.DisplayName || student.ApplicantName,
+      ClassApplyingFor: student.ClassAdmitted || student.ClassName,
+      ClassAdmitted: student.ClassAdmitted || student.ClassName,
+      StudentType: student.StudentType,
+      BillingCategory: student.BillingCategory || 'Regular',
+      AcademicSession: student.AcademicSession,
+      Term: student.Term,
+      AdmissionNo: student.AdmissionNo || student.AccountRef,
+      Status: student.Status || 'Active',
+      ResultStatus: student.Status || '',
+      ParentEmail: student.ParentEmail,
+      VerificationEmail: email,
+      VerificationCode: code
+    };
+  }
+  if (!app) {
+    const err = new Error('Selected child is not linked to an application or student account.');
+    err.status = 404;
+    throw err;
   }
   if (!student) student = await findStudentForApplication(env, app);
   if (student) accountRef = student.AdmissionNo || student.AccountRef || student.ApplicationReference || accountRef;
