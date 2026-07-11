@@ -1,5 +1,5 @@
-﻿{
+{
   "version": "3.0.0",
   "installer_url": "https://github.com/Jozcefhs/dcs/releases/download/v3.0.0/Integrated_School_Management_Suite_Setup_v3.0.0.exe",
-  "notes": "Major upgrade: renamed to Integrated School Management Suite, added Firestore backend migration and PC/SC NFC wallet card support."
+  "notes": "Integrated School Management Suite v3.0.0 with Firestore-ready backend support, parent dashboard improvements, finance modules, clinic/kitchen tools, class arms, and NFC wallet support."
 }
