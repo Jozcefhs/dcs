@@ -52,7 +52,7 @@ function renderChildren() {
     button.innerHTML = `
       <strong>${child.DisplayName || 'Student'}</strong>
       <span>${child.AccountRef || ''}</span>
-      <span>${child.ClassName || ''} ${child.StudentType ? '| ' + child.StudentType : ''}</span>
+      <span>${[child.ClassName, child.ClassArm, child.StudentType].filter(Boolean).join(' | ')}</span>
       <span>Status: ${child.Status || 'Active'}</span>
     `;
     button.addEventListener('click', () => {

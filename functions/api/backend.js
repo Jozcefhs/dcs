@@ -200,12 +200,15 @@ function normalizeStudent(row) {
     DisplayName: displayName,
     ClassAdmitted: pick(row, ['className', 'ClassName', 'classAdmitted', 'ClassAdmitted']),
     ClassName: pick(row, ['className', 'ClassName', 'classAdmitted', 'ClassAdmitted']),
+    ClassArm: pick(row, ['classArm', 'ClassArm', 'arm', 'Arm']),
     StudentType: pick(row, ['studentType', 'StudentType'], 'Day Student'),
     BillingCategory: pick(row, ['billingCategory', 'BillingCategory'], 'Regular'),
     AcademicSession: pick(row, ['academicSession', 'AcademicSession']),
     Term: pick(row, ['term', 'Term']),
     ParentEmail: lower(pick(row, ['parentEmail', 'ParentEmail'])),
     ParentPhone: pick(row, ['parentPhone', 'ParentPhone']),
+    VerificationCode: clean(pick(row, ['verificationCode', 'VerificationCode', 'parentLoginCode', 'ParentLoginCode', 'loginCode', 'LoginCode'])).toUpperCase(),
+    ParentLoginCode: clean(pick(row, ['parentLoginCode', 'ParentLoginCode', 'verificationCode', 'VerificationCode', 'loginCode', 'LoginCode'])).toUpperCase(),
     WalletCardId: pick(row, ['walletCardId', 'WalletCardId']),
     WalletCardStatus: pick(row, ['walletCardStatus', 'WalletCardStatus']),
     WalletPinHash: pick(row, ['walletPinHash', 'WalletPinHash']),
@@ -219,6 +222,10 @@ function normalizeStudent(row) {
     StatusEffectiveDate: toDisplayDate(pick(row, ['statusEffectiveDate', 'StatusEffectiveDate'])),
     ExpectedReturnDate: toDisplayDate(pick(row, ['expectedReturnDate', 'ExpectedReturnDate']))
   };
+}
+
+function studentLoginCode(row) {
+  return clean(pick(row, ['VerificationCode', 'verificationCode', 'ParentLoginCode', 'parentLoginCode', 'LoginCode', 'loginCode'])).toUpperCase();
 }
 
 function normalizeAccount(row) {
@@ -645,19 +652,20 @@ export async function getPayableFees(env, body = {}) {
   const students = [...firestoreStudents, ...sheetStudents].map(normalizeStudent);
   const sales = [...firestoreSales, ...sheetSales];
   const loginApp = applications.find((row) => lower(row.VerificationEmail || row.Email || row.ParentEmail) === email && clean(row.VerificationCode).toUpperCase() === code);
+  const loginStudent = students.find((row) => lower(row.ParentEmail || row.Email || row.VerificationEmail) === email && studentLoginCode(row) === code);
   const saleMatch = sales.some((row) => {
     return lower(pick(row, ['Email', 'email'])) === email &&
       clean(pick(row, ['VerificationCode', 'verificationCode'])).toUpperCase() === code;
   });
-  if (!loginApp && !saleMatch) {
+  if (!loginApp && !loginStudent && !saleMatch) {
     const err = new Error('Application not found for that email/code.');
     err.status = 404;
     throw err;
   }
 
   let app = loginApp;
-  let accountRef = requestedAccountRef || accountRefFromApplication(loginApp || {});
-  let student = requestedAccountRef ? findStudentByAccountRefInRows(students, requestedAccountRef) : null;
+  let accountRef = requestedAccountRef || accountRefFromApplication(loginApp || {}) || loginStudent?.AdmissionNo || loginStudent?.AccountRef || '';
+  let student = requestedAccountRef ? findStudentByAccountRefInRows(students, requestedAccountRef) : (loginStudent || null);
   let selectedApplication = null;
   if (requestedAccountRef) {
     selectedApplication = applications.find((row) => {
@@ -995,6 +1003,7 @@ async function updateApplicationStatus(env, body) {
   if (body.Notes !== undefined) updates.Notes = clean(body.Notes);
   if (body.AdmissionNo !== undefined) updates.AdmissionNo = clean(body.AdmissionNo);
   if (body.Term !== undefined) updates.Term = clean(body.Term);
+  if (body.ClassArm !== undefined || body.Arm !== undefined) updates.ClassArm = clean(body.ClassArm || body.Arm);
   [
     'AcceptanceFeePaid',
     'AcceptanceFeePaidAt',
@@ -1011,10 +1020,11 @@ async function updateApplicationStatus(env, body) {
 
   const admissionNo = updates.AdmissionNo || pick(existing, ['AdmissionNo']);
   const student = await findStudent(env, admissionNo, pick(existing, ['ApplicationReference', 'ApplicationID']));
-  if (student && (body.AdmissionNo !== undefined || body.Term !== undefined)) {
+  if (student && (body.AdmissionNo !== undefined || body.Term !== undefined || body.ClassArm !== undefined || body.Arm !== undefined)) {
     const studentUpdates = { ...student, UpdatedAt: now };
     if (body.AdmissionNo !== undefined) studentUpdates.AdmissionNo = clean(body.AdmissionNo);
     if (body.Term !== undefined) studentUpdates.Term = clean(body.Term);
+    if (body.ClassArm !== undefined || body.Arm !== undefined) studentUpdates.ClassArm = clean(body.ClassArm || body.Arm);
     await saveStudent(env, studentUpdates);
   }
   return { ok: true, message: 'Application status updated.', application: saved };

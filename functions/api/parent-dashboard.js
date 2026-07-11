@@ -81,6 +81,17 @@ function accountKeys(student) {
   ].map(clean).filter(Boolean);
 }
 
+function studentLoginCode(student) {
+  return clean(pick(student, [
+    'ParentLoginCode',
+    'parentLoginCode',
+    'VerificationCode',
+    'verificationCode',
+    'LoginCode',
+    'loginCode'
+  ])).toUpperCase();
+}
+
 async function firestoreRows(env, collection) {
   try {
     requireFirestoreEnv(env);
@@ -154,9 +165,11 @@ function normalizeStudent(row) {
     ApplicationReference: pick(row, ['ApplicationReference', 'applicationReference']),
     DisplayName: displayName,
     ClassName: pick(row, ['ClassName', 'className', 'ClassAdmitted', 'classAdmitted']),
+    ClassArm: pick(row, ['ClassArm', 'classArm', 'Arm', 'arm']),
     StudentType: pick(row, ['StudentType', 'studentType']),
-    ParentEmail: lower(pick(row, ['ParentEmail', 'parentEmail', 'Email', 'email', 'VerificationEmail'])),
+    ParentEmail: lower(pick(row, ['ParentEmail', 'parentEmail', 'Email', 'email', 'VerificationEmail', 'FatherEmail', 'MotherEmail', 'GuardianEmail'])),
     ParentPhone: pick(row, ['ParentPhone', 'parentPhone']),
+    VerificationCode: studentLoginCode(row),
     WalletCardStatus: pick(row, ['WalletCardStatus', 'walletCardStatus'], 'Active'),
     WalletDailyLimit: asMoneyNumber(pick(row, ['WalletDailyLimit', 'walletDailyLimit'])),
     WalletTxnLimit: asMoneyNumber(pick(row, ['WalletTxnLimit', 'walletTxnLimit'])),
@@ -225,6 +238,7 @@ function normalizeInvoice(row) {
     Debit: asMoneyNumber(pick(row, ['Debit', 'debit', 'Amount', 'amount'])),
     Credit: asMoneyNumber(pick(row, ['Credit', 'credit', 'PaidAmount', 'paidAmount'])),
     Balance: asMoneyNumber(pick(row, ['Balance', 'balance', 'BalanceAmount', 'balanceAmount'])),
+    DueDate: toDisplayDate(pick(row, ['DueDate', 'dueDate', 'PaymentDueDate', 'paymentDueDate'])),
     Status: pick(row, ['Status', 'status']),
     Reference: pick(row, ['InvoiceId', 'invoiceId', 'Reference', 'reference', '__id'])
   };
@@ -284,12 +298,15 @@ async function assertParentAccess(sources, email, code) {
     ].some((value) => lower(value) === wantedEmail) &&
       clean(pick(row, ['VerificationCode', 'verificationCode'])).toUpperCase() === wantedCode;
   });
-  if (!saleMatch && matchingApplications.length === 0) {
+  const studentMatch = (sources.students || []).map(normalizeStudent).some((row) => {
+    return lower(row.ParentEmail) === wantedEmail && studentLoginCode(row) === wantedCode;
+  });
+  if (!saleMatch && matchingApplications.length === 0 && !studentMatch) {
     const err = new Error('Invalid parent email or verification code.');
     err.status = 401;
     throw err;
   }
-  return { applications, matchingApplications };
+  return { applications, matchingApplications, studentMatch };
 }
 
 function parentOwnsStudent(student, email, applications, matchingApplications = []) {
@@ -445,6 +462,28 @@ function dueStatus(dueDate) {
   return `Due ${text}`;
 }
 
+function invoiceDueNotifications(invoices, keys) {
+  return (invoices || [])
+    .filter((invoice) => anyKeyMatches(invoice.AccountRef, keys))
+    .filter((invoice) => {
+      const status = lower(invoice.Status);
+      const balance = asMoneyNumber(invoice.Balance || invoice.Debit) - asMoneyNumber(invoice.Credit);
+      return clean(invoice.DueDate) && status !== 'paid' && balance > 0;
+    })
+    .map((invoice) => ({
+      FeeCode: invoice.FeeCode,
+      FeeName: invoice.FeeName || invoice.FeeCode || 'Payment due',
+      FeeCategory: invoice.FeeCategory,
+      Amount: invoice.Balance || invoice.Debit,
+      Currency: 'NGN',
+      AcademicSession: invoice.AcademicSession || '',
+      Term: invoice.Term || '',
+      DueDate: invoice.DueDate,
+      DueStatus: dueStatus(invoice.DueDate),
+      Source: 'Invoice'
+    }));
+}
+
 async function getDashboard(env, body) {
   const email = lower(body.email || body.ParentEmail || body.Email);
   const code = clean(body.code || body.VerificationCode).toUpperCase();
@@ -503,7 +542,7 @@ async function getDashboard(env, body) {
     paymentRecords[child.AccountRef] = visiblePayments
       .sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
     payableItems[child.AccountRef] = [];
-    dueNotifications[child.AccountRef] = [];
+    dueNotifications[child.AccountRef] = invoiceDueNotifications(invoices, keys);
     clinicVisits[child.AccountRef] = clinic.filter((record) => {
       return anyKeyMatches(record.AdmissionNo, keys);
     }).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
@@ -559,27 +598,30 @@ async function getChildPayable(env, body) {
     AccountRef: body.accountRef || body.AccountRef || body.AdmissionNo
   });
   const items = buildPayableItems(payable.fees || [], payable.schoolFeeBreakdown || []);
+  const sources = await loadParentSources(env);
+  const invoiceNotices = invoiceDueNotifications((sources.invoices || []).map(normalizeInvoice), [body.accountRef || body.AccountRef || body.AdmissionNo]);
+  const itemNotices = items
+    .filter((item) => clean(item.DueDate))
+    .map((item) => ({
+      FeeCode: item.FeeCode,
+      FeeName: item.FeeName,
+      FeeCategory: item.FeeCategory,
+      Amount: item.Amount,
+      Currency: item.Currency || 'NGN',
+      AcademicSession: item.AcademicSession || '',
+      Term: item.Term || '',
+      DueDate: item.DueDate,
+      DueStatus: dueStatus(item.DueDate),
+      AllowInstallment: item.AllowInstallment || '',
+      MinAmount: item.MinAmount || '',
+      MaxAmount: item.MaxAmount || ''
+    }));
   return {
     ok: true,
     message: 'Payable items loaded.',
     accountRef: clean(body.accountRef || body.AccountRef || body.AdmissionNo),
     payableItems: items,
-    dueNotifications: items
-      .filter((item) => clean(item.DueDate))
-      .map((item) => ({
-        FeeCode: item.FeeCode,
-        FeeName: item.FeeName,
-        FeeCategory: item.FeeCategory,
-        Amount: item.Amount,
-        Currency: item.Currency || 'NGN',
-        AcademicSession: item.AcademicSession || '',
-        Term: item.Term || '',
-        DueDate: item.DueDate,
-        DueStatus: dueStatus(item.DueDate),
-        AllowInstallment: item.AllowInstallment || '',
-        MinAmount: item.MinAmount || '',
-        MaxAmount: item.MaxAmount || ''
-      }))
+    dueNotifications: [...invoiceNotices, ...itemNotices]
   };
 }
 
