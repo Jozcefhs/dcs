@@ -103,10 +103,16 @@ export async function onRequestPost(context) {
     try {
       requireFirestoreEnv(env);
       feeData = await getPayableFees(env, { Email: email, VerificationCode: code, AccountRef: accountRef });
+      const hasPayableItems = (feeData.fees || []).length || (feeData.schoolFeeBreakdown || []).length;
+      if (!hasPayableItems && env.GOOGLE_APPS_SCRIPT_URL && env.GOOGLE_APPS_SCRIPT_SECRET) {
+        feeData = null;
+      }
     } catch (firestoreErr) {
       if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
         return Response.json({ ok: false, message: firestoreErr.message || String(firestoreErr) }, { status: firestoreErr.status || 500 });
       }
+    }
+    if (!feeData && env.GOOGLE_APPS_SCRIPT_URL && env.GOOGLE_APPS_SCRIPT_SECRET) {
       const feeRes = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

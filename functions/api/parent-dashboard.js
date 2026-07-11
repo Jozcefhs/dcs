@@ -296,6 +296,24 @@ function buildPayableItems(fees, breakdown) {
   return items;
 }
 
+async function getAppsScriptAccountsOverview(env) {
+  if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) return null;
+  try {
+    const response = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        Secret: env.GOOGLE_APPS_SCRIPT_SECRET,
+        Action: 'getAccountsOverview'
+      })
+    });
+    const text = await response.text();
+    return JSON.parse(text);
+  } catch (_err) {
+    return null;
+  }
+}
+
 function dueStatus(dueDate) {
   const text = clean(dueDate);
   if (!text) return '';
@@ -333,9 +351,22 @@ async function getDashboard(env, body) {
       children.push(child);
       accountKeys(child).forEach((key) => childRefs.add(lower(key)));
     });
-  const ledger = (await listCollection(env, 'ledger')).map(normalizeLedger);
-  const invoices = (await listCollection(env, 'invoices')).map(normalizeInvoice);
-  const payments = (await listCollection(env, 'payments')).map(normalizePayment);
+  const sheetFinance = await getAppsScriptAccountsOverview(env);
+  const sheetLedger = sheetFinance && sheetFinance.ok ? (sheetFinance.ledger || []).map(normalizeLedger) : [];
+  const sheetInvoices = sheetFinance && sheetFinance.ok ? (sheetFinance.invoices || []).map(normalizeInvoice) : [];
+  const sheetPayments = sheetFinance && sheetFinance.ok ? (sheetFinance.payments || []).map(normalizePayment) : [];
+  const ledger = [
+    ...(await listCollection(env, 'ledger')).map(normalizeLedger),
+    ...sheetLedger
+  ];
+  const invoices = [
+    ...(await listCollection(env, 'invoices')).map(normalizeInvoice),
+    ...sheetInvoices
+  ];
+  const payments = [
+    ...(await listCollection(env, 'payments')).map(normalizePayment),
+    ...sheetPayments
+  ];
   const clinic = (await listCollection(env, 'clinicRecords')).map(normalizeClinicRecord);
   const walletActivity = {};
   const paymentRecords = {};

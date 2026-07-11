@@ -506,6 +506,50 @@ async function findStudentForApplication(env, app) {
   return found || null;
 }
 
+async function getAppsScriptPayableFees(env, body = {}) {
+  if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) return null;
+  const response = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      Secret: env.GOOGLE_APPS_SCRIPT_SECRET,
+      Action: 'getPayableFees',
+      Email: body.Email || body.email,
+      VerificationCode: body.VerificationCode || body.code,
+      AccountRef: body.AccountRef || body.accountRef || body.AdmissionNo || body.admissionNo
+    })
+  });
+  const text = await response.text();
+  try {
+    const data = JSON.parse(text);
+    return data && data.ok ? { ...data, backend: 'apps-script' } : data;
+  } catch (_err) {
+    return {
+      ok: false,
+      message: 'Google Sheets fee lookup did not return JSON. Confirm the Apps Script deployment is current.'
+    };
+  }
+}
+
+async function getAppsScriptAccountsOverview(env) {
+  if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) return null;
+  const response = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      Secret: env.GOOGLE_APPS_SCRIPT_SECRET,
+      Action: 'getAccountsOverview'
+    })
+  });
+  const text = await response.text();
+  try {
+    const data = JSON.parse(text);
+    return data && data.ok ? data : null;
+  } catch (_err) {
+    return null;
+  }
+}
+
 export async function getPayableFees(env, body = {}) {
   const email = lower(body.Email || body.email);
   const code = clean(body.VerificationCode || body.code).toUpperCase();
@@ -576,11 +620,28 @@ export async function getPayableFees(env, body = {}) {
     });
   };
 
-  const [feeRows, paymentRows, invoiceRows] = await Promise.all([
+  let [feeRows, paymentRows, invoiceRows] = await Promise.all([
     listCollection(env, 'feeItems'),
     listCollection(env, 'payments'),
     listCollection(env, 'invoices')
   ]);
+  if (!feeRows.length) {
+    const sheetFinance = await getAppsScriptAccountsOverview(env);
+    if (sheetFinance) {
+      feeRows = sheetFinance.feeItems || [];
+      paymentRows = [
+        ...(paymentRows || []),
+        ...(sheetFinance.payments || [])
+      ];
+      invoiceRows = [
+        ...(invoiceRows || []),
+        ...(sheetFinance.invoices || [])
+      ];
+    } else {
+      const sheetData = await getAppsScriptPayableFees(env, body);
+      if (sheetData) return sheetData;
+    }
+  }
   const allFees = feeRows.map(normalizeFeeItem)
     .filter((row) => yesNo(row.Active) === 'YES')
     .sort((a, b) => asMoneyNumber(a.SortOrder) - asMoneyNumber(b.SortOrder));
