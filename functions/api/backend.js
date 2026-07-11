@@ -295,11 +295,17 @@ function normalizePayment(row) {
     PaymentId: pick(row, ['paymentId', 'PaymentId', '__id']),
     AccountRef: pick(row, ['accountRef', 'AccountRef']),
     FeeCode: pick(row, ['feeCode', 'FeeCode']),
+    FeeName: pick(row, ['feeName', 'FeeName']),
+    FeeCategory: pick(row, ['feeCategory', 'FeeCategory']),
     Amount: asMoneyNumber(pick(row, ['amount', 'Amount'])),
     Currency: pick(row, ['currency', 'Currency'], 'NGN'),
     Gateway: pick(row, ['gateway', 'Gateway']),
     Method: pick(row, ['method', 'Method']),
     Reference: pick(row, ['reference', 'Reference']),
+    AcademicSession: pick(row, ['academicSession', 'AcademicSession']),
+    Term: pick(row, ['term', 'Term']),
+    Status: pick(row, ['status', 'Status'], 'Paid'),
+    Metadata: pick(row, ['metadata', 'Metadata']),
     Date: toDisplayDate(pick(row, ['paidAt', 'Date'])),
     RecordedBy: pick(row, ['recordedBy', 'RecordedBy'])
   };
@@ -316,6 +322,8 @@ function normalizeLedger(row) {
     DisplayName: pick(row, ['displayName', 'DisplayName']),
     ClassName: pick(row, ['className', 'ClassName']),
     EntryType: pick(row, ['entryType', 'EntryType']),
+    FeeCode: pick(row, ['feeCode', 'FeeCode']),
+    FeeName: pick(row, ['feeName', 'FeeName']),
     FeeCategory: pick(row, ['feeCategory', 'FeeCategory']),
     Description: pick(row, ['description', 'Description']),
     Debit: asMoneyNumber(pick(row, ['debit', 'Debit'])),
@@ -1538,6 +1546,212 @@ async function deleteFeeItem(env, body) {
   return { ok: true, message: 'Fee item deleted from Firestore.' };
 }
 
+const DEFAULT_FEE_ITEMS = [
+  { FeeCode: 'ACCEPTANCE_FEE', FeeName: 'Acceptance Fee', FeeCategory: 'Admission', ClassName: 'All', StudentType: 'All', AcademicSession: 'All', Term: 'All', Amount: 0, Currency: 'NGN', PayableOnline: 'YES', AllowInstallment: 'NO', RequiredForEnrollment: 'YES', Active: 'YES', SortOrder: 1 },
+  { FeeCode: 'TUITION', FeeName: 'Tuition', FeeCategory: 'School Fee', ClassName: 'All', StudentType: 'All', AcademicSession: 'All', Term: 'All', Amount: 0, Currency: 'NGN', PayableOnline: 'YES', AllowInstallment: 'YES', RequiredForEnrollment: 'NO', Active: 'YES', SortOrder: 10 },
+  { FeeCode: 'BOARDING_FEE', FeeName: 'Boarding Fee', FeeCategory: 'School Fee', ClassName: 'All', StudentType: 'Boarding', AcademicSession: 'All', Term: 'All', Amount: 0, Currency: 'NGN', PayableOnline: 'YES', AllowInstallment: 'YES', RequiredForEnrollment: 'NO', Active: 'YES', SortOrder: 20 },
+  { FeeCode: 'FEEDING_FEE', FeeName: 'Feeding Fee', FeeCategory: 'School Fee', ClassName: 'All', StudentType: 'Boarding', AcademicSession: 'All', Term: 'All', Amount: 0, Currency: 'NGN', PayableOnline: 'YES', AllowInstallment: 'YES', RequiredForEnrollment: 'NO', Active: 'YES', SortOrder: 30 },
+  { FeeCode: 'BOOKS', FeeName: 'Books', FeeCategory: 'School Fee', ClassName: 'All', StudentType: 'All', AcademicSession: 'All', Term: 'All', Amount: 0, Currency: 'NGN', PayableOnline: 'YES', AllowInstallment: 'NO', RequiredForEnrollment: 'NO', Active: 'YES', SortOrder: 40 },
+  { FeeCode: 'TRANSPORT', FeeName: 'Transport', FeeCategory: 'Optional', ClassName: 'All', StudentType: 'Day', AcademicSession: 'All', Term: 'All', Amount: 0, Currency: 'NGN', PayableOnline: 'YES', AllowInstallment: 'NO', RequiredForEnrollment: 'NO', Active: 'YES', SortOrder: 50 },
+  { FeeCode: 'CLINIC_FEE', FeeName: 'Clinic / Medical Fee', FeeCategory: 'Clinic', ClassName: 'All', StudentType: 'All', AcademicSession: 'All', Term: 'All', Amount: 0, Currency: 'NGN', PayableOnline: 'YES', AllowInstallment: 'NO', RequiredForEnrollment: 'NO', Active: 'YES', SortOrder: 60 },
+  { FeeCode: 'KITCHEN_FEE', FeeName: 'Kitchen / Feeding Fee', FeeCategory: 'Kitchen', ClassName: 'All', StudentType: 'All', AcademicSession: 'All', Term: 'All', Amount: 0, Currency: 'NGN', PayableOnline: 'YES', AllowInstallment: 'YES', RequiredForEnrollment: 'NO', Active: 'YES', SortOrder: 70 },
+  { FeeCode: 'WALLET_TOPUP', FeeName: 'Student Wallet Top-up', FeeCategory: 'Wallet', ClassName: 'All', StudentType: 'All', AcademicSession: 'All', Term: 'All', Amount: 0, Currency: 'NGN', PayableOnline: 'YES', AllowInstallment: 'YES', MinAmount: 500, RequiredForEnrollment: 'NO', Active: 'YES', SortOrder: 900 }
+];
+
+async function seedDefaultFeeItems(env) {
+  const existing = (await listCollection(env, 'feeItems')).map(normalizeFeeItem);
+  const existingCodes = new Set(existing.map((item) => clean(item.FeeCode).toUpperCase()));
+  let added = 0;
+  for (const item of DEFAULT_FEE_ITEMS) {
+    if (existingCodes.has(clean(item.FeeCode).toUpperCase())) continue;
+    await upsertDocument(env, 'feeItems', safeDocumentId(item.FeeCode), {
+      ...item,
+      CreatedAt: nowIso(),
+      UpdatedAt: nowIso()
+    });
+    added += 1;
+  }
+  return { ok: true, message: added ? 'Default fee items created in Firestore.' : 'Default fee items already exist in Firestore.', added };
+}
+
+async function recordManualPayment(env, body) {
+  const accountRef = clean(body.AccountRef || body.accountRef || body.ApplicationReference);
+  const feeCode = clean(body.FeeCode || body.feeCode);
+  const amount = asMoneyNumber(body.Amount || body.amount);
+  const reference = clean(body.Reference || body.reference || ledgerDocumentId('PAY'));
+  if (!accountRef) {
+    const err = new Error('AccountRef is required.');
+    err.status = 400;
+    throw err;
+  }
+  if (!feeCode) {
+    const err = new Error('FeeCode is required.');
+    err.status = 400;
+    throw err;
+  }
+  if (amount <= 0) {
+    const err = new Error('Amount must be greater than zero.');
+    err.status = 400;
+    throw err;
+  }
+  const existingPayment = (await listCollection(env, 'payments')).find((row) => sameText(row.Reference, reference) || sameText(row.GatewayReference, reference));
+  if (existingPayment) return { ok: true, message: 'Payment was already recorded.', duplicate: true, payment: normalizePayment(existingPayment) };
+  const fee = (await listCollection(env, 'feeItems')).map(normalizeFeeItem).find((item) => sameText(item.FeeCode, feeCode)) || {};
+  const student = await findStudentByAccountRef(env, accountRef);
+  const paymentId = ledgerDocumentId('PAY');
+  const payment = {
+    PaymentId: paymentId,
+    AccountRef: accountRef,
+    ApplicationReference: clean(body.ApplicationReference || (student && student.ApplicationReference)),
+    AdmissionNo: clean(body.AdmissionNo || (student && student.AdmissionNo)),
+    DisplayName: clean(body.DisplayName || (student && (student.DisplayName || student.ApplicantName))),
+    ClassName: clean(body.ClassName || (student && student.ClassName)),
+    StudentType: clean(body.StudentType || (student && student.StudentType) || fee.StudentType),
+    BillingCategory: clean(body.BillingCategory || (student && student.BillingCategory) || fee.BillingCategory) || 'Regular',
+    AcademicSession: clean(body.AcademicSession || fee.AcademicSession),
+    Term: clean(body.Term || fee.Term),
+    FeeCode: feeCode,
+    FeeName: clean(body.FeeName || fee.FeeName || feeCode),
+    FeeCategory: clean(body.FeeCategory || fee.FeeCategory),
+    Amount: amount,
+    Currency: clean(body.Currency || fee.Currency) || 'NGN',
+    Method: clean(body.Method) || 'Manual',
+    Gateway: clean(body.Gateway) || 'Manual',
+    Reference: reference,
+    GatewayReference: clean(body.GatewayReference),
+    Status: 'Paid',
+    PaidAt: clean(body.PaidAt) || nowIso(),
+    RecordedAt: nowIso(),
+    RecordedBy: clean(body.RecordedBy) || 'Accounts Office',
+    Channel: clean(body.Channel),
+    ReceiptNo: clean(body.ReceiptNo) || paymentId,
+    Metadata: clean(body.Metadata)
+  };
+  await upsertDocument(env, 'payments', safeDocumentId(paymentId), payment);
+  const ledgerNo = ledgerDocumentId('LED');
+  await upsertDocument(env, 'ledger', safeDocumentId(ledgerNo), {
+    LedgerNo: ledgerNo,
+    Date: payment.PaidAt,
+    AccountRef: payment.AccountRef,
+    ApplicationReference: payment.ApplicationReference,
+    AdmissionNo: payment.AdmissionNo,
+    DisplayName: payment.DisplayName,
+    ClassName: payment.ClassName,
+    EntryType: normalizeMatchText(payment.FeeCategory) === 'wallet' || clean(payment.FeeCode) === 'WALLET_TOPUP' ? 'Wallet Deposit' : 'Payment',
+    FeeCode: payment.FeeCode,
+    FeeName: payment.FeeName,
+    FeeCategory: payment.FeeCategory,
+    Description: payment.FeeName,
+    Debit: 0,
+    Credit: amount,
+    Currency: payment.Currency,
+    Reference: reference,
+    RecordedBy: payment.RecordedBy,
+    Source: payment.Gateway || payment.Method,
+    Metadata: payment.Metadata
+  });
+  const matchingInvoices = (await listCollection(env, 'invoices')).map(normalizeInvoice).filter((invoice) => {
+    return sameText(invoice.AccountRef, accountRef) && sameText(invoice.FeeCode, feeCode) && normalizeMatchText(invoice.Status) !== 'paid';
+  });
+  if (matchingInvoices.length) {
+    const invoice = matchingInvoices[0];
+    await upsertDocument(env, 'invoices', safeDocumentId(invoice.InvoiceId), {
+      ...invoice,
+      Credit: Math.min(asMoneyNumber(invoice.Debit), asMoneyNumber(invoice.Credit) + amount),
+      Balance: Math.max(0, asMoneyNumber(invoice.Debit) - asMoneyNumber(invoice.Credit) - amount),
+      Status: asMoneyNumber(invoice.Debit) <= asMoneyNumber(invoice.Credit) + amount ? 'Paid' : 'Part Paid',
+      UpdatedAt: nowIso()
+    });
+  }
+  if (clean(payment.FeeCode).toUpperCase() === 'ACCEPTANCE_FEE') {
+    const appId = payment.ApplicationReference || payment.AccountRef;
+    const app = await findApplication(env, appId);
+    if (app) {
+      await saveApplication(env, {
+        ...app,
+        AcceptanceFeePaid: 'YES',
+        AcceptanceFeePaidAt: payment.PaidAt,
+        AcceptanceFeeAmount: amount,
+        AcceptanceFeeMethod: payment.Gateway || payment.Method,
+        AcceptanceFeeReceiptNo: payment.ReceiptNo || payment.Reference,
+        AcceptanceFeeReceivedBy: payment.RecordedBy,
+        UpdatedAt: nowIso()
+      });
+    }
+  }
+  return { ok: true, message: 'Payment recorded in Firestore.', payment };
+}
+
+async function generateSchoolFeeInvoices(env, body) {
+  const accountRef = clean(body.AccountRef || body.accountRef);
+  if (!accountRef) {
+    const err = new Error('AccountRef is required.');
+    err.status = 400;
+    throw err;
+  }
+  const student = await findStudentByAccountRef(env, accountRef);
+  if (!student) throw applicationNotFound(accountRef);
+  const billingApp = {
+    ...student,
+    ClassApplyingFor: student.ClassName,
+    ClassAdmitted: student.ClassName,
+    AcademicSession: student.AcademicSession,
+    Term: student.Term,
+    BillingCategory: student.BillingCategory || 'Regular'
+  };
+  const fees = applyBillingCategoryOverrides((await listCollection(env, 'feeItems')).map(normalizeFeeItem).filter((fee) => {
+    return yesNo(fee.Active) === 'YES' &&
+      normalizeMatchText(fee.FeeCategory || 'School Fee') === 'school fee' &&
+      !isWalletFee(fee) &&
+      asMoneyNumber(fee.Amount) > 0 &&
+      feeMatchesApplication(fee, billingApp);
+  }), billingApp);
+  if (!fees.length) {
+    const err = new Error('No matching school fee items found for this class/student type.');
+    err.status = 400;
+    throw err;
+  }
+  const existing = (await listCollection(env, 'invoices')).map(normalizeInvoice);
+  let created = 0;
+  for (const fee of fees) {
+    const duplicate = existing.some((invoice) => {
+      return sameText(invoice.AccountRef, accountRef) &&
+        sameText(invoice.FeeCode, fee.FeeCode) &&
+        feeFieldMatches(invoice.AcademicSession || 'All', fee.AcademicSession || 'All', true) &&
+        feeFieldMatches(invoice.Term || 'All', fee.Term || 'All', true);
+    });
+    if (duplicate) continue;
+    const invoiceId = ledgerDocumentId('INV');
+    await upsertDocument(env, 'invoices', safeDocumentId(invoiceId), {
+      InvoiceId: invoiceId,
+      AccountRef: accountRef,
+      ApplicationReference: student.ApplicationReference || '',
+      AdmissionNo: student.AdmissionNo || '',
+      DisplayName: student.DisplayName || student.ApplicantName || '',
+      ClassName: student.ClassName || '',
+      StudentType: student.StudentType || '',
+      BillingCategory: student.BillingCategory || 'Regular',
+      FeeCode: fee.FeeCode,
+      FeeName: fee.FeeName,
+      FeeCategory: fee.FeeCategory,
+      Amount: asMoneyNumber(fee.Amount),
+      Debit: asMoneyNumber(fee.Amount),
+      Credit: 0,
+      Balance: asMoneyNumber(fee.Amount),
+      Currency: fee.Currency || 'NGN',
+      AcademicSession: fee.AcademicSession || student.AcademicSession || '',
+      Term: fee.Term || student.Term || '',
+      DueDate: fee.DueDate || '',
+      Status: 'Unpaid',
+      Date: nowIso(),
+      CreatedAt: nowIso(),
+      RecordedBy: clean(body.RecordedBy) || 'Accounts Office'
+    });
+    created += 1;
+  }
+  return { ok: true, message: `${created} school fee invoice item(s) generated.`, created };
+}
+
 function ledgerDocumentId(prefix = 'LED') {
   return `${prefix}-${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
 }
@@ -1720,6 +1934,127 @@ async function recordWalletPurchase(env, body) {
   };
 }
 
+async function saveClinicRecord(env, body) {
+  const studentName = clean(body.StudentName || body.studentName);
+  const complaint = clean(body.Complaint || body.complaint);
+  if (!studentName) {
+    const err = new Error('Student name is required.');
+    err.status = 400;
+    throw err;
+  }
+  if (!complaint) {
+    const err = new Error('Complaint is required.');
+    err.status = 400;
+    throw err;
+  }
+  const recordId = clean(body.RecordId || body.RecordNo) || ledgerDocumentId('CLN');
+  const payload = {
+    RecordId: recordId,
+    RecordNo: recordId,
+    Date: clean(body.Date) || nowIso(),
+    StudentName: studentName,
+    AdmissionNo: clean(body.AdmissionNo),
+    ClassName: clean(body.ClassName),
+    Complaint: complaint,
+    Treatment: clean(body.Treatment),
+    Disposition: clean(body.Disposition),
+    RecordedBy: clean(body.RecordedBy) || 'Clinic',
+    ReviewedBy: clean(body.ReviewedBy),
+    Notes: clean(body.Notes),
+    UpdatedAt: nowIso()
+  };
+  await upsertDocument(env, 'clinicRecords', safeDocumentId(recordId), payload);
+  return { ok: true, message: 'Clinic record saved to Firestore.', record: payload };
+}
+
+async function saveInventoryItem(env, body, collection, defaults) {
+  const itemName = clean(body.ItemName || body.itemName);
+  const originalItemName = clean(body.OriginalItemName || body.originalItemName || itemName);
+  if (!itemName) {
+    const err = new Error('Item name is required.');
+    err.status = 400;
+    throw err;
+  }
+  const existingRows = await listCollection(env, collection);
+  const existing = existingRows.find((row) => sameText(row.ItemName, originalItemName) || sameText(row.__id, safeDocumentId(originalItemName)) || sameText(row.ItemName, itemName)) || {};
+  const originalId = safeDocumentId(originalItemName);
+  const nextId = safeDocumentId(itemName);
+  const payload = {
+    ...existing,
+    ItemName: itemName,
+    Category: clean(body.Category || body.category) || defaults.category,
+    Unit: clean(body.Unit || body.unit) || defaults.unit,
+    Quantity: asMoneyNumber(body.Quantity || body.quantity),
+    ReorderLevel: asMoneyNumber(body.ReorderLevel || body.reorderLevel),
+    LastUpdated: nowIso(),
+    Notes: clean(body.Notes || body.notes)
+  };
+  if (originalId && originalId !== nextId) {
+    await deleteDocument(env, collection, originalId);
+  }
+  await upsertDocument(env, collection, nextId, payload);
+  return { ok: true, message: `${defaults.label} inventory item saved to Firestore.`, item: normalizeInventory(payload) };
+}
+
+async function deleteInventoryItem(env, body, collection, label) {
+  const itemName = clean(body.ItemName || body.itemName);
+  if (!itemName) {
+    const err = new Error('Item name is required.');
+    err.status = 400;
+    throw err;
+  }
+  await deleteDocument(env, collection, safeDocumentId(itemName));
+  return { ok: true, message: `${label} inventory item deleted from Firestore.` };
+}
+
+async function recordStockMovement(env, body, collection, movementCollection, defaults) {
+  const itemName = clean(body.ItemName || body.itemName);
+  const movementType = clean(body.MovementType || body.movementType).toUpperCase();
+  const quantity = asMoneyNumber(body.Quantity || body.quantity);
+  if (!itemName) {
+    const err = new Error('Item name is required.');
+    err.status = 400;
+    throw err;
+  }
+  if (!['IN', 'OUT'].includes(movementType)) {
+    const err = new Error('MovementType must be IN or OUT.');
+    err.status = 400;
+    throw err;
+  }
+  if (quantity <= 0) {
+    const err = new Error('Quantity must be greater than zero.');
+    err.status = 400;
+    throw err;
+  }
+  const rows = await listCollection(env, collection);
+  const existing = rows.find((row) => sameText(row.ItemName, itemName) || sameText(row.__id, safeDocumentId(itemName)));
+  if (!existing) {
+    const err = new Error('Inventory item not found. Create the item first.');
+    err.status = 404;
+    throw err;
+  }
+  const current = asMoneyNumber(existing.Quantity);
+  const nextQty = movementType === 'IN' ? current + quantity : current - quantity;
+  const itemPayload = {
+    ...existing,
+    Quantity: nextQty,
+    LastUpdated: nowIso()
+  };
+  await upsertDocument(env, collection, safeDocumentId(existing.ItemName || itemName), itemPayload);
+  const movementNo = ledgerDocumentId(defaults.prefix);
+  const movement = {
+    MovementNo: movementNo,
+    Date: nowIso(),
+    ItemName: existing.ItemName || itemName,
+    MovementType: movementType,
+    Quantity: quantity,
+    Reason: clean(body.Reason),
+    RecordedBy: clean(body.RecordedBy) || defaults.actor
+  };
+  await upsertDocument(env, movementCollection, safeDocumentId(movementNo), movement);
+  return { ok: true, message: `${defaults.label} stock movement recorded in Firestore.`, movement, item: normalizeInventory(itemPayload) };
+}
+
 async function updateStudentBillingCategory(env, body) {
   const accountRef = clean(body.AccountRef || body.accountRef || body.AdmissionNo || body.admissionNo);
   const category = clean(body.BillingCategory || body.billingCategory) || 'Regular';
@@ -1792,6 +2127,12 @@ async function routeAction(env, action, body = {}) {
       return saveFeeItem(env, body);
     case 'deleteFeeItem':
       return deleteFeeItem(env, body);
+    case 'seedDefaultFeeItems':
+      return seedDefaultFeeItems(env);
+    case 'generateSchoolFeeInvoices':
+      return generateSchoolFeeInvoices(env, body);
+    case 'recordManualPayment':
+      return recordManualPayment(env, body);
     case 'getWalletCardAccount':
       return getWalletCardAccount(env, body);
     case 'saveWalletCard':
@@ -1812,18 +2153,32 @@ async function routeAction(env, action, body = {}) {
         message: 'Clinic records loaded from Firestore.',
         records: (await listCollection(env, 'clinicRecords')).map(normalizeClinicRecord)
       };
+    case 'saveClinicRecord':
+      return saveClinicRecord(env, body);
     case 'getClinicInventory':
       return {
         ok: true,
         message: 'Clinic inventory loaded from Firestore.',
         inventory: (await listCollection(env, 'clinicInventory')).map(normalizeInventory)
       };
+    case 'saveClinicInventoryItem':
+      return saveInventoryItem(env, body, 'clinicInventory', { label: 'Clinic', category: 'Medical Supply', unit: 'pcs' });
+    case 'deleteClinicInventoryItem':
+      return deleteInventoryItem(env, body, 'clinicInventory', 'Clinic');
+    case 'recordClinicStockMovement':
+      return recordStockMovement(env, body, 'clinicInventory', 'clinicMovements', { label: 'Clinic', prefix: 'MED', actor: 'Clinic' });
     case 'getKitchenInventory':
       return {
         ok: true,
         message: 'Kitchen inventory loaded from Firestore.',
         inventory: (await listCollection(env, 'kitchenInventory')).map(normalizeInventory)
       };
+    case 'saveKitchenInventoryItem':
+      return saveInventoryItem(env, body, 'kitchenInventory', { label: 'Kitchen', category: 'Foodstuff', unit: 'kg' });
+    case 'deleteKitchenInventoryItem':
+      return deleteInventoryItem(env, body, 'kitchenInventory', 'Kitchen');
+    case 'recordKitchenStockMovement':
+      return recordStockMovement(env, body, 'kitchenInventory', 'kitchenMovements', { label: 'Kitchen', prefix: 'KIT', actor: 'Kitchen' });
     case 'updateApplicationStatus':
       return updateApplicationStatus(env, body);
     case 'updateApplicantNotes':

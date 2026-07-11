@@ -117,7 +117,7 @@ export async function onRequestPost(context) {
     const origin = new URL(request.url).origin;
     const amount = Number(tx.amount || 0) / 100;
     const amountPaid = formatNairaAmount(amount);
-    const expiryDays = Number(env.ADMISSION_FORM_EXPIRY_DAYS || 60);
+    const expiryDays = Number(env.ADMISSION_FORM_EXPIRY_DAYS || 30);
     const receiptNo = makeReceiptNo(tx.reference || reference);
     const basePayload = {
       ReceiptNo: receiptNo,
@@ -129,7 +129,7 @@ export async function onRequestPost(context) {
       FormLink: `${origin}/verify.html`,
       PaymentDate: tx.paid_at || tx.paidAt || new Date().toISOString(),
       PaymentReference: tx.reference || reference,
-      ExpiryDate: formatDateOnly(addDays(new Date(), Number.isFinite(expiryDays) && expiryDays > 0 ? expiryDays : 60)),
+      ExpiryDate: formatDateOnly(addDays(new Date(), Number.isFinite(expiryDays) && expiryDays > 0 ? expiryDays : 30)),
       Status: 'PAID',
       Used: 'NO'
     };
