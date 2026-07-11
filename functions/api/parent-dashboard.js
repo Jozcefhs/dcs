@@ -78,6 +78,33 @@ function normalizeStudent(row) {
   };
 }
 
+function normalizeApplicationChild(row) {
+  const displayName = pick(row, ['ApplicantName', 'applicantName', 'DisplayName', 'displayName', 'Name', 'name']) ||
+    [pick(row, ['Surname', 'surname']), pick(row, ['FirstName', 'firstName']), pick(row, ['MiddleName', 'middleName'])]
+      .map(clean)
+      .filter(Boolean)
+      .join(' ');
+  const applicationRef = pick(row, ['ApplicationReference', 'applicationReference', 'ApplicationID', 'applicationId', '__id']);
+  return {
+    ...row,
+    AccountRef: applicationRef,
+    AdmissionNo: pick(row, ['AdmissionNo', 'admissionNo']),
+    ApplicationReference: applicationRef,
+    DisplayName: displayName,
+    ClassName: pick(row, ['ClassApplyingFor', 'classApplyingFor', 'ClassAdmitted', 'classAdmitted', 'ClassName', 'className']),
+    StudentType: pick(row, ['StudentType', 'studentType'], 'Day Student'),
+    ParentEmail: lower(pick(row, ['ParentEmail', 'parentEmail', 'VerificationEmail', 'verificationEmail', 'Email', 'email'])),
+    ParentPhone: pick(row, ['ParentPhone', 'parentPhone', 'Phone', 'phone']),
+    WalletCardStatus: 'Not Issued',
+    WalletDailyLimit: 0,
+    WalletTxnLimit: 0,
+    WalletPinThreshold: 0,
+    Status: pick(row, ['ResultStatus', 'resultStatus', 'Status', 'status'], 'Application'),
+    StatusReason: '',
+    SourceType: 'Application'
+  };
+}
+
 function normalizeLedger(row) {
   return {
     Date: toDisplayDate(pick(row, ['Date', 'date', 'CreatedAt', 'createdAt'])),
@@ -161,7 +188,7 @@ async function assertParentAccess(env, email, code) {
     return lower(pick(row, ['Email', 'email'])) === wantedEmail &&
       clean(pick(row, ['VerificationCode', 'verificationCode'])).toUpperCase() === wantedCode;
   });
-  const applicationMatch = applications.some((row) => {
+  const matchingApplications = applications.filter((row) => {
     return [
       pick(row, ['VerificationEmail', 'verificationEmail']),
       pick(row, ['ParentEmail', 'parentEmail']),
@@ -169,18 +196,21 @@ async function assertParentAccess(env, email, code) {
     ].some((value) => lower(value) === wantedEmail) &&
       clean(pick(row, ['VerificationCode', 'verificationCode'])).toUpperCase() === wantedCode;
   });
-  if (!saleMatch && !applicationMatch) {
+  if (!saleMatch && matchingApplications.length === 0) {
     const err = new Error('Invalid parent email or verification code.');
     err.status = 401;
     throw err;
   }
-  return { applications };
+  return { applications, matchingApplications };
 }
 
-function parentOwnsStudent(student, email, applications) {
+function parentOwnsStudent(student, email, applications, matchingApplications = []) {
   const wantedEmail = lower(email);
   if (lower(student.ParentEmail) === wantedEmail) return true;
   const appRef = pick(student, ['ApplicationReference', 'applicationReference']);
+  if (appRef && matchingApplications.some((app) => sameText(pick(app, ['ApplicationReference', 'applicationReference', '__id']), appRef))) {
+    return true;
+  }
   return applications.some((app) => {
     const sameRef = appRef && sameText(pick(app, ['ApplicationReference', 'applicationReference', '__id']), appRef);
     const emailMatch = [
@@ -283,9 +313,26 @@ function dueStatus(dueDate) {
 async function getDashboard(env, body) {
   const email = lower(body.email || body.ParentEmail || body.Email);
   const code = clean(body.code || body.VerificationCode).toUpperCase();
-  const { applications } = await assertParentAccess(env, email, code);
+  const { applications, matchingApplications } = await assertParentAccess(env, email, code);
   const allStudents = (await listCollection(env, 'students')).map(normalizeStudent);
-  const children = allStudents.filter((student) => parentOwnsStudent(student, email, applications));
+  const children = allStudents.filter((student) => parentOwnsStudent(student, email, applications, matchingApplications));
+  const childRefs = new Set(children.flatMap((child) => accountKeys(child).map((key) => lower(key))));
+  const parentApplications = applications.filter((app) => {
+    const emailMatch = [
+      pick(app, ['VerificationEmail', 'verificationEmail']),
+      pick(app, ['ParentEmail', 'parentEmail']),
+      pick(app, ['Email', 'email'])
+    ].some((value) => lower(value) === email);
+    const codeMatch = clean(pick(app, ['VerificationCode', 'verificationCode'])).toUpperCase() === code;
+    return emailMatch || codeMatch;
+  });
+  parentApplications
+    .map(normalizeApplicationChild)
+    .filter((child) => child.AccountRef && !childRefs.has(lower(child.AccountRef)))
+    .forEach((child) => {
+      children.push(child);
+      accountKeys(child).forEach((key) => childRefs.add(lower(key)));
+    });
   const ledger = (await listCollection(env, 'ledger')).map(normalizeLedger);
   const invoices = (await listCollection(env, 'invoices')).map(normalizeInvoice);
   const payments = (await listCollection(env, 'payments')).map(normalizePayment);
@@ -293,6 +340,7 @@ async function getDashboard(env, body) {
   const walletActivity = {};
   const paymentRecords = {};
   const payableItems = {};
+  const payableErrors = {};
   const dueNotifications = {};
   const clinicVisits = {};
 
@@ -350,8 +398,9 @@ async function getDashboard(env, body) {
           MinAmount: item.MinAmount || '',
           MaxAmount: item.MaxAmount || ''
         }));
-    } catch (_err) {
+    } catch (err) {
       payableItems[child.AccountRef] = [];
+      payableErrors[child.AccountRef] = String(err && err.message ? err.message : err);
       dueNotifications[child.AccountRef] = [];
     }
     clinicVisits[child.AccountRef] = clinic.filter((record) => {
@@ -366,6 +415,7 @@ async function getDashboard(env, body) {
     walletActivity,
     paymentRecords,
     payableItems,
+    payableErrors,
     dueNotifications,
     clinicVisits
   };

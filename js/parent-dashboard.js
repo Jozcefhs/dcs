@@ -159,7 +159,8 @@ async function payItem(child, fee) {
 
 function renderPayableItems(child) {
   const records = dashboard.payableItems?.[child.AccountRef] || [];
-  payableItems.innerHTML = records.length ? '' : '<p class="muted">There are no online payment items due at the moment.</p>';
+  const payableError = dashboard.payableErrors?.[child.AccountRef] || '';
+  payableItems.innerHTML = records.length ? '' : `<p class="${payableError ? 'status bad' : 'muted'}">${payableError || 'There are no online payment items due at the moment.'}</p>`;
   records.forEach((fee) => {
     const item = document.createElement('div');
     item.className = 'activity-item payment-action';
