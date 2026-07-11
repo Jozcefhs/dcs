@@ -81,6 +81,70 @@ function accountKeys(student) {
   ].map(clean).filter(Boolean);
 }
 
+async function firestoreRows(env, collection) {
+  try {
+    requireFirestoreEnv(env);
+    return await listCollection(env, collection);
+  } catch (_err) {
+    return [];
+  }
+}
+
+async function appsScriptAction(env, action, payload = {}) {
+  if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) return null;
+  try {
+    if (action === 'getApplications') {
+      const url = new URL(env.GOOGLE_APPS_SCRIPT_URL);
+      url.searchParams.set('secret', env.GOOGLE_APPS_SCRIPT_SECRET);
+      url.searchParams.set('action', action);
+      const response = await fetch(url.toString());
+      const text = await response.text();
+      return JSON.parse(text);
+    }
+    const response = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        Secret: env.GOOGLE_APPS_SCRIPT_SECRET,
+        Action: action,
+        ...payload
+      })
+    });
+    const text = await response.text();
+    return JSON.parse(text);
+  } catch (_err) {
+    return null;
+  }
+}
+
+async function loadParentSources(env) {
+  const [firestoreSales, firestoreApplications, firestoreStudents, firestoreLedger, firestoreInvoices, firestorePayments, firestoreClinic] = await Promise.all([
+    firestoreRows(env, 'formSales'),
+    firestoreRows(env, 'applications'),
+    firestoreRows(env, 'students'),
+    firestoreRows(env, 'ledger'),
+    firestoreRows(env, 'invoices'),
+    firestoreRows(env, 'payments'),
+    firestoreRows(env, 'clinicRecords')
+  ]);
+  const [sheetSales, sheetApplications, sheetStudents, sheetFinance, sheetClinic] = await Promise.all([
+    appsScriptAction(env, 'getFormSales'),
+    appsScriptAction(env, 'getApplications'),
+    appsScriptAction(env, 'getStudents'),
+    appsScriptAction(env, 'getAccountsOverview'),
+    appsScriptAction(env, 'getClinicRecords')
+  ]);
+  return {
+    sales: [...firestoreSales, ...((sheetSales && sheetSales.ok && sheetSales.sales) || [])],
+    applications: [...firestoreApplications, ...((sheetApplications && sheetApplications.ok && sheetApplications.applications) || [])],
+    students: [...firestoreStudents, ...((sheetStudents && sheetStudents.ok && sheetStudents.students) || [])],
+    ledger: [...firestoreLedger, ...((sheetFinance && sheetFinance.ok && sheetFinance.ledger) || [])],
+    invoices: [...firestoreInvoices, ...((sheetFinance && sheetFinance.ok && sheetFinance.invoices) || [])],
+    payments: [...firestorePayments, ...((sheetFinance && sheetFinance.ok && sheetFinance.payments) || [])],
+    clinic: [...firestoreClinic, ...((sheetClinic && sheetClinic.ok && sheetClinic.records) || [])]
+  };
+}
+
 function normalizeStudent(row) {
   const displayName = pick(row, ['DisplayName', 'displayName', 'ApplicantName', 'applicantName']);
   return {
@@ -197,7 +261,7 @@ function normalizeClinicRecord(row) {
   };
 }
 
-async function assertParentAccess(env, email, code) {
+async function assertParentAccess(sources, email, code) {
   const wantedEmail = lower(email);
   const wantedCode = clean(code).toUpperCase();
   if (!wantedEmail || !wantedCode) {
@@ -206,8 +270,8 @@ async function assertParentAccess(env, email, code) {
     throw err;
   }
 
-  const sales = await listCollection(env, 'formSales');
-  const applications = await listCollection(env, 'applications');
+  const sales = sources.sales || [];
+  const applications = sources.applications || [];
   const saleMatch = sales.some((row) => {
     return lower(pick(row, ['Email', 'email'])) === wantedEmail &&
       clean(pick(row, ['VerificationCode', 'verificationCode'])).toUpperCase() === wantedCode;
@@ -355,8 +419,9 @@ function dueStatus(dueDate) {
 async function getDashboard(env, body) {
   const email = lower(body.email || body.ParentEmail || body.Email);
   const code = clean(body.code || body.VerificationCode).toUpperCase();
-  const { applications, matchingApplications } = await assertParentAccess(env, email, code);
-  const allStudents = (await listCollection(env, 'students')).map(normalizeStudent);
+  const sources = await loadParentSources(env);
+  const { applications, matchingApplications } = await assertParentAccess(sources, email, code);
+  const allStudents = (sources.students || []).map(normalizeStudent);
   const children = allStudents.filter((student) => parentOwnsStudent(student, email, applications, matchingApplications));
   const childRefs = new Set(children.flatMap((child) => accountKeys(child).map((key) => lower(key))));
   const parentApplications = applications.filter((app) => {
@@ -375,23 +440,10 @@ async function getDashboard(env, body) {
       children.push(child);
       accountKeys(child).forEach((key) => childRefs.add(lower(key)));
     });
-  const sheetFinance = await getAppsScriptAccountsOverview(env);
-  const sheetLedger = sheetFinance && sheetFinance.ok ? (sheetFinance.ledger || []).map(normalizeLedger) : [];
-  const sheetInvoices = sheetFinance && sheetFinance.ok ? (sheetFinance.invoices || []).map(normalizeInvoice) : [];
-  const sheetPayments = sheetFinance && sheetFinance.ok ? (sheetFinance.payments || []).map(normalizePayment) : [];
-  const ledger = [
-    ...(await listCollection(env, 'ledger')).map(normalizeLedger),
-    ...sheetLedger
-  ];
-  const invoices = [
-    ...(await listCollection(env, 'invoices')).map(normalizeInvoice),
-    ...sheetInvoices
-  ];
-  const payments = [
-    ...(await listCollection(env, 'payments')).map(normalizePayment),
-    ...sheetPayments
-  ];
-  const clinic = (await listCollection(env, 'clinicRecords')).map(normalizeClinicRecord);
+  const ledger = (sources.ledger || []).map(normalizeLedger);
+  const invoices = (sources.invoices || []).map(normalizeInvoice);
+  const payments = (sources.payments || []).map(normalizePayment);
+  const clinic = (sources.clinic || []).map(normalizeClinicRecord);
   const walletActivity = {};
   const paymentRecords = {};
   const payableItems = {};
@@ -478,7 +530,9 @@ async function getDashboard(env, body) {
 
 async function updateWalletRestrictions(env, body) {
   const email = lower(body.email || body.ParentEmail || body.Email);
-  const { applications } = await assertParentAccess(env, email, body.code || body.VerificationCode);
+  requireFirestoreEnv(env);
+  const sources = await loadParentSources(env);
+  const { applications } = await assertParentAccess(sources, email, body.code || body.VerificationCode);
   const students = (await listCollection(env, 'students')).map(normalizeStudent);
   const accountRef = clean(body.accountRef || body.AccountRef || body.AdmissionNo);
   const student = students.find((row) => {
@@ -507,7 +561,6 @@ async function updateWalletRestrictions(env, body) {
 export async function onRequestPost(context) {
   try {
     const { request, env } = context;
-    requireFirestoreEnv(env);
     const body = await request.json().catch(() => ({}));
     const action = clean(body.action || body.Action || 'getDashboard');
     const data = action === 'updateWalletRestrictions'
