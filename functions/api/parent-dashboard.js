@@ -402,7 +402,7 @@ function groupedLedgerPayments(entries) {
     groups[key] = groups[key] || {
       ...entry,
       RecordType: 'Payment',
-      Description: lower(entry.FeeCategory) === 'school fee' || lower(entry.FeeName).includes('tuition') ? 'School Fees' : (entry.Description || entry.FeeName || entry.FeeCode || 'Payment'),
+      Description: entry.FeeCategory || entry.Department || entry.Description || entry.FeeName || entry.FeeCode || 'Payment',
       Amount: 0,
       Credit: 0,
       Status: entry.Status || 'Paid'
@@ -491,7 +491,7 @@ async function getDashboard(env, body) {
     const paymentEntries = payments.filter((entry) => anyKeyMatches(entry.AccountRef, keys)).map((entry) => ({
       ...entry,
       RecordType: 'Payment',
-      Description: entry.FeeName || entry.FeeCode || 'Payment',
+      Description: entry.FeeCategory || entry.Department || entry.FeeName || entry.FeeCode || 'Payment',
       Credit: entry.Amount,
       Status: entry.Status || 'Paid'
     }));
@@ -502,31 +502,8 @@ async function getDashboard(env, body) {
     const visiblePayments = paymentEntries.length ? paymentEntries : ledgerPaymentEntries;
     paymentRecords[child.AccountRef] = visiblePayments
       .sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
-    try {
-      const payable = await getPayableFees(env, { Email: email, VerificationCode: code, AccountRef: child.AccountRef });
-      const items = buildPayableItems(payable.fees || [], payable.schoolFeeBreakdown || []);
-      payableItems[child.AccountRef] = items;
-      dueNotifications[child.AccountRef] = items
-        .filter((item) => clean(item.DueDate))
-        .map((item) => ({
-          FeeCode: item.FeeCode,
-          FeeName: item.FeeName,
-          FeeCategory: item.FeeCategory,
-          Amount: item.Amount,
-          Currency: item.Currency || 'NGN',
-          AcademicSession: item.AcademicSession || '',
-          Term: item.Term || '',
-          DueDate: item.DueDate,
-          DueStatus: dueStatus(item.DueDate),
-          AllowInstallment: item.AllowInstallment || '',
-          MinAmount: item.MinAmount || '',
-          MaxAmount: item.MaxAmount || ''
-        }));
-    } catch (err) {
-      payableItems[child.AccountRef] = [];
-      payableErrors[child.AccountRef] = String(err && err.message ? err.message : err);
-      dueNotifications[child.AccountRef] = [];
-    }
+    payableItems[child.AccountRef] = [];
+    dueNotifications[child.AccountRef] = [];
     clinicVisits[child.AccountRef] = clinic.filter((record) => {
       return anyKeyMatches(record.AdmissionNo, keys);
     }).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
@@ -575,14 +552,50 @@ async function updateWalletRestrictions(env, body) {
   return { ok: true, message: 'Wallet restrictions saved.' };
 }
 
+async function getChildPayable(env, body) {
+  const payable = await getPayableFees(env, {
+    Email: body.email || body.ParentEmail || body.Email,
+    VerificationCode: body.code || body.VerificationCode,
+    AccountRef: body.accountRef || body.AccountRef || body.AdmissionNo
+  });
+  const items = buildPayableItems(payable.fees || [], payable.schoolFeeBreakdown || []);
+  return {
+    ok: true,
+    message: 'Payable items loaded.',
+    accountRef: clean(body.accountRef || body.AccountRef || body.AdmissionNo),
+    payableItems: items,
+    dueNotifications: items
+      .filter((item) => clean(item.DueDate))
+      .map((item) => ({
+        FeeCode: item.FeeCode,
+        FeeName: item.FeeName,
+        FeeCategory: item.FeeCategory,
+        Amount: item.Amount,
+        Currency: item.Currency || 'NGN',
+        AcademicSession: item.AcademicSession || '',
+        Term: item.Term || '',
+        DueDate: item.DueDate,
+        DueStatus: dueStatus(item.DueDate),
+        AllowInstallment: item.AllowInstallment || '',
+        MinAmount: item.MinAmount || '',
+        MaxAmount: item.MaxAmount || ''
+      }))
+  };
+}
+
 export async function onRequestPost(context) {
   try {
     const { request, env } = context;
     const body = await request.json().catch(() => ({}));
     const action = clean(body.action || body.Action || 'getDashboard');
-    const data = action === 'updateWalletRestrictions'
-      ? await updateWalletRestrictions(env, body)
-      : await getDashboard(env, body);
+    let data;
+    if (action === 'updateWalletRestrictions') {
+      data = await updateWalletRestrictions(env, body);
+    } else if (action === 'getChildPayable') {
+      data = await getChildPayable(env, body);
+    } else {
+      data = await getDashboard(env, body);
+    }
     return Response.json(data);
   } catch (err) {
     return Response.json({

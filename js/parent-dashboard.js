@@ -16,6 +16,7 @@ const pinThreshold = document.getElementById('pinThreshold');
 
 let dashboard = null;
 let selectedAccountRef = '';
+const loadedPayables = new Set();
 
 function setStatus(message, type) {
   statusEl.textContent = message || '';
@@ -57,6 +58,7 @@ function renderChildren() {
     button.addEventListener('click', () => {
       selectedAccountRef = child.AccountRef;
       renderDashboard();
+      loadPayablesForSelected();
     });
     childrenList.appendChild(button);
   });
@@ -106,6 +108,42 @@ function renderDueNotifications(child) {
     `;
     dueNotifications.appendChild(item);
   });
+}
+
+async function loadPayablesForSelected() {
+  const child = selectedChild();
+  if (!child || loadedPayables.has(child.AccountRef)) return;
+  loadedPayables.add(child.AccountRef);
+  dashboard.payableItems = dashboard.payableItems || {};
+  dashboard.payableErrors = dashboard.payableErrors || {};
+  dashboard.dueNotifications = dashboard.dueNotifications || {};
+  dashboard.payableItems[child.AccountRef] = [];
+  dashboard.payableErrors[child.AccountRef] = '';
+  renderPayableItems(child);
+  renderDueNotifications(child);
+  try {
+    const response = await fetch('/api/parent-dashboard', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'getChildPayable',
+        ...authPayload(),
+        accountRef: child.AccountRef
+      })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data.message || 'Could not load payable items.');
+    }
+    dashboard.payableItems[child.AccountRef] = data.payableItems || [];
+    dashboard.dueNotifications[child.AccountRef] = data.dueNotifications || [];
+  } catch (error) {
+    dashboard.payableItems[child.AccountRef] = [];
+    dashboard.dueNotifications[child.AccountRef] = [];
+    dashboard.payableErrors[child.AccountRef] = error.message;
+  }
+  renderPayableItems(child);
+  renderDueNotifications(child);
 }
 
 function paymentAmountFor(fee) {
@@ -160,7 +198,8 @@ async function payItem(child, fee) {
 function renderPayableItems(child) {
   const records = dashboard.payableItems?.[child.AccountRef] || [];
   const payableError = dashboard.payableErrors?.[child.AccountRef] || '';
-  payableItems.innerHTML = records.length ? '' : `<p class="${payableError ? 'status bad' : 'muted'}">${payableError || 'There are no online payment items due at the moment.'}</p>`;
+  const loading = !loadedPayables.has(child.AccountRef);
+  payableItems.innerHTML = records.length ? '' : `<p class="${payableError ? 'status bad' : 'muted'}">${payableError || (loading ? 'Loading payable items...' : 'There are no online payment items due at the moment.')}</p>`;
   records.forEach((fee) => {
     const item = document.createElement('div');
     item.className = 'activity-item payment-action';
@@ -201,10 +240,11 @@ function renderPayments(child) {
     const isCredit = Number(record.Credit || record.Amount || 0) > 0 && Number(record.Debit || 0) === 0;
     const amount = record.Amount || record.Credit || record.Debit || 0;
     const period = [record.AcademicSession, record.Term].filter(Boolean).join(' | ');
+    const title = record.Description || record.FeeCategory || record.Department || record.RecordType || 'Payment record';
     const item = document.createElement('div');
     item.className = 'activity-item';
     item.innerHTML = `
-      <strong>${record.Description || record.FeeName || record.FeeCode || record.RecordType || 'Payment record'}</strong>
+      <strong>${title}</strong>
       <span>${record.Date || ''}${period ? ' | ' + period : ''} | ${isCredit ? '+' : ''}${money(amount)}</span>
       <small>${record.RecordType || ''}${record.Status ? ' | Status: ' + record.Status : ''}${record.Reference ? ' | Ref: ' + record.Reference : ''}</small>
     `;
@@ -244,9 +284,11 @@ async function loadDashboard() {
     throw new Error(data.message || 'Could not load parent dashboard.');
   }
   dashboard = data;
+  loadedPayables.clear();
   selectedAccountRef = data.children?.[0]?.AccountRef || '';
   dashboardContent.hidden = false;
   renderDashboard();
+  loadPayablesForSelected();
   setStatus('Dashboard loaded.', 'ok');
 }
 

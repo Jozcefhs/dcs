@@ -673,13 +673,17 @@ export async function getPayableFees(env, body = {}) {
     const linkedApplication = studentAppRef ? applications.find((row) => sameText(row.ApplicationReference || row.ApplicationID || row.__id, studentAppRef) || referencesMatch(row.ApplicationReference || row.ApplicationID || row.__id, studentAppRef)) : null;
     const linkedEmailMatches = linkedApplication && [linkedApplication.VerificationEmail, linkedApplication.ParentEmail, linkedApplication.Email]
       .some((value) => lower(value) === email);
-    if (!parentEmailMatches && !linkedEmailMatches) {
+    const selectedEmailMatches = selectedApplication && [selectedApplication.VerificationEmail, selectedApplication.ParentEmail, selectedApplication.Email]
+      .some((value) => lower(value) === email);
+    if (!parentEmailMatches && !linkedEmailMatches && !selectedEmailMatches && !saleMatch) {
       const err = new Error('The selected student is not linked to this parent email.');
       err.status = 403;
       throw err;
     }
     if (linkedApplication) {
       app = linkedApplication;
+    } else if (selectedApplication) {
+      app = selectedApplication;
     }
   } else if (selectedApplication) {
     const selectedEmailMatches = [selectedApplication.VerificationEmail, selectedApplication.ParentEmail, selectedApplication.Email]
