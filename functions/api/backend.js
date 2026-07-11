@@ -363,6 +363,14 @@ function referencesMatch(left, right) {
   const b = normalizeReferenceText(right);
   if (!a || !b) return false;
   if (a === b) return true;
+  const leftParts = clean(left).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const rightParts = clean(right).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  if (leftParts.length >= 3 && rightParts.length >= 3) {
+    const leftTail = leftParts[leftParts.length - 1];
+    const rightTail = rightParts[rightParts.length - 1];
+    const samePrefix = leftParts.slice(0, -1).join('|') === rightParts.slice(0, -1).join('|');
+    if (samePrefix && String(Number(leftTail)) === String(Number(rightTail))) return true;
+  }
   const aParts = a.match(/^([a-z]+)(\d+)(\d+)$/);
   const bParts = b.match(/^([a-z]+)(\d+)(\d+)$/);
   return Boolean(aParts && bParts && aParts[1] === bParts[1] && aParts[2] === bParts[2] && String(Number(aParts[3])) === String(Number(bParts[3])));
@@ -561,19 +569,29 @@ export async function getPayableFees(env, body = {}) {
   }
 
   const applications = (await listCollection(env, 'applications')).map(normalizeApplication);
-  const app = applications.find((row) => lower(row.VerificationEmail || row.Email || row.ParentEmail) === email && clean(row.VerificationCode).toUpperCase() === code);
-  if (!app) {
+  const loginApp = applications.find((row) => lower(row.VerificationEmail || row.Email || row.ParentEmail) === email && clean(row.VerificationCode).toUpperCase() === code);
+  if (!loginApp) {
     const err = new Error('Application not found for that email/code.');
     err.status = 404;
     throw err;
   }
 
-  let accountRef = accountRefFromApplication(app);
+  let app = loginApp;
+  let accountRef = requestedAccountRef || accountRefFromApplication(loginApp);
   let student = requestedAccountRef ? await findStudentByAccountRef(env, requestedAccountRef) : null;
+  let selectedApplication = null;
+  if (requestedAccountRef) {
+    selectedApplication = applications.find((row) => {
+      return sameText(row.ApplicationReference || row.ApplicationID || row.__id, requestedAccountRef) ||
+        referencesMatch(row.ApplicationReference || row.ApplicationID || row.__id, requestedAccountRef) ||
+        sameText(row.AdmissionNo || row.AdmissionNumber, requestedAccountRef) ||
+        referencesMatch(row.AdmissionNo || row.AdmissionNumber, requestedAccountRef);
+    }) || null;
+  }
   if (student) {
     const parentEmailMatches = lower(student.ParentEmail || student.Email) === email;
     const studentAppRef = clean(student.ApplicationReference);
-    const linkedApplication = studentAppRef ? applications.find((row) => sameText(row.ApplicationReference || row.ApplicationID || row.__id, studentAppRef)) : null;
+    const linkedApplication = studentAppRef ? applications.find((row) => sameText(row.ApplicationReference || row.ApplicationID || row.__id, studentAppRef) || referencesMatch(row.ApplicationReference || row.ApplicationID || row.__id, studentAppRef)) : null;
     const linkedEmailMatches = linkedApplication && [linkedApplication.VerificationEmail, linkedApplication.ParentEmail, linkedApplication.Email]
       .some((value) => lower(value) === email);
     if (!parentEmailMatches && !linkedEmailMatches) {
@@ -581,6 +599,18 @@ export async function getPayableFees(env, body = {}) {
       err.status = 403;
       throw err;
     }
+    if (linkedApplication) {
+      app = linkedApplication;
+    }
+  } else if (selectedApplication) {
+    const selectedEmailMatches = [selectedApplication.VerificationEmail, selectedApplication.ParentEmail, selectedApplication.Email]
+      .some((value) => lower(value) === email);
+    if (!selectedEmailMatches) {
+      const err = new Error('The selected applicant is not linked to this parent email.');
+      err.status = 403;
+      throw err;
+    }
+    app = selectedApplication;
   }
   if (!student) student = await findStudentForApplication(env, app);
   if (student) accountRef = student.AdmissionNo || student.AccountRef || student.ApplicationReference || accountRef;
@@ -620,10 +650,11 @@ export async function getPayableFees(env, body = {}) {
     });
   };
 
-  let [feeRows, paymentRows, invoiceRows] = await Promise.all([
+  let [feeRows, paymentRows, invoiceRows, ledgerRows] = await Promise.all([
     listCollection(env, 'feeItems'),
     listCollection(env, 'payments'),
-    listCollection(env, 'invoices')
+    listCollection(env, 'invoices'),
+    listCollection(env, 'ledger')
   ]);
   if (!feeRows.length) {
     const sheetFinance = await getAppsScriptAccountsOverview(env);
@@ -636,6 +667,10 @@ export async function getPayableFees(env, body = {}) {
       invoiceRows = [
         ...(invoiceRows || []),
         ...(sheetFinance.invoices || [])
+      ];
+      ledgerRows = [
+        ...(ledgerRows || []),
+        ...(sheetFinance.ledger || [])
       ];
     } else {
       const sheetData = await getAppsScriptPayableFees(env, body);
@@ -692,6 +727,14 @@ export async function getPayableFees(env, body = {}) {
     if (normalizeMatchText(row.Status) === 'paid') {
       addBalanceCredit(row.FeeCode || row.FeeName, row.Debit || row.Balance, row.AcademicSession, row.Term);
     }
+  });
+  ledgerRows.map(normalizeLedger).filter(rowMatchesAccount).forEach((row) => {
+    const credit = asMoneyNumber(row.Credit);
+    if (credit <= 0) return;
+    addPaid(paymentCodeMap, row.FeeCode, credit);
+    addPaid(paymentNameMap, row.FeeName, credit);
+    addPaid(paymentCodeMap, periodKey(row.FeeCode, row.AcademicSession, row.Term), credit);
+    addPaid(paymentNameMap, periodKey(row.FeeName, row.AcademicSession, row.Term), credit);
   });
   paymentRows.map(normalizePayment).filter(rowMatchesAccount).forEach((row) => {
     const status = normalizeMatchText(row.Status || 'Paid');

@@ -46,6 +46,30 @@ function sameText(left, right) {
   return lower(left) === lower(right);
 }
 
+function normalizeReferenceText(value) {
+  return clean(value).toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function referencesMatch(left, right) {
+  const a = normalizeReferenceText(left);
+  const b = normalizeReferenceText(right);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const leftParts = clean(left).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const rightParts = clean(right).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  if (leftParts.length >= 3 && rightParts.length >= 3) {
+    const leftTail = leftParts[leftParts.length - 1];
+    const rightTail = rightParts[rightParts.length - 1];
+    const samePrefix = leftParts.slice(0, -1).join('|') === rightParts.slice(0, -1).join('|');
+    if (samePrefix && String(Number(leftTail)) === String(Number(rightTail))) return true;
+  }
+  return false;
+}
+
+function anyKeyMatches(value, keys) {
+  return keys.some((key) => sameText(value, key) || referencesMatch(value, key));
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -378,19 +402,19 @@ async function getDashboard(env, body) {
   for (const child of children) {
     const keys = accountKeys(child);
     const walletEntries = ledger.filter((entry) => {
-      return keys.some((key) => sameText(entry.AccountRef, key)) &&
+      return anyKeyMatches(entry.AccountRef, keys) &&
         lower(entry.FeeCategory) === 'wallet';
     }).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
     child.WalletBalance = walletBalance(walletEntries);
     walletActivity[child.AccountRef] = walletEntries;
-    const invoiceEntries = invoices.filter((entry) => keys.some((key) => sameText(entry.AccountRef, key))).map((entry) => ({
+    const invoiceEntries = invoices.filter((entry) => anyKeyMatches(entry.AccountRef, keys)).map((entry) => ({
       ...entry,
       RecordType: 'Invoice',
       Amount: entry.Debit,
       Description: entry.FeeName || entry.FeeCode || 'Fee invoice',
       Status: entry.Status || (entry.Balance > 0 ? 'Outstanding' : 'Paid')
     }));
-    const paymentEntries = payments.filter((entry) => keys.some((key) => sameText(entry.AccountRef, key))).map((entry) => ({
+    const paymentEntries = payments.filter((entry) => anyKeyMatches(entry.AccountRef, keys)).map((entry) => ({
       ...entry,
       RecordType: 'Payment',
       Description: entry.FeeName || entry.FeeCode || 'Payment',
@@ -398,7 +422,7 @@ async function getDashboard(env, body) {
       Status: entry.Status || 'Paid'
     }));
     const ledgerEntries = ledger.filter((entry) => {
-      return keys.some((key) => sameText(entry.AccountRef, key)) &&
+      return anyKeyMatches(entry.AccountRef, keys) &&
         lower(entry.FeeCategory) !== 'wallet';
     }).map((entry) => ({
       ...entry,
@@ -435,7 +459,7 @@ async function getDashboard(env, body) {
       dueNotifications[child.AccountRef] = [];
     }
     clinicVisits[child.AccountRef] = clinic.filter((record) => {
-      return keys.some((key) => sameText(record.AdmissionNo, key));
+      return anyKeyMatches(record.AdmissionNo, keys);
     }).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
   }
 
