@@ -10,10 +10,10 @@
   <main class="page-wrap">
     <section class="card dashboard-card">
       <div class="form-header">
-        <img src="images/logo.png" alt="Destiny Christian Academy" class="logo small" onerror="this.style.display='none'">
+        <img src="images/logo.png" alt="School logo" class="logo small" onerror="this.style.display='none'">
         <div>
           <h1>Parent Dashboard</h1>
-          <p class="muted">Monitor wallet spending, clinic visits, and student activity.</p>
+          <p class="muted"><span data-school-name>School Portal</span> - monitor results, payments, wallet spending, clinic visits, and student activity.</p>
         </div>
       </div>
 
@@ -44,6 +44,11 @@
           <section class="panel full-panel">
             <h2>Pay Now</h2>
             <div id="payableItems" class="activity-list"></div>
+          </section>
+
+          <section class="panel full-panel">
+            <h2>Entrance Result</h2>
+            <div id="entranceResults" class="activity-list"></div>
           </section>
 
           <section class="panel">
@@ -90,6 +95,7 @@
     </section>
   </main>
 
+  <script src="js/site-config.js"></script>
   <script src="js/parent-dashboard.js"></script>
 </body>
 </html>

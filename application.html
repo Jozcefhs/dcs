@@ -3,17 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>DCA Admission Application Form</title>
+  <title>Admission Application Form</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <main class="page-wrap">
     <section class="card">
       <div class="form-header">
-        <img src="images/logo.png" alt="Destiny Christian Academy" class="logo small" onerror="this.style.display='none'">
+        <img src="images/logo.png" alt="School logo" class="logo small" onerror="this.style.display='none'">
         <div>
-          <h1>Destiny Christian Academy</h1>
-          <p class="muted">The Lord's Garden, Airport Road, Lugbe, Abuja</p>
+          <h1 data-school-name>School Portal</h1>
+          <p class="muted" data-school-address></p>
           <h2>Admission Application Form</h2>
         </div>
       </div>
@@ -244,11 +244,11 @@
               </select>
             </div>
             <div class="full">
-              <label for="howHeard">How did you hear about Destiny Christian Academy?</label>
+              <label for="howHeard">How did you hear about this school?</label>
               <input id="howHeard" name="HowHeard">
             </div>
             <div class="full">
-              <label for="reasonForChoosing">Reason for choosing Destiny Christian Academy</label>
+              <label for="reasonForChoosing">Reason for choosing this school</label>
               <textarea id="reasonForChoosing" name="ReasonForChoosingSchool" rows="3"></textarea>
             </div>
           </div>
@@ -299,7 +299,7 @@
           <div class="terms-text">
             <p>I declare that I am the parent or authorized guardian of the applicant and that all information provided is true to the best of my knowledge.</p>
             <p>I pledge to comply with all admission requirements and to meet my financial obligations to the school promptly, usually before each resumption.</p>
-            <p>I understand that Destiny Christian Academy is a faith-based school operated on Biblical principles and standards, and I give permission for my child/ward to be instructed in line with the school's vision, mission, and standards.</p>
+            <p>I understand that the school operates according to its approved principles, standards, vision, and mission, and I give permission for my child/ward to be instructed in line with those standards.</p>
             <p>I give permission for my child/ward to take part in school activities, including co-curricular activities and school-sponsored trips or excursions outside the school premises as scheduled by the school.</p>
             <p>I agree to support and comply with all school regulations on behalf of the applicant and authorize the school to apply discipline in accordance with its policies.</p>
           </div>
@@ -326,6 +326,7 @@
       <p><strong>Do not close this page or press Back.</strong></p>
     </div>
   </div>
+  <script src="js/site-config.js"></script>
   <script src="js/application.js"></script>
 </body>
 </html>

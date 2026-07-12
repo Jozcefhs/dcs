@@ -7,6 +7,7 @@ const walletLedger = document.getElementById('walletLedger');
 const dueNotifications = document.getElementById('dueNotifications');
 const payableItems = document.getElementById('payableItems');
 const paymentRecords = document.getElementById('paymentRecords');
+const entranceResults = document.getElementById('entranceResults');
 const clinicRecords = document.getElementById('clinicRecords');
 const restrictionForm = document.getElementById('restrictionForm');
 const walletStatus = document.getElementById('walletStatus');
@@ -252,6 +253,42 @@ function renderPayments(child) {
   });
 }
 
+function resultDisplayMode() {
+  return window.SCHOOL_PROFILE?.ResultDisplayMode || 'subjects';
+}
+
+function renderEntranceResults(child) {
+  const records = dashboard.entranceResults?.[child.AccountRef] || [];
+  entranceResults.innerHTML = records.length ? '' : '<p class="muted">Entrance result is not available yet.</p>';
+  records.forEach((record) => {
+    const item = document.createElement('div');
+    item.className = 'activity-item';
+    const percentage = record.ResultPercentage ? `${record.ResultPercentage}%` : '';
+    const status = record.ResultStatus || 'Pending';
+    const date = record.ResultUpdatedAt || record.ResultSentAt || '';
+    if (resultDisplayMode() === 'percentage') {
+      item.innerHTML = `
+        <strong>${status}</strong>
+        <span>${[percentage || 'Percentage not recorded', date].filter(Boolean).join(' | ')}</span>
+        <small>${record.ResultNotes || ''}</small>
+      `;
+    } else {
+      item.innerHTML = `
+        <strong>${status}${percentage ? ' | ' + percentage : ''}</strong>
+        <span>${date || ''}</span>
+        <div class="result-scores">
+          <span>English: <strong>${record.EnglishScore || '-'}</strong></span>
+          <span>Mathematics: <strong>${record.MathematicsScore || '-'}</strong></span>
+          <span>Interview / General: <strong>${record.InterviewScore || '-'}</strong></span>
+          <span>Total: <strong>${record.TotalScore || '-'}</strong></span>
+        </div>
+        <small>${record.ResultNotes || ''}</small>
+      `;
+    }
+    entranceResults.appendChild(item);
+  });
+}
+
 function renderDashboard() {
   const children = dashboard?.children || [];
   if (!selectedAccountRef && children.length) {
@@ -262,6 +299,7 @@ function renderDashboard() {
   if (!child) return;
   renderDueNotifications(child);
   renderPayableItems(child);
+  renderEntranceResults(child);
   renderWallet(child);
   renderPayments(child);
   renderClinic(child);

@@ -202,6 +202,15 @@ function normalizeApplicationChild(row) {
     WalletPinThreshold: 0,
     Status: pick(row, ['ResultStatus', 'resultStatus', 'Status', 'status'], 'Application'),
     StatusReason: '',
+    EnglishScore: pick(row, ['EnglishScore', 'englishScore', 'English', 'english']),
+    MathematicsScore: pick(row, ['MathematicsScore', 'mathematicsScore', 'MathScore', 'mathScore', 'Mathematics', 'mathematics']),
+    InterviewScore: pick(row, ['InterviewScore', 'interviewScore', 'GeneralPaperScore', 'generalPaperScore']),
+    TotalScore: pick(row, ['TotalScore', 'totalScore', 'Total', 'total']),
+    ResultPercentage: pick(row, ['ResultPercentage', 'resultPercentage', 'Percentage', 'percentage']),
+    ResultStatus: pick(row, ['ResultStatus', 'resultStatus', 'AdmissionDecision', 'admissionDecision']),
+    ResultNotes: pick(row, ['ResultNotes', 'resultNotes', 'Notes', 'notes']),
+    ResultSent: pick(row, ['ResultSent', 'resultSent', 'EntranceResultSent', 'entranceResultSent']),
+    ResultReadyOnline: pick(row, ['ResultReadyOnline', 'resultReadyOnline', 'ResultPublished', 'resultPublished']),
     SourceType: 'Application'
   };
 }
@@ -341,6 +350,28 @@ function isSchoolFee(fee) {
 
 function isYes(value) {
   return ['yes', 'y', 'true', '1'].includes(lower(value));
+}
+
+function resultIsVisible(application) {
+  return isYes(pick(application, ['ResultReadyOnline', 'resultReadyOnline', 'ResultPublished', 'resultPublished'])) ||
+    isYes(pick(application, ['ResultSent', 'resultSent', 'EntranceResultSent', 'entranceResultSent']));
+}
+
+function buildEntranceResult(application) {
+  if (!application || !resultIsVisible(application)) return null;
+  return {
+    ApplicationReference: pick(application, ['ApplicationReference', 'applicationReference', 'ApplicationID', 'applicationId', '__id']),
+    ApplicantName: pick(application, ['ApplicantName', 'applicantName', 'DisplayName', 'displayName', 'Name', 'name']),
+    EnglishScore: pick(application, ['EnglishScore', 'englishScore', 'English', 'english']),
+    MathematicsScore: pick(application, ['MathematicsScore', 'mathematicsScore', 'MathScore', 'mathScore', 'Mathematics', 'mathematics']),
+    InterviewScore: pick(application, ['InterviewScore', 'interviewScore', 'GeneralPaperScore', 'generalPaperScore']),
+    TotalScore: pick(application, ['TotalScore', 'totalScore', 'Total', 'total']),
+    ResultPercentage: pick(application, ['ResultPercentage', 'resultPercentage', 'Percentage', 'percentage']),
+    ResultStatus: pick(application, ['ResultStatus', 'resultStatus', 'AdmissionDecision', 'admissionDecision', 'Status', 'status']),
+    ResultNotes: pick(application, ['ResultNotes', 'resultNotes', 'Notes', 'notes']),
+    ResultUpdatedAt: toDisplayDate(pick(application, ['ResultUpdatedAt', 'resultUpdatedAt', 'UpdatedAt', 'updatedAt'])),
+    ResultSentAt: toDisplayDate(pick(application, ['ResultSentAt', 'resultSentAt', 'EntranceResultSentAt', 'entranceResultSentAt']))
+  };
 }
 
 function schoolFeeTotalItem(breakdown) {
@@ -518,6 +549,7 @@ async function getDashboard(env, body) {
   const payableErrors = {};
   const dueNotifications = {};
   const clinicVisits = {};
+  const entranceResults = {};
 
   for (const child of children) {
     const keys = accountKeys(child);
@@ -546,6 +578,12 @@ async function getDashboard(env, body) {
     clinicVisits[child.AccountRef] = clinic.filter((record) => {
       return anyKeyMatches(record.AdmissionNo, keys);
     }).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
+    const resultSource = applications.find((app) => {
+      const appRef = pick(app, ['ApplicationReference', 'applicationReference', 'ApplicationID', 'applicationId', '__id']);
+      return keys.some((key) => referencesMatch(appRef, key) || sameText(appRef, key));
+    }) || (child.SourceType === 'Application' ? child : null);
+    const result = buildEntranceResult(resultSource);
+    entranceResults[child.AccountRef] = result ? [result] : [];
   }
 
   return {
@@ -557,6 +595,7 @@ async function getDashboard(env, body) {
     payableItems,
     payableErrors,
     dueNotifications,
+    entranceResults,
     clinicVisits
   };
 }

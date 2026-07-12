@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>School Setup</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <main class="page-wrap">
+    <section class="card dashboard-card">
+      <div class="form-header">
+        <img src="images/logo.png" alt="School logo" class="logo small" onerror="this.style.display='none'">
+        <div>
+          <h1>School Setup</h1>
+          <p class="muted">Configure the public school identity and portal behaviour.</p>
+        </div>
+      </div>
+
+      <form id="setupForm">
+        <fieldset>
+          <legend>Security</legend>
+          <label for="setupPassword">Setup Password <span class="required">*</span></label>
+          <input id="setupPassword" type="password" autocomplete="current-password" required>
+        </fieldset>
+
+        <fieldset>
+          <legend>School Profile</legend>
+          <div class="grid two">
+            <div>
+              <label for="schoolName">School Name <span class="required">*</span></label>
+              <input id="schoolName" name="SchoolName" required>
+            </div>
+            <div>
+              <label for="schoolEmail">School Email</label>
+              <input id="schoolEmail" name="SchoolEmail" type="email">
+            </div>
+            <div>
+              <label for="schoolPhone">School Phone</label>
+              <input id="schoolPhone" name="SchoolPhone" inputmode="tel">
+            </div>
+            <div>
+              <label for="resultDisplayMode">Parent Result Display</label>
+              <select id="resultDisplayMode" name="ResultDisplayMode">
+                <option value="subjects">Show subjects and scores</option>
+                <option value="percentage">Show average/percentage only</option>
+              </select>
+            </div>
+            <div class="full">
+              <label for="schoolAddress">School Address</label>
+              <input id="schoolAddress" name="SchoolAddress">
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Landing Page</legend>
+          <label for="portalHeadline">Headline</label>
+          <input id="portalHeadline" name="PortalHeadline">
+
+          <label for="portalSubheading">Subheading</label>
+          <textarea id="portalSubheading" name="PortalSubheading" rows="3"></textarea>
+
+          <label for="portalNotice">Optional Notice</label>
+          <textarea id="portalNotice" name="PortalNotice" rows="2" placeholder="Example: Admission into JSS 1 closes on Friday."></textarea>
+        </fieldset>
+
+        <fieldset>
+          <legend>Product Key</legend>
+          <label for="productKeyMode">Product Key Requirement</label>
+          <select id="productKeyMode" name="ProductKeyMode">
+            <option value="off">Off for now</option>
+            <option value="required">Require product key before app use</option>
+          </select>
+          <p class="muted">Full product-key enforcement should be connected to a license/activation record so each school can receive its own key.</p>
+        </fieldset>
+
+        <button type="submit">Save Setup</button>
+        <p id="setupStatus" class="status"></p>
+      </form>
+
+      <p><a href="admin.html">Open web admin</a> | <a href="index.html">Return to portal</a></p>
+    </section>
+  </main>
+
+  <script src="js/setup.js"></script>
+</body>
+</html>

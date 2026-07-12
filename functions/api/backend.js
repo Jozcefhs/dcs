@@ -1067,6 +1067,8 @@ async function updateEntranceResult(env, body) {
     ResultNotes: body.ResultNotes ?? '',
     ResultUpdatedBy: clean(body.ResultUpdatedBy) || 'Admissions Office',
     ResultUpdatedAt: nowIso(),
+    ResultReadyOnline: clean(body.ResultReadyOnline || body.resultReadyOnline || body.ResultPublished || ''),
+    ResultPublished: clean(body.ResultPublished || body.resultPublished || body.ResultReadyOnline || ''),
     UpdatedAt: nowIso()
   };
   if (resultStatus === 'Admitted') updates.Status = 'Accepted';
