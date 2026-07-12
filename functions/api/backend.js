@@ -807,6 +807,30 @@ export async function getPayableFees(env, body = {}) {
   const applicationStatus = normalizeMatchText(app.Status);
   const resultStatus = normalizeMatchText(app.ResultStatus);
   const admittedForPreEnrollment = resultStatus === 'admitted' || ['admitted', 'accepted', 'admission letter sent'].includes(applicationStatus);
+  const acceptanceAlreadyPaid = yesNo(app.AcceptanceFeePaid) === 'YES' ||
+    paymentRows.map(normalizePayment).filter(rowMatchesAccount).some((row) => {
+      const status = normalizeMatchText(row.Status || 'Paid');
+      if (status && status !== 'paid') return false;
+      const parts = [
+        row.FeeCode,
+        row.FeeName,
+        row.FeeCategory,
+        row.PaymentType,
+        row.Description
+      ].map((value) => normalizeMatchText(value)).join(' ');
+      return parts.includes('acceptance_fee') || parts.includes('acceptance fee') || (parts.includes('acceptance') && parts.includes('admission'));
+    }) ||
+    ledgerRows.map(normalizeLedger).filter(rowMatchesAccount).some((row) => {
+      if (asMoneyNumber(row.Credit) <= 0) return false;
+      const parts = [
+        row.FeeCode,
+        row.FeeName,
+        row.FeeCategory,
+        row.EntryType,
+        row.Description
+      ].map((value) => normalizeMatchText(value)).join(' ');
+      return parts.includes('acceptance_fee') || parts.includes('acceptance fee') || (parts.includes('acceptance') && parts.includes('admission'));
+    });
   const matchedFees = applyBillingCategoryOverrides(allFees.filter((fee) => {
     const amount = asMoneyNumber(fee.Amount);
     const category = normalizeMatchText(fee.FeeCategory || '');
@@ -816,7 +840,7 @@ export async function getPayableFees(env, body = {}) {
     if (yesNo(fee.PayableOnline || 'YES') !== 'YES') return false;
     if (!feeMatchesApplication(fee, billingApp)) return false;
     if (isAcceptanceFee) {
-      if (yesNo(app.AcceptanceFeePaid) === 'YES') return false;
+      if (acceptanceAlreadyPaid) return false;
       return admittedForPreEnrollment && yesNo(app.OfferSent) === 'YES';
     }
     if (!enrolledForBilling) {
@@ -882,7 +906,7 @@ export async function getPayableFees(env, body = {}) {
     addPaid(paymentNameMap, periodKey(row.FeeName, row.AcademicSession || nested.academicSession, row.Term || nested.term), row.Amount);
   });
 
-  let acceptanceCreditRemaining = enrolledForBilling && yesNo(app.AcceptanceFeePaid) === 'YES' ? asMoneyNumber(app.AcceptanceFeeAmount) : 0;
+  let acceptanceCreditRemaining = enrolledForBilling && acceptanceAlreadyPaid ? asMoneyNumber(app.AcceptanceFeeAmount) : 0;
   if (acceptanceCreditRemaining <= 0 && enrolledForBilling) {
     acceptanceCreditRemaining = Math.max(asMoneyNumber(paymentCodeMap.ACCEPTANCE_FEE), asMoneyNumber(paymentNameMap['Acceptance Fee']));
   }

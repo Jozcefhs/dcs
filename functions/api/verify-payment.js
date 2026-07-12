@@ -16,6 +16,15 @@ function extractMetadata(data) {
   return metadata;
 }
 
+async function recordInAppsScript(env, payload) {
+  const recordRes = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  return recordRes.json();
+}
+
 export async function onRequestPost(context) {
   try {
     const { request, env } = context;
@@ -78,24 +87,42 @@ export async function onRequestPost(context) {
       })
     };
 
-    let recordData;
+    let recordData = null;
+    const recordErrors = [];
     if (firestoreConfigured) {
-      recordData = await recordManualPayment(env, paymentPayload);
-    } else {
-      const recordRes = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(paymentPayload)
-      });
-      recordData = await recordRes.json();
+      try {
+        const firestoreData = await recordManualPayment(env, paymentPayload);
+        if (firestoreData && firestoreData.ok) {
+          recordData = firestoreData;
+        } else {
+          recordErrors.push(`Firestore: ${(firestoreData && firestoreData.message) || 'record failed'}`);
+        }
+      } catch (err) {
+        recordErrors.push(`Firestore: ${err && err.message ? err.message : String(err)}`);
+      }
     }
-    if (!recordData.ok) {
-      return Response.json(recordData, { status: 400 });
+    if (appsScriptConfigured) {
+      try {
+        const sheetData = await recordInAppsScript(env, paymentPayload);
+        if (sheetData && sheetData.ok) {
+          recordData = recordData || sheetData;
+        } else {
+          recordErrors.push(`Google Sheets: ${(sheetData && sheetData.message) || 'record failed'}`);
+        }
+      } catch (err) {
+        recordErrors.push(`Google Sheets: ${err && err.message ? err.message : String(err)}`);
+      }
+    }
+    if (!recordData || !recordData.ok) {
+      return Response.json({
+        ok: false,
+        message: recordErrors.length ? `Payment confirmed, but backend recording failed. ${recordErrors.join(' | ')}` : 'Payment confirmed, but it could not be recorded.'
+      }, { status: 400 });
     }
 
     return Response.json({
       ok: true,
-      message: 'Payment verified and recorded.',
+      message: recordErrors.length ? `Payment verified and recorded with warning: ${recordErrors.join(' | ')}` : 'Payment verified and recorded.',
       payment: recordData.payment || {},
       reference: tx.reference,
       amount,
