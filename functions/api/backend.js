@@ -403,6 +403,36 @@ function referencesMatch(left, right) {
   return Boolean(aParts && bParts && aParts[1] === bParts[1] && aParts[2] === bParts[2] && String(Number(aParts[3])) === String(Number(bParts[3])));
 }
 
+function isAcceptanceFeeLike(row) {
+  const parts = [
+    row && row.FeeCode,
+    row && row.FeeName,
+    row && row.FeeCategory,
+    row && row.PaymentType,
+    row && row.EntryType,
+    row && row.Description
+  ].map((value) => normalizeMatchText(value)).join(' ');
+  return parts.includes('acceptance_fee') ||
+    parts.includes('acceptance fee') ||
+    (parts.includes('acceptance') && parts.includes('admission'));
+}
+
+function accountRefsFrom(row) {
+  return [
+    row && row.AccountRef,
+    row && row.ApplicationReference,
+    row && row.ApplicationID,
+    row && row.AdmissionNo,
+    row && row.AdmissionNumber
+  ].map(clean).filter(Boolean);
+}
+
+function referencesAny(left, refs) {
+  const wanted = clean(left);
+  if (!wanted) return false;
+  return (refs || []).some((ref) => sameText(wanted, ref) || referencesMatch(wanted, ref));
+}
+
 function displayNameFromApplication(app) {
   return clean(pick(app, ['ApplicantName', 'DisplayName', 'Name'])) ||
     [pick(app, ['Surname']), pick(app, ['FirstName']), pick(app, ['MiddleName'])].map(clean).filter(Boolean).join(' ');
@@ -811,25 +841,11 @@ export async function getPayableFees(env, body = {}) {
     paymentRows.map(normalizePayment).filter(rowMatchesAccount).some((row) => {
       const status = normalizeMatchText(row.Status || 'Paid');
       if (status && status !== 'paid') return false;
-      const parts = [
-        row.FeeCode,
-        row.FeeName,
-        row.FeeCategory,
-        row.PaymentType,
-        row.Description
-      ].map((value) => normalizeMatchText(value)).join(' ');
-      return parts.includes('acceptance_fee') || parts.includes('acceptance fee') || (parts.includes('acceptance') && parts.includes('admission'));
+      return isAcceptanceFeeLike(row);
     }) ||
     ledgerRows.map(normalizeLedger).filter(rowMatchesAccount).some((row) => {
       if (asMoneyNumber(row.Credit) <= 0) return false;
-      const parts = [
-        row.FeeCode,
-        row.FeeName,
-        row.FeeCategory,
-        row.EntryType,
-        row.Description
-      ].map((value) => normalizeMatchText(value)).join(' ');
-      return parts.includes('acceptance_fee') || parts.includes('acceptance fee') || (parts.includes('acceptance') && parts.includes('admission'));
+      return isAcceptanceFeeLike(row);
     });
   const matchedFees = applyBillingCategoryOverrides(allFees.filter((fee) => {
     const amount = asMoneyNumber(fee.Amount);
@@ -969,16 +985,70 @@ export async function getPayableFees(env, body = {}) {
 }
 
 async function getAccountsOverview(env) {
-  const [accounts, payments, invoices, feeItems, storedLedger] = await Promise.all([
+  const [accounts, payments, invoices, feeItems, storedLedger, applications, students] = await Promise.all([
     listCollection(env, 'accounts'),
     listCollection(env, 'payments'),
     listCollection(env, 'invoices'),
     listCollection(env, 'feeItems'),
-    listCollection(env, 'ledger')
+    listCollection(env, 'ledger'),
+    listCollection(env, 'applications'),
+    listCollection(env, 'students')
   ]);
   const normalizedPayments = payments.map(normalizePayment);
   const normalizedInvoices = invoices.map(normalizeInvoice);
   const normalizedStoredLedger = storedLedger.map(normalizeLedger);
+  const accountMap = new Map();
+  const putAccount = (row) => {
+    const normalized = normalizeAccount(row || {});
+    const refs = accountRefsFrom(normalized);
+    const accountRef = clean(normalized.AccountRef || refs[0]);
+    if (!accountRef) return;
+    const key = safeDocumentId(accountRef).toLowerCase();
+    const existing = accountMap.get(key) || {};
+    accountMap.set(key, {
+      ...existing,
+      ...normalized,
+      AccountRef: clean(existing.AccountRef || normalized.AccountRef || accountRef),
+      ApplicationReference: clean(existing.ApplicationReference || normalized.ApplicationReference),
+      AdmissionNo: clean(existing.AdmissionNo || normalized.AdmissionNo),
+      DisplayName: clean(existing.DisplayName || normalized.DisplayName),
+      ClassName: clean(existing.ClassName || normalized.ClassName),
+      StudentType: clean(existing.StudentType || normalized.StudentType),
+      BillingCategory: clean(existing.BillingCategory || normalized.BillingCategory) || 'Regular',
+      Status: clean(existing.Status || normalized.Status)
+    });
+  };
+  accounts.map(normalizeAccount).forEach(putAccount);
+  students.map(normalizeStudent).forEach((student) => putAccount({
+    AccountRef: student.AdmissionNo || student.ApplicationReference,
+    ApplicationReference: student.ApplicationReference,
+    AdmissionNo: student.AdmissionNo,
+    DisplayName: student.DisplayName || student.ApplicantName,
+    ClassName: student.ClassName || student.ClassAdmitted,
+    StudentType: student.StudentType,
+    BillingCategory: student.BillingCategory,
+    Status: student.Status || 'Active'
+  }));
+  applications.map(normalizeApplication).forEach((app) => putAccount({
+    AccountRef: app.AdmissionNo || app.AdmissionNumber || app.ApplicationReference || app.ApplicationID,
+    ApplicationReference: app.ApplicationReference || app.ApplicationID,
+    AdmissionNo: app.AdmissionNo || app.AdmissionNumber,
+    DisplayName: displayNameFromApplication(app),
+    ClassName: app.ClassApplyingFor || app.ClassAdmitted,
+    StudentType: app.StudentType,
+    BillingCategory: app.BillingCategory || 'Regular',
+    Status: app.Status
+  }));
+  [...normalizedPayments, ...normalizedInvoices, ...normalizedStoredLedger].forEach((row) => putAccount({
+    AccountRef: row.AccountRef || row.AdmissionNo || row.ApplicationReference,
+    ApplicationReference: row.ApplicationReference,
+    AdmissionNo: row.AdmissionNo,
+    DisplayName: row.DisplayName,
+    ClassName: row.ClassName,
+    StudentType: row.StudentType,
+    BillingCategory: row.BillingCategory,
+    Status: 'Active'
+  }));
   const ledger = [
     ...normalizedStoredLedger,
     ...normalizedInvoices.map((row) => ({
@@ -1004,14 +1074,77 @@ async function getAccountsOverview(env) {
       RecordedBy: row.RecordedBy
     }))
   ];
+  const ledgerRows = ledger.map(normalizeLedger);
+  const accountRows = Array.from(accountMap.values()).map((account) => {
+    const refs = accountRefsFrom(account);
+    let totalDebit = 0;
+    let totalCredit = 0;
+    let walletBalance = asMoneyNumber(account.WalletBalance);
+    let lastPaymentAt = clean(account.LastPaymentAt);
+    ledgerRows.forEach((row) => {
+      const rowRefs = accountRefsFrom(row);
+      const matched = rowRefs.some((ref) => referencesAny(ref, refs));
+      if (!matched) return;
+      const debit = asMoneyNumber(row.Debit);
+      const credit = asMoneyNumber(row.Credit);
+      totalDebit += debit;
+      totalCredit += credit;
+      if (normalizeMatchText(row.EntryType).includes('wallet')) {
+        walletBalance += credit - debit;
+      }
+      if (credit > 0 && row.Date && (!lastPaymentAt || String(row.Date) > String(lastPaymentAt))) {
+        lastPaymentAt = row.Date;
+      }
+    });
+    return {
+      ...account,
+      TotalDebit: totalDebit,
+      TotalCredit: totalCredit,
+      Balance: Math.max(0, totalDebit - totalCredit),
+      WalletBalance: walletBalance,
+      LastPaymentAt: lastPaymentAt
+    };
+  }).sort((a, b) => clean(a.DisplayName || a.AccountRef).localeCompare(clean(b.DisplayName || b.AccountRef)));
   return {
     ok: true,
     message: 'Accounts loaded from Firestore.',
-    accounts: accounts.map(normalizeAccount),
+    accounts: accountRows,
     payments: normalizedPayments,
     invoices: normalizedInvoices,
     ledger,
     feeItems: feeItems.map(normalizeFeeItem)
+  };
+}
+
+async function saveBrevoSettings(env, body) {
+  const senderName = clean(body.BrevoSenderName || body.SenderName || body.senderName);
+  const senderEmail = clean(body.BrevoSenderEmail || body.SenderEmail || body.senderEmail);
+  const apiKey = clean(body.BrevoApiKey || body.ApiKey || body.apiKey);
+  if (!senderEmail) {
+    const err = new Error('Brevo sender email is required.');
+    err.status = 400;
+    throw err;
+  }
+  const now = nowIso();
+  const payload = {
+    BrevoSenderName: senderName,
+    BrevoSenderEmail: senderEmail,
+    UpdatedAt: now,
+    UpdatedBy: clean(body.UserRole || body.UpdatedBy || body.updatedBy) || 'Super Admin'
+  };
+  if (apiKey) {
+    payload.BrevoApiKey = apiKey;
+    payload.ApiKeyUpdatedAt = now;
+  }
+  await upsertDocument(env, 'settings', 'brevo', payload);
+  return {
+    ok: true,
+    message: 'Brevo settings saved to Firestore.',
+    settings: {
+      BrevoSenderName: senderName,
+      BrevoSenderEmail: senderEmail,
+      HasBrevoApiKey: Boolean(apiKey)
+    }
   };
 }
 
@@ -1690,7 +1823,7 @@ export async function recordManualPayment(env, body) {
       UpdatedAt: nowIso()
     });
   }
-  if (clean(payment.FeeCode).toUpperCase() === 'ACCEPTANCE_FEE') {
+  if (isAcceptanceFeeLike(payment)) {
     const appId = payment.ApplicationReference || payment.AccountRef;
     const app = await findApplication(env, appId);
     if (app) {
@@ -2172,6 +2305,8 @@ async function routeAction(env, action, body = {}) {
       return updateStudentStatus(env, body);
     case 'getAccountsOverview':
       return getAccountsOverview(env);
+    case 'saveBrevoSettings':
+      return saveBrevoSettings(env, body);
     case 'getPayableFees':
       return getPayableFees(env, body);
     case 'getClinicRecords':
