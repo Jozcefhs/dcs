@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Integrated School Management Suite - Web Admin</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <main class="page-wrap">
+    <section class="card dashboard-card">
+      <h1>School Web Admin</h1>
+      <p class="muted">Department activity dashboard for admissions, accounts, clinic, kitchen, tuck shop, and students.</p>
+
+      <form id="adminLogin" class="dashboard-login">
+        <div class="grid two">
+          <div>
+            <label for="adminPassword">Admin Password <span class="required">*</span></label>
+            <input id="adminPassword" type="password" autocomplete="current-password" required>
+          </div>
+          <div>
+            <label>&nbsp;</label>
+            <button type="submit">Open Dashboard</button>
+          </div>
+        </div>
+        <p id="adminStatus" class="status"></p>
+      </form>
+
+      <section id="adminDashboard" hidden>
+        <div id="adminSummary" class="metric-row"></div>
+        <div class="admin-tabs" id="adminTabs"></div>
+        <section id="adminPanel" class="panel full-panel"></section>
+      </section>
+
+      <p><a href="index.html">Return to admission portal</a></p>
+    </section>
+  </main>
+  <script src="js/admin.js"></script>
+</body>
+</html>

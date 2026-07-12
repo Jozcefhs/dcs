@@ -26,6 +26,13 @@ function applicantName(application) {
     .trim();
 }
 
+function duplicateKey(application) {
+  const first = lower(application.FirstName || application.firstName);
+  const surname = lower(application.Surname || application.surname || application.LastName || application.lastName);
+  const parentEmail = lower(application.ParentEmail || application.parentEmail);
+  return first && surname && parentEmail ? `${first}|${surname}|${parentEmail}` : '';
+}
+
 function nextApplicationReference(applications) {
   const yearCode = String(new Date().getFullYear()).slice(-2);
   let maxNo = 0;
@@ -53,6 +60,13 @@ async function submitToFirestore(env, email, code, receiptNo, application) {
   if (!parentEmail) {
     return { ok: false, message: 'Parent Dashboard Email is required.' };
   }
+  const incomingDuplicateKey = duplicateKey({ ...application, ParentEmail: parentEmail });
+  const duplicateRefs = incomingDuplicateKey
+    ? applications
+      .filter((row) => duplicateKey(row) === incomingDuplicateKey)
+      .map((row) => clean(row.ApplicationReference || row.ApplicationID || row.__id))
+      .filter(Boolean)
+    : [];
   const app = {
     ...application,
     ApplicationReference: reference,
@@ -66,6 +80,8 @@ async function submitToFirestore(env, email, code, receiptNo, application) {
     ReceiptNo: receiptNo || clean(sale.ReceiptNo),
     ClassApplyingFor: clean(application.ClassApplyingFor || sale.ClassApplyingFor),
     Status: 'Submitted',
+    DuplicateWarning: duplicateRefs.length ? 'Possible duplicate' : '',
+    DuplicateMatches: duplicateRefs.length ? `First name + surname + parent email match ${duplicateRefs.join(', ')}` : '',
     SubmittedAt: now,
     UpdatedAt: now
   };
