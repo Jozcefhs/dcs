@@ -14,6 +14,7 @@ const walletStatus = document.getElementById('walletStatus');
 const txnLimit = document.getElementById('txnLimit');
 const dailyLimit = document.getElementById('dailyLimit');
 const pinThreshold = document.getElementById('pinThreshold');
+const refreshDashboardBtn = document.getElementById('refreshDashboardBtn');
 
 let dashboard = null;
 let selectedAccountRef = '';
@@ -96,6 +97,10 @@ function isYes(value) {
   return ['yes', 'y', 'true', '1'].includes(String(value || '').trim().toLowerCase());
 }
 
+function isWalletFee(fee) {
+  return String(fee.FeeCode || '').trim() === 'WALLET_TOPUP' || String(fee.FeeCategory || '').trim().toLowerCase() === 'wallet';
+}
+
 function renderDueNotifications(child) {
   const records = dashboard.dueNotifications?.[child.AccountRef] || [];
   dueNotifications.innerHTML = records.length ? '' : '<p class="muted">No payment due date notifications at the moment.</p>';
@@ -107,6 +112,16 @@ function renderDueNotifications(child) {
       <span>${record.DueStatus || 'Due date set'} | ${record.DueDate || ''} | ${money(record.Amount)}</span>
       <small>${[record.AcademicSession, record.Term].filter(Boolean).join(' | ')}</small>
     `;
+    if (record.Components?.length) {
+      const list = document.createElement('ul');
+      list.className = 'component-list';
+      record.Components.forEach((component) => {
+        const line = document.createElement('li');
+        line.textContent = `${component.FeeCategory || component.FeeName || component.FeeCode}: ${component.FeeName || component.FeeCode} - ${money(component.Amount)}`;
+        list.appendChild(line);
+      });
+      item.appendChild(list);
+    }
     dueNotifications.appendChild(item);
   });
 }
@@ -182,13 +197,16 @@ async function loadPayablesForSelected() {
   renderEntranceResults(child);
 }
 
+function amountInputId(fee) {
+  return `amount-${String(fee.FeeCode || 'fee').replace(/[^A-Za-z0-9_-]/g, '-')}`;
+}
+
 function paymentAmountFor(fee) {
+  const input = document.getElementById(amountInputId(fee));
   const amount = Number(String(fee.Amount || '0').replace(/,/g, ''));
-  if (!isYes(fee.AllowInstallment)) return amount;
+  if (!isWalletFee(fee) && !isYes(fee.AllowInstallment)) return amount;
   const min = Number(String(fee.MinAmount || '0').replace(/,/g, ''));
-  const defaultAmount = Number.isFinite(min) && min > 0 ? min : amount;
-  const entered = window.prompt(`Enter amount to pay for ${fee.FeeName || fee.FeeCode}`, String(defaultAmount));
-  if (entered === null) return null;
+  const entered = input ? input.value : '';
   const value = Number(String(entered || '0').replace(/,/g, ''));
   if (!Number.isFinite(value) || value <= 0) {
     setStatus('Enter a valid amount.', 'bad');
@@ -218,7 +236,7 @@ async function payItem(child, fee) {
         accountRef: child.AccountRef,
         feeCode: fee.FeeCode,
         components: fee.Components || undefined,
-        amount: isYes(fee.AllowInstallment) ? amount : undefined
+        amount: (isWalletFee(fee) || isYes(fee.AllowInstallment)) ? amount : undefined
       })
     });
     const data = await response.json();
@@ -240,11 +258,38 @@ function renderPayableItems(child) {
     const item = document.createElement('div');
     item.className = 'activity-item payment-action';
     const period = [fee.AcademicSession, fee.Term].filter(Boolean).join(' | ');
+    const allowAmountEntry = isWalletFee(fee) || isYes(fee.AllowInstallment);
+    const defaultAmount = Number(fee.MinAmount || 0) > 0 ? fee.MinAmount : (isWalletFee(fee) ? '' : fee.Amount);
     item.innerHTML = `
       <strong>${fee.FeeName || fee.FeeCode}</strong>
       <span>${money(fee.Amount)}${period ? ' | ' + period : ''}${fee.DueDate ? ' | Due: ' + fee.DueDate : ''}</span>
       <small>${fee.FeeCategory || ''}${isYes(fee.AllowInstallment) ? ' | Part payment allowed' : ''}</small>
     `;
+    if (fee.Components?.length) {
+      const list = document.createElement('ul');
+      list.className = 'component-list';
+      fee.Components.forEach((component) => {
+        const line = document.createElement('li');
+        line.textContent = `${component.FeeCategory || component.FeeName || component.FeeCode}: ${component.FeeName || component.FeeCode} - ${money(component.Amount)}`;
+        list.appendChild(line);
+      });
+      item.appendChild(list);
+    }
+    if (allowAmountEntry) {
+      const label = document.createElement('label');
+      label.setAttribute('for', amountInputId(fee));
+      label.textContent = isWalletFee(fee) ? 'Wallet top-up amount' : 'Amount to pay now';
+      const input = document.createElement('input');
+      input.id = amountInputId(fee);
+      input.type = 'number';
+      input.min = fee.MinAmount || '1';
+      if (!isWalletFee(fee) && fee.MaxAmount) input.max = fee.MaxAmount;
+      input.step = '0.01';
+      input.value = defaultAmount;
+      input.inputMode = 'decimal';
+      item.appendChild(label);
+      item.appendChild(input);
+    }
     const button = document.createElement('button');
     button.type = 'button';
     button.textContent = 'Pay Now';
@@ -407,3 +452,13 @@ restrictionForm.addEventListener('submit', async (event) => {
     setStatus(error.message, 'bad');
   }
 });
+
+if (refreshDashboardBtn) {
+  refreshDashboardBtn.addEventListener('click', async () => {
+    try {
+      await loadDashboard();
+    } catch (error) {
+      setStatus(error.message, 'bad');
+    }
+  });
+}
