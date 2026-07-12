@@ -817,7 +817,7 @@ export async function getPayableFees(env, body = {}) {
     if (!feeMatchesApplication(fee, billingApp)) return false;
     if (isAcceptanceFee) {
       if (yesNo(app.AcceptanceFeePaid) === 'YES') return false;
-      return admittedForPreEnrollment;
+      return admittedForPreEnrollment && yesNo(app.OfferSent) === 'YES';
     }
     if (!enrolledForBilling) {
       if (!admittedForPreEnrollment) return false;
@@ -1065,6 +1065,7 @@ async function updateEntranceResult(env, body) {
     ResultPercentage: body.ResultPercentage ?? '',
     ResultStatus: resultStatus,
     ResultNotes: body.ResultNotes ?? '',
+    ResultNextStep: body.ResultNextStep ?? body.NextStep ?? '',
     ResultUpdatedBy: clean(body.ResultUpdatedBy) || 'Admissions Office',
     ResultUpdatedAt: nowIso(),
     ResultReadyOnline: clean(body.ResultReadyOnline || body.resultReadyOnline || body.ResultPublished || ''),
@@ -1576,7 +1577,7 @@ async function seedDefaultFeeItems(env) {
   return { ok: true, message: added ? 'Default fee items created in Firestore.' : 'Default fee items already exist in Firestore.', added };
 }
 
-async function recordManualPayment(env, body) {
+export async function recordManualPayment(env, body) {
   const accountRef = clean(body.AccountRef || body.accountRef || body.ApplicationReference);
   const feeCode = clean(body.FeeCode || body.feeCode);
   const amount = asMoneyNumber(body.Amount || body.amount);

@@ -1,9 +1,17 @@
+const setupLoginForm = document.getElementById('setupLoginForm');
 const setupForm = document.getElementById('setupForm');
+const setupLoginStatus = document.getElementById('setupLoginStatus');
 const setupStatus = document.getElementById('setupStatus');
+let unlockedPassword = '';
 
 function setStatus(message, type) {
   setupStatus.textContent = message || '';
   setupStatus.className = 'status ' + (type || '');
+}
+
+function setLoginStatus(message, type) {
+  setupLoginStatus.textContent = message || '';
+  setupLoginStatus.className = 'status ' + (type || '');
 }
 
 function setField(id, value) {
@@ -26,9 +34,15 @@ function profileFromForm() {
   };
 }
 
-async function loadProfile() {
+async function loadProfile(password = '') {
   try {
-    const response = await fetch('/api/settings');
+    const response = password
+      ? await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'load', password })
+        })
+      : await fetch('/api/settings');
     const data = await response.json();
     if (!response.ok || !data.ok) throw new Error(data.message || 'Could not load setup.');
     const profile = data.profile || {};
@@ -46,6 +60,21 @@ async function loadProfile() {
   }
 }
 
+setupLoginForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    setLoginStatus('Checking password...', '');
+    unlockedPassword = document.getElementById('setupPassword').value;
+    await loadProfile(unlockedPassword);
+    setupLoginForm.hidden = true;
+    setupForm.hidden = false;
+    setStatus('Setup unlocked.', 'ok');
+  } catch (error) {
+    unlockedPassword = '';
+    setLoginStatus(error.message, 'bad');
+  }
+});
+
 setupForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   try {
@@ -54,7 +83,7 @@ setupForm.addEventListener('submit', async (event) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        password: document.getElementById('setupPassword').value,
+        password: unlockedPassword,
         profile: profileFromForm()
       })
     });
@@ -66,4 +95,4 @@ setupForm.addEventListener('submit', async (event) => {
   }
 });
 
-loadProfile();
+// Public pages can read the school profile, but setup editing stays locked until password entry.

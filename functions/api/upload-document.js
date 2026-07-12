@@ -24,7 +24,10 @@ export async function onRequestPost(context) {
       return Response.json({ ok: false, message: 'Choose a file to upload.' }, { status: 400 });
     }
     if (!env.GOOGLE_APPS_SCRIPT_URL) {
-      return Response.json({ ok: false, message: 'Server upload is not configured yet.' }, { status: 500 });
+      return Response.json({
+        ok: false,
+        message: 'Document upload storage is not configured. In Firestore mode, files are not stored inside Firestore; configure Google Apps Script/Google Drive, Firebase Storage, or Cloudflare R2 for document storage.'
+      }, { status: 500 });
     }
 
     const payload = {

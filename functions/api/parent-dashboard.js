@@ -128,22 +128,23 @@ async function appsScriptAction(env, action, payload = {}) {
   }
 }
 
-async function loadParentSources(env) {
+async function loadParentSources(env, scope = 'full') {
+  const full = scope !== 'identity';
   const [firestoreSales, firestoreApplications, firestoreStudents, firestoreLedger, firestoreInvoices, firestorePayments, firestoreClinic] = await Promise.all([
     firestoreRows(env, 'formSales'),
     firestoreRows(env, 'applications'),
     firestoreRows(env, 'students'),
-    firestoreRows(env, 'ledger'),
-    firestoreRows(env, 'invoices'),
-    firestoreRows(env, 'payments'),
-    firestoreRows(env, 'clinicRecords')
+    full ? firestoreRows(env, 'ledger') : Promise.resolve([]),
+    full ? firestoreRows(env, 'invoices') : Promise.resolve([]),
+    full ? firestoreRows(env, 'payments') : Promise.resolve([]),
+    full ? firestoreRows(env, 'clinicRecords') : Promise.resolve([])
   ]);
   const [sheetSales, sheetApplications, sheetStudents, sheetFinance, sheetClinic] = await Promise.all([
     appsScriptAction(env, 'getFormSales'),
     appsScriptAction(env, 'getApplications'),
     appsScriptAction(env, 'getStudents'),
-    appsScriptAction(env, 'getAccountsOverview'),
-    appsScriptAction(env, 'getClinicRecords')
+    full ? appsScriptAction(env, 'getAccountsOverview') : Promise.resolve(null),
+    full ? appsScriptAction(env, 'getClinicRecords') : Promise.resolve(null)
   ]);
   return {
     sales: [...firestoreSales, ...((sheetSales && sheetSales.ok && sheetSales.sales) || [])],
@@ -369,6 +370,7 @@ function buildEntranceResult(application) {
     ResultPercentage: pick(application, ['ResultPercentage', 'resultPercentage', 'Percentage', 'percentage']),
     ResultStatus: pick(application, ['ResultStatus', 'resultStatus', 'AdmissionDecision', 'admissionDecision', 'Status', 'status']),
     ResultNotes: pick(application, ['ResultNotes', 'resultNotes', 'Notes', 'notes']),
+    ResultNextStep: pick(application, ['ResultNextStep', 'resultNextStep', 'NextStep', 'nextStep']),
     ResultUpdatedAt: toDisplayDate(pick(application, ['ResultUpdatedAt', 'resultUpdatedAt', 'UpdatedAt', 'updatedAt'])),
     ResultSentAt: toDisplayDate(pick(application, ['ResultSentAt', 'resultSentAt', 'EntranceResultSentAt', 'entranceResultSentAt']))
   };
@@ -518,7 +520,7 @@ function invoiceDueNotifications(invoices, keys) {
 async function getDashboard(env, body) {
   const email = lower(body.email || body.ParentEmail || body.Email);
   const code = clean(body.code || body.VerificationCode).toUpperCase();
-  const sources = await loadParentSources(env);
+  const sources = await loadParentSources(env, 'identity');
   const { applications, matchingApplications } = await assertParentAccess(sources, email, code);
   const allStudents = (sources.students || []).map(normalizeStudent);
   const children = allStudents.filter((student) => parentOwnsStudent(student, email, applications, matchingApplications));
@@ -600,6 +602,69 @@ async function getDashboard(env, body) {
   };
 }
 
+async function getChildActivity(env, body) {
+  const email = lower(body.email || body.ParentEmail || body.Email);
+  const code = clean(body.code || body.VerificationCode).toUpperCase();
+  const accountRef = clean(body.accountRef || body.AccountRef || body.AdmissionNo);
+  const sources = await loadParentSources(env, 'full');
+  const { applications, matchingApplications } = await assertParentAccess(sources, email, code);
+  const allStudents = (sources.students || []).map(normalizeStudent);
+  const children = allStudents.filter((student) => parentOwnsStudent(student, email, applications, matchingApplications));
+  const childRefs = new Set(children.flatMap((child) => accountKeys(child).map((key) => lower(key))));
+  applications
+    .filter((app) => {
+      const emailMatch = [
+        pick(app, ['VerificationEmail', 'verificationEmail']),
+        pick(app, ['ParentEmail', 'parentEmail']),
+        pick(app, ['Email', 'email'])
+      ].some((value) => lower(value) === email);
+      const codeMatch = clean(pick(app, ['VerificationCode', 'verificationCode'])).toUpperCase() === code;
+      return emailMatch || codeMatch;
+    })
+    .map(normalizeApplicationChild)
+    .filter((child) => child.AccountRef && !childRefs.has(lower(child.AccountRef)))
+    .forEach((child) => {
+      children.push(child);
+      accountKeys(child).forEach((key) => childRefs.add(lower(key)));
+    });
+  const child = children.find((row) => accountKeys(row).some((key) => anyKeyMatches(accountRef, [key])));
+  if (!child) {
+    const err = new Error('The selected child was not found for this parent account.');
+    err.status = 404;
+    throw err;
+  }
+  const keys = accountKeys(child);
+  const ledger = (sources.ledger || []).map(normalizeLedger);
+  const invoices = (sources.invoices || []).map(normalizeInvoice);
+  const payments = (sources.payments || []).map(normalizePayment);
+  const clinic = (sources.clinic || []).map(normalizeClinicRecord);
+  const walletEntries = ledger.filter((entry) => anyKeyMatches(entry.AccountRef, keys) && lower(entry.FeeCategory) === 'wallet')
+    .sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
+  const paymentEntries = payments.filter((entry) => anyKeyMatches(entry.AccountRef, keys)).map((entry) => ({
+    ...entry,
+    RecordType: 'Payment',
+    Description: entry.FeeCategory || entry.Department || entry.FeeName || entry.FeeCode || 'Payment',
+    Credit: entry.Amount,
+    Status: entry.Status || 'Paid'
+  }));
+  const ledgerPaymentEntries = groupedLedgerPayments(ledger.filter((entry) => anyKeyMatches(entry.AccountRef, keys) && lower(entry.FeeCategory) !== 'wallet'));
+  const resultSource = applications.find((app) => {
+    const appRef = pick(app, ['ApplicationReference', 'applicationReference', 'ApplicationID', 'applicationId', '__id']);
+    return keys.some((key) => referencesMatch(appRef, key) || sameText(appRef, key));
+  }) || (child.SourceType === 'Application' ? child : null);
+  const result = buildEntranceResult(resultSource);
+  return {
+    ok: true,
+    accountRef: child.AccountRef,
+    walletActivity: walletEntries,
+    walletBalance: walletBalance(walletEntries),
+    paymentRecords: (paymentEntries.length ? paymentEntries : ledgerPaymentEntries).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date))),
+    dueNotifications: invoiceDueNotifications(invoices, keys),
+    clinicVisits: clinic.filter((record) => anyKeyMatches(record.AdmissionNo, keys)).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date))),
+    entranceResults: result ? [result] : []
+  };
+}
+
 async function updateWalletRestrictions(env, body) {
   const email = lower(body.email || body.ParentEmail || body.Email);
   requireFirestoreEnv(env);
@@ -672,6 +737,8 @@ export async function onRequestPost(context) {
     let data;
     if (action === 'updateWalletRestrictions') {
       data = await updateWalletRestrictions(env, body);
+    } else if (action === 'getChildActivity') {
+      data = await getChildActivity(env, body);
     } else if (action === 'getChildPayable') {
       data = await getChildPayable(env, body);
     } else {

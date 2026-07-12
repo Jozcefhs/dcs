@@ -60,6 +60,10 @@ export async function onRequestPost(context) {
     const { request, env } = context;
     const body = await request.json().catch(() => ({}));
     requireAdmin(env, body.password);
+    if (clean(body.action || body.Action) === 'load') {
+      const profile = await getProfile(env);
+      return Response.json({ ok: true, profile });
+    }
     requireFirestoreEnv(env);
 
     const incoming = body.profile || {};

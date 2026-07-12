@@ -1,5 +1,7 @@
 // Cloudflare Pages Function: /api/verify-payment
-// Verifies Paystack payment and records it in Apps Script.
+// Verifies Paystack payment and records it in the configured backend.
+
+import { recordManualPayment } from './backend.js';
 
 function extractMetadata(data) {
   const metadata = data && data.metadata;
@@ -24,7 +26,10 @@ export async function onRequestPost(context) {
       return Response.json({ ok: false, message: 'Payment reference is required.' }, { status: 400 });
     }
 
-    if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET || !env.PAYSTACK_SECRET_KEY) {
+    const firestoreConfigured = env.FIREBASE_PROJECT_ID && env.FIREBASE_CLIENT_EMAIL && env.FIREBASE_PRIVATE_KEY;
+    const appsScriptConfigured = env.GOOGLE_APPS_SCRIPT_URL && env.GOOGLE_APPS_SCRIPT_SECRET;
+
+    if (!env.PAYSTACK_SECRET_KEY || (!firestoreConfigured && !appsScriptConfigured)) {
       return Response.json({ ok: false, message: 'Online payment verification is not configured yet.' }, { status: 500 });
     }
 
@@ -39,44 +44,51 @@ export async function onRequestPost(context) {
     const tx = paystackData.data;
     const meta = extractMetadata(tx);
     const amount = Number(tx.amount || 0) / 100;
-    const recordRes = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        Secret: env.GOOGLE_APPS_SCRIPT_SECRET,
-        Action: 'recordOnlinePayment',
-        AccountRef: meta.accountRef || meta.applicationReference,
-        ApplicationReference: meta.applicationReference || '',
-        AdmissionNo: meta.admissionNo || '',
-        DisplayName: meta.displayName || '',
-        ClassName: meta.className || '',
-        StudentType: meta.studentType || '',
-        AcademicSession: meta.academicSession || '',
-        Term: meta.term || '',
-        FeeCode: meta.feeCode || 'ONLINE_PAYMENT',
-        FeeName: meta.feeName || 'Online Payment',
-        FeeCategory: meta.feeCategory || '',
-        PaymentType: meta.paymentType || '',
-        FeeItems: meta.feeItems ? JSON.stringify(meta.feeItems) : '',
-        Amount: amount,
-        Currency: tx.currency || 'NGN',
-        Gateway: 'Paystack',
-        Method: 'Online',
-        Reference: tx.reference,
-        GatewayReference: tx.reference,
-        Channel: tx.channel || '',
-        PaidAt: tx.paid_at || tx.paidAt || '',
-        ReceiptNo: tx.receipt_number || '',
-        Metadata: JSON.stringify({
-          paystackId: tx.id,
-          gatewayResponse: tx.gateway_response,
-          fees: tx.fees,
-          requestedAmount: tx.requested_amount,
-          metadata: meta
-        })
+    const paymentPayload = {
+      Secret: env.GOOGLE_APPS_SCRIPT_SECRET,
+      Action: 'recordOnlinePayment',
+      AccountRef: meta.accountRef || meta.applicationReference,
+      ApplicationReference: meta.applicationReference || '',
+      AdmissionNo: meta.admissionNo || '',
+      DisplayName: meta.displayName || '',
+      ClassName: meta.className || '',
+      StudentType: meta.studentType || '',
+      AcademicSession: meta.academicSession || '',
+      Term: meta.term || '',
+      FeeCode: meta.feeCode || 'ONLINE_PAYMENT',
+      FeeName: meta.feeName || 'Online Payment',
+      FeeCategory: meta.feeCategory || '',
+      PaymentType: meta.paymentType || '',
+      FeeItems: meta.feeItems ? JSON.stringify(meta.feeItems) : '',
+      Amount: amount,
+      Currency: tx.currency || 'NGN',
+      Gateway: 'Paystack',
+      Method: 'Online',
+      Reference: tx.reference,
+      GatewayReference: tx.reference,
+      Channel: tx.channel || '',
+      PaidAt: tx.paid_at || tx.paidAt || '',
+      ReceiptNo: tx.receipt_number || '',
+      Metadata: JSON.stringify({
+        paystackId: tx.id,
+        gatewayResponse: tx.gateway_response,
+        fees: tx.fees,
+        requestedAmount: tx.requested_amount,
+        metadata: meta
       })
-    });
-    const recordData = await recordRes.json();
+    };
+
+    let recordData;
+    if (firestoreConfigured) {
+      recordData = await recordManualPayment(env, paymentPayload);
+    } else {
+      const recordRes = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(paymentPayload)
+      });
+      recordData = await recordRes.json();
+    }
     if (!recordData.ok) {
       return Response.json(recordData, { status: 400 });
     }

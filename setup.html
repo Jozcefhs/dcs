@@ -17,13 +17,17 @@
         </div>
       </div>
 
-      <form id="setupForm">
+      <form id="setupLoginForm" class="dashboard-login">
         <fieldset>
           <legend>Security</legend>
           <label for="setupPassword">Setup Password <span class="required">*</span></label>
           <input id="setupPassword" type="password" autocomplete="current-password" required>
+          <button type="submit">Unlock Setup</button>
         </fieldset>
+        <p id="setupLoginStatus" class="status"></p>
+      </form>
 
+      <form id="setupForm" hidden>
         <fieldset>
           <legend>School Profile</legend>
           <div class="grid two">

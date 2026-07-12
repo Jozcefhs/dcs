@@ -118,26 +118,57 @@ async function loadPayablesForSelected() {
   dashboard.payableItems = dashboard.payableItems || {};
   dashboard.payableErrors = dashboard.payableErrors || {};
   dashboard.dueNotifications = dashboard.dueNotifications || {};
+  dashboard.walletActivity = dashboard.walletActivity || {};
+  dashboard.paymentRecords = dashboard.paymentRecords || {};
+  dashboard.clinicVisits = dashboard.clinicVisits || {};
+  dashboard.entranceResults = dashboard.entranceResults || {};
   dashboard.payableItems[child.AccountRef] = [];
   dashboard.payableErrors[child.AccountRef] = '';
   renderPayableItems(child);
   renderDueNotifications(child);
+  renderWallet(child);
+  renderPayments(child);
+  renderClinic(child);
+  renderEntranceResults(child);
   try {
-    const response = await fetch('/api/parent-dashboard', {
+    const baseBody = {
+      ...authPayload(),
+      accountRef: child.AccountRef
+    };
+    const payableRequest = fetch('/api/parent-dashboard', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         action: 'getChildPayable',
-        ...authPayload(),
-        accountRef: child.AccountRef
+        ...baseBody
       })
     });
-    const data = await response.json();
-    if (!response.ok || !data.ok) {
-      throw new Error(data.message || 'Could not load payable items.');
+    const activityRequest = fetch('/api/parent-dashboard', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'getChildActivity',
+        ...baseBody
+      })
+    });
+    const [payableResponse, activityResponse] = await Promise.all([payableRequest, activityRequest]);
+    const payableData = await payableResponse.json();
+    const activityData = await activityResponse.json();
+    if (!payableResponse.ok || !payableData.ok) {
+      dashboard.payableErrors[child.AccountRef] = payableData.message || 'Could not load payable items.';
+    } else {
+      dashboard.payableItems[child.AccountRef] = payableData.payableItems || [];
+      dashboard.dueNotifications[child.AccountRef] = payableData.dueNotifications || [];
     }
-    dashboard.payableItems[child.AccountRef] = data.payableItems || [];
-    dashboard.dueNotifications[child.AccountRef] = data.dueNotifications || [];
+    if (activityResponse.ok && activityData.ok) {
+      dashboard.walletActivity[child.AccountRef] = activityData.walletActivity || [];
+      dashboard.paymentRecords[child.AccountRef] = activityData.paymentRecords || [];
+      dashboard.clinicVisits[child.AccountRef] = activityData.clinicVisits || [];
+      dashboard.entranceResults[child.AccountRef] = activityData.entranceResults || [];
+      child.WalletBalance = activityData.walletBalance ?? child.WalletBalance;
+    } else {
+      dashboard.payableErrors[child.AccountRef] = dashboard.payableErrors[child.AccountRef] || activityData.message || 'Could not load child activity.';
+    }
   } catch (error) {
     dashboard.payableItems[child.AccountRef] = [];
     dashboard.dueNotifications[child.AccountRef] = [];
@@ -145,6 +176,10 @@ async function loadPayablesForSelected() {
   }
   renderPayableItems(child);
   renderDueNotifications(child);
+  renderWallet(child);
+  renderPayments(child);
+  renderClinic(child);
+  renderEntranceResults(child);
 }
 
 function paymentAmountFor(fee) {
@@ -270,7 +305,7 @@ function renderEntranceResults(child) {
       item.innerHTML = `
         <strong>${status}</strong>
         <span>${[percentage || 'Percentage not recorded', date].filter(Boolean).join(' | ')}</span>
-        <small>${record.ResultNotes || ''}</small>
+        <small>${[record.ResultNotes, record.ResultNextStep].filter(Boolean).join(' | ')}</small>
       `;
     } else {
       item.innerHTML = `
@@ -282,7 +317,7 @@ function renderEntranceResults(child) {
           <span>Interview / General: <strong>${record.InterviewScore || '-'}</strong></span>
           <span>Total: <strong>${record.TotalScore || '-'}</strong></span>
         </div>
-        <small>${record.ResultNotes || ''}</small>
+        <small>${[record.ResultNotes, record.ResultNextStep].filter(Boolean).join(' | ')}</small>
       `;
     }
     entranceResults.appendChild(item);
