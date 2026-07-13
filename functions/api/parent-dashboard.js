@@ -42,6 +42,15 @@ function toDisplayDate(value) {
   return Number.isNaN(date.getTime()) ? text : date.toISOString().slice(0, 10);
 }
 
+function timestampMs(value) {
+  const text = clean(value);
+  if (!text) return 0;
+  const date = new Date(text);
+  if (!Number.isNaN(date.getTime())) return date.getTime();
+  const dateOnly = new Date(`${text}T00:00:00`);
+  return Number.isNaN(dateOnly.getTime()) ? 0 : dateOnly.getTime();
+}
+
 function sameText(left, right) {
   return lower(left) === lower(right);
 }
@@ -218,6 +227,8 @@ function normalizeApplicationChild(row) {
     ResultNotes: pick(row, ['ResultNotes', 'resultNotes', 'Notes', 'notes']),
     ResultSent: pick(row, ['ResultSent', 'resultSent', 'EntranceResultSent', 'entranceResultSent']),
     ResultReadyOnline: pick(row, ['ResultReadyOnline', 'resultReadyOnline', 'ResultPublished', 'resultPublished']),
+    SubmittedAt: pick(row, ['SubmittedAt', 'submittedAt', 'CreatedAt', 'createdAt', 'ApplicationDate', 'applicationDate', 'Timestamp', 'timestamp']),
+    CreatedAt: pick(row, ['CreatedAt', 'createdAt', 'SubmittedAt', 'submittedAt']),
     SourceType: 'Application'
   };
 }
@@ -225,6 +236,7 @@ function normalizeApplicationChild(row) {
 function normalizeLedger(row) {
   return {
     Date: toDisplayDate(pick(row, ['Date', 'date', 'CreatedAt', 'createdAt'])),
+    RawDate: pick(row, ['Date', 'date', 'CreatedAt', 'createdAt', 'PaidAt', 'paidAt']),
     AccountRef: pick(row, ['AccountRef', 'accountRef', 'AdmissionNo', 'admissionNo']),
     ApplicationReference: pick(row, ['ApplicationReference', 'applicationReference']),
     ApplicationID: pick(row, ['ApplicationID', 'applicationId']),
@@ -526,8 +538,12 @@ function paymentHistoryForChild(child, payments, ledger) {
   if (!childCanShowFinanceHistory(child)) return [];
   if (child && child.SourceType === 'Application') {
     const appRef = clean(child.ApplicationReference || child.AccountRef);
+    const childCreatedMs = timestampMs(child.SubmittedAt || child.CreatedAt || child.UpdatedAt);
     const appLedger = (ledger || []).filter((entry) => {
-      return lower(entry.FeeCategory) !== 'wallet' && isPaidRecord(entry) && recordMatchesApplication(entry, appRef);
+      if (lower(entry.FeeCategory) === 'wallet' || !isPaidRecord(entry) || !recordMatchesApplication(entry, appRef)) return false;
+      if (!childCreatedMs) return false;
+      const entryMs = timestampMs(entry.RawDate || entry.Date);
+      return entryMs >= childCreatedMs;
     });
     return groupedLedgerPayments(appLedger).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
   }

@@ -37,6 +37,15 @@ function toDisplayDate(value) {
   return date.toISOString().slice(0, 10);
 }
 
+function timestampMs(value) {
+  const text = clean(value);
+  if (!text) return 0;
+  const date = new Date(text);
+  if (!Number.isNaN(date.getTime())) return date.getTime();
+  const dateOnly = new Date(`${text}T00:00:00`);
+  return Number.isNaN(dateOnly.getTime()) ? 0 : dateOnly.getTime();
+}
+
 function pick(row, keys, fallback = '') {
   for (const key of keys) {
     if (row[key] !== undefined && row[key] !== null && String(row[key]).trim() !== '') {
@@ -322,6 +331,7 @@ function normalizeLedger(row) {
     ...row,
     LedgerNo: pick(row, ['ledgerNo', 'LedgerNo', 'LedgerId', 'LedgerID', '__id']),
     Date: toDisplayDate(pick(row, ['date', 'Date', 'createdAt', 'CreatedAt'])),
+    RawDate: pick(row, ['date', 'Date', 'createdAt', 'CreatedAt', 'paidAt', 'PaidAt']),
     AccountRef: pick(row, ['accountRef', 'AccountRef']),
     ApplicationReference: pick(row, ['applicationReference', 'ApplicationReference']),
     AdmissionNo: pick(row, ['admissionNo', 'AdmissionNo']),
@@ -843,8 +853,14 @@ export async function getPayableFees(env, body = {}) {
   const applicationStatus = normalizeMatchText(app.Status);
   const resultStatus = normalizeMatchText(app.ResultStatus);
   const admittedForPreEnrollment = resultStatus === 'admitted' || ['admitted', 'accepted', 'admission letter sent'].includes(applicationStatus);
+  const applicationCreatedAt = timestampMs(app.SubmittedAt || app.CreatedAt || app.UpdatedAt);
+  const notStaleForApplication = (row) => {
+    if (!applicationCreatedAt) return true;
+    const rowTime = timestampMs(row.RawDate || row.Date);
+    return !rowTime || rowTime >= applicationCreatedAt;
+  };
   const acceptanceAlreadyPaid = yesNo(app.AcceptanceFeePaid) === 'YES' ||
-    ledgerRows.map(normalizeLedger).filter(rowMatchesAccount).some((row) => {
+    ledgerRows.map(normalizeLedger).filter(rowMatchesAccount).filter(notStaleForApplication).some((row) => {
       if (asMoneyNumber(row.Credit) <= 0) return false;
       return isAcceptanceFeeLike(row);
     });
@@ -892,7 +908,7 @@ export async function getPayableFees(env, body = {}) {
       addBalanceCredit(row.FeeCode || row.FeeName, row.Debit || row.Balance, row.AcademicSession, row.Term);
     }
   });
-  ledgerRows.map(normalizeLedger).filter(rowMatchesAccount).forEach((row) => {
+  ledgerRows.map(normalizeLedger).filter(rowMatchesAccount).filter(notStaleForApplication).forEach((row) => {
     const credit = asMoneyNumber(row.Credit);
     if (credit <= 0) return;
     addPaid(paymentCodeMap, row.FeeCode, credit);
@@ -996,9 +1012,18 @@ async function getAccountsOverview(env) {
       BillingCategory: clean(existing.BillingCategory || normalized.BillingCategory) || 'Regular',
       AcademicSession: clean(existing.AcademicSession || normalized.AcademicSession),
       Term: clean(existing.Term || normalized.Term),
-      Status: clean(existing.Status || normalized.Status)
+    Status: clean(existing.Status || normalized.Status)
     });
   };
+  const applicationCreatedMap = new Map();
+  applications.map(normalizeApplication).forEach((app) => {
+    const refs = accountRefsFrom(app);
+    const createdAt = timestampMs(app.SubmittedAt || app.CreatedAt || app.UpdatedAt);
+    refs.forEach((ref) => {
+      const key = safeDocumentId(ref).toLowerCase();
+      if (key && createdAt) applicationCreatedMap.set(key, createdAt);
+    });
+  });
   accounts.map(normalizeAccount).forEach(putAccount);
   students.map(normalizeStudent).forEach((student) => putAccount({
     AccountRef: student.AdmissionNo || student.ApplicationReference,
@@ -1062,6 +1087,11 @@ async function getAccountsOverview(env) {
       const rowRefs = accountRefsFrom(row);
       const matched = rowRefs.some((ref) => referencesAny(ref, refs));
       if (!matched) return;
+      const accountCreatedAt = refs
+        .map((ref) => applicationCreatedMap.get(safeDocumentId(ref).toLowerCase()) || 0)
+        .filter(Boolean)
+        .sort((a, b) => b - a)[0] || 0;
+      if (accountCreatedAt && timestampMs(row.RawDate || row.Date) && timestampMs(row.RawDate || row.Date) < accountCreatedAt) return;
       const debit = asMoneyNumber(row.Debit);
       const credit = asMoneyNumber(row.Credit);
       totalDebit += debit;
