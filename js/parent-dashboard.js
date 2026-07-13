@@ -117,7 +117,13 @@ function renderComponents(parent, components) {
     list.className = 'component-list';
     rows.forEach((component) => {
       const line = document.createElement('li');
-      line.textContent = `${component.FeeName || component.FeeCode}: ${money(component.Amount)}`;
+      const originalAmount = component.OriginalAmount || component.Amount;
+      const credit = Number(String(component.AcceptanceCreditApplied || '0').replace(/,/g, ''));
+      const balance = component.BalanceAmount || component.Amount;
+      const creditNote = Number.isFinite(credit) && credit > 0
+        ? ` (less acceptance credit ${money(credit)}; balance ${money(balance)})`
+        : '';
+      line.textContent = `${component.FeeName || component.FeeCode}: ${money(originalAmount)}${creditNote}`;
       list.appendChild(line);
     });
     parent.appendChild(list);

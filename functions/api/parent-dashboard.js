@@ -432,7 +432,7 @@ function schoolFeeTotalItem(breakdown) {
       FeeCode: fee.FeeCode,
       FeeName: fee.FeeName,
       FeeCategory: fee.FeeCategory || 'School Fee',
-      Amount: fee.Amount,
+      Amount: fee.OriginalAmount || fee.Amount,
       OriginalAmount: fee.OriginalAmount || fee.Amount,
       PaidAmount: fee.PaidAmount || '',
       AcceptanceCreditApplied: fee.AcceptanceCreditApplied || '',
