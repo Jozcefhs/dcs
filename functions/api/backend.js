@@ -1008,12 +1008,26 @@ async function getAccountsOverview(env) {
   const normalizedInvoices = invoices.map(normalizeInvoice);
   const normalizedStoredLedger = storedLedger.map(normalizeLedger);
   const accountMap = new Map();
+  const accountAliasMap = new Map();
+  const accountKeyForRefs = (refs, fallback) => {
+    for (const ref of refs) {
+      const alias = accountAliasMap.get(safeDocumentId(ref).toLowerCase());
+      if (alias) return alias;
+    }
+    return safeDocumentId(fallback || refs[0]).toLowerCase();
+  };
+  const registerAccountAliases = (key, refs) => {
+    refs.forEach((ref) => {
+      const alias = safeDocumentId(ref).toLowerCase();
+      if (alias) accountAliasMap.set(alias, key);
+    });
+  };
   const putAccount = (row) => {
     const normalized = normalizeAccount(row || {});
     const refs = accountRefsFrom(normalized);
     const accountRef = clean(normalized.AccountRef || refs[0]);
     if (!accountRef) return;
-    const key = safeDocumentId(accountRef).toLowerCase();
+    const key = accountKeyForRefs(refs, accountRef);
     const existing = accountMap.get(key) || {};
     accountMap.set(key, {
       ...existing,
@@ -1033,6 +1047,7 @@ async function getAccountsOverview(env) {
       Enrolled: clean(existing.Enrolled || normalized.Enrolled),
       AdmissionLetterSent: clean(existing.AdmissionLetterSent || normalized.AdmissionLetterSent)
     });
+    registerAccountAliases(key, accountRefsFrom(accountMap.get(key)));
   };
   const applicationCreatedMap = new Map();
   applications.map(normalizeApplication).forEach((app) => {
@@ -1107,10 +1122,14 @@ async function getAccountsOverview(env) {
     let totalCredit = 0;
     let walletBalance = asMoneyNumber(account.WalletBalance);
     let lastPaymentAt = clean(account.LastPaymentAt);
+    const countedLedgerKeys = new Set();
     ledgerRows.forEach((row) => {
       const rowRefs = accountRefsFrom(row);
       const matched = rowRefs.some((ref) => referencesAny(ref, refs));
       if (!matched) return;
+      const ledgerKey = clean(row.LedgerNo || row.Reference || `${row.Date}|${row.AccountRef}|${row.FeeCode}|${row.Debit}|${row.Credit}`);
+      if (ledgerKey && countedLedgerKeys.has(ledgerKey)) return;
+      if (ledgerKey) countedLedgerKeys.add(ledgerKey);
       const accountCreatedAt = refs
         .map((ref) => applicationCreatedMap.get(safeDocumentId(ref).toLowerCase()) || 0)
         .filter(Boolean)
