@@ -536,6 +536,21 @@ function isWalletFee(fee) {
   return clean(fee && fee.FeeCode) === 'WALLET_TOPUP' || normalizeMatchText(fee && fee.FeeCategory) === 'wallet';
 }
 
+function isWalletLedger(row) {
+  return clean(row && row.FeeCode).toUpperCase() === 'WALLET_TOPUP' ||
+    normalizeMatchText(row && row.FeeCategory) === 'wallet' ||
+    normalizeMatchText(row && row.EntryType).includes('wallet');
+}
+
+function ledgerFeeKey(row) {
+  const code = normalizeMatchText(row && row.FeeCode);
+  if (code) return `code:${code}`;
+  const name = normalizeMatchText((row && (row.FeeName || row.Description)) || '');
+  const category = normalizeMatchText(row && row.FeeCategory);
+  if (name || category) return `text:${category}|${name}`;
+  return '';
+}
+
 function periodKey(key, session, term) {
   const cleanKey = clean(key);
   if (!cleanKey) return '';
@@ -1123,6 +1138,8 @@ async function getAccountsOverview(env) {
     let walletBalance = asMoneyNumber(account.WalletBalance);
     let lastPaymentAt = clean(account.LastPaymentAt);
     const countedLedgerKeys = new Set();
+    const ledgerDebitKeys = new Set();
+    const feeCreditRows = [];
     ledgerRows.forEach((row) => {
       const rowRefs = accountRefsFrom(row);
       const matched = rowRefs.some((ref) => referencesAny(ref, refs));
@@ -1137,10 +1154,18 @@ async function getAccountsOverview(env) {
       if (accountCreatedAt && timestampMs(row.RawDate || row.Date) && timestampMs(row.RawDate || row.Date) < accountCreatedAt) return;
       const debit = asMoneyNumber(row.Debit);
       const credit = asMoneyNumber(row.Credit);
-      totalDebit += debit;
-      totalCredit += credit;
-      if (normalizeMatchText(row.EntryType).includes('wallet')) {
+      if (isWalletLedger(row)) {
         walletBalance += credit - debit;
+        return;
+      }
+      if (debit > 0) {
+        totalDebit += debit;
+        const feeKey = ledgerFeeKey(row);
+        if (feeKey) ledgerDebitKeys.add(feeKey);
+      }
+      if (credit > 0) {
+        totalCredit += credit;
+        feeCreditRows.push(row);
       }
       if (credit > 0 && row.Date && (!lastPaymentAt || String(row.Date) > String(lastPaymentAt))) {
         lastPaymentAt = row.Date;
@@ -1152,7 +1177,7 @@ async function getAccountsOverview(env) {
     const isAdmitted = resultStatus === 'admitted' || ['admitted', 'accepted', 'admission letter sent'].includes(accountStatus);
     const offerSent = yesNo(account.OfferSent) === 'YES';
     if (isEnrolled || (isAdmitted && offerSent)) {
-      const expectedFeeDebit = normalizedFeeItems
+      const matchingExpectedFees = normalizedFeeItems
         .filter((fee) => yesNo(fee.Active) === 'YES')
         .filter((fee) => yesNo(fee.PayableOnline || 'YES') === 'YES')
         .filter((fee) => !isWalletFee(fee))
@@ -1164,10 +1189,37 @@ async function getAccountsOverview(env) {
           }
           return category === 'admission' || requiredForEnrollment;
         })
-        .filter((fee) => feeMatchesApplication(fee, account))
-        .reduce((sum, fee) => sum + asMoneyNumber(fee.Amount), 0);
+        .filter((fee) => feeMatchesApplication(fee, account));
+      const expectedFeeDebit = matchingExpectedFees.reduce((sum, fee) => sum + asMoneyNumber(fee.Amount), 0);
       if (expectedFeeDebit > totalDebit) {
         totalDebit = expectedFeeDebit;
+      }
+      if (isEnrolled) {
+        const paidPreEnrollmentFees = normalizedFeeItems
+          .filter((fee) => yesNo(fee.Active) === 'YES')
+          .filter((fee) => !isWalletFee(fee))
+          .filter((fee) => !isAcceptanceFeeLike(fee))
+          .filter((fee) => {
+            const category = normalizeMatchText(fee.FeeCategory || 'School Fee');
+            return category === 'admission' || yesNo(fee.RequiredForEnrollment) === 'YES';
+          })
+          .filter((fee) => feeMatchesApplication(fee, account));
+        feeCreditRows.forEach((row) => {
+          if (isAcceptanceFeeLike(row)) return;
+          const paidAmount = asMoneyNumber(row.Credit);
+          if (paidAmount <= 0) return;
+          const match = paidPreEnrollmentFees.find((fee) => {
+            if (sameText(fee.FeeCode, row.FeeCode) || sameText(fee.FeeName, row.FeeName) || sameText(fee.FeeName, row.Description)) return true;
+            const sameCategory = normalizeMatchText(fee.FeeCategory) === normalizeMatchText(row.FeeCategory);
+            return sameCategory && Math.abs(asMoneyNumber(fee.Amount) - paidAmount) < 0.01;
+          });
+          if (!match) return;
+          const rowKey = ledgerFeeKey(row);
+          const feeKey = ledgerFeeKey(match);
+          if ((rowKey && ledgerDebitKeys.has(rowKey)) || (feeKey && ledgerDebitKeys.has(feeKey))) return;
+          totalDebit += Math.min(paidAmount, asMoneyNumber(match.Amount) || paidAmount);
+          if (feeKey) ledgerDebitKeys.add(feeKey);
+        });
       }
     }
     return {
