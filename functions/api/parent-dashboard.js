@@ -227,6 +227,7 @@ function normalizeLedger(row) {
     Date: toDisplayDate(pick(row, ['Date', 'date', 'CreatedAt', 'createdAt'])),
     AccountRef: pick(row, ['AccountRef', 'accountRef', 'AdmissionNo', 'admissionNo']),
     ApplicationReference: pick(row, ['ApplicationReference', 'applicationReference']),
+    ApplicationID: pick(row, ['ApplicationID', 'applicationId']),
     AdmissionNo: pick(row, ['AdmissionNo', 'admissionNo']),
     FeeCode: pick(row, ['FeeCode', 'feeCode']),
     FeeName: pick(row, ['FeeName', 'feeName']),
@@ -268,6 +269,7 @@ function normalizePayment(row) {
     Date: toDisplayDate(pick(row, ['Date', 'date', 'PaidAt', 'paidAt', 'CreatedAt', 'createdAt'])),
     AccountRef: pick(row, ['AccountRef', 'accountRef', 'AdmissionNo', 'admissionNo']),
     ApplicationReference: pick(row, ['ApplicationReference', 'applicationReference']),
+    ApplicationID: pick(row, ['ApplicationID', 'applicationId']),
     AdmissionNo: pick(row, ['AdmissionNo', 'admissionNo']),
     FeeCode: pick(row, ['FeeCode', 'feeCode']),
     FeeName: pick(row, ['FeeName', 'feeName']),
@@ -536,6 +538,35 @@ function paymentHistoryFor(keys, payments, ledger) {
   return groupedLedgerPayments([...ledgerEntries, ...directPayments]).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
 }
 
+function recordMatchesApplication(record, applicationRef) {
+  const ref = clean(applicationRef);
+  if (!ref) return false;
+  return sameText(record.ApplicationReference, ref) ||
+    sameText(record.ApplicationID, ref) ||
+    referencesMatch(record.Reference, ref);
+}
+
+function paymentHistoryForChild(child, payments, ledger) {
+  if (!childCanShowFinanceHistory(child)) return [];
+  if (child && child.SourceType === 'Application') {
+    const appRef = clean(child.ApplicationReference || child.AccountRef);
+    const appLedger = (ledger || []).filter((entry) => {
+      return lower(entry.FeeCategory) !== 'wallet' && isPaidRecord(entry) && recordMatchesApplication(entry, appRef);
+    });
+    const appPayments = (payments || []).filter((entry) => {
+      return isPaidRecord(entry) && recordMatchesApplication(entry, appRef);
+    });
+    return groupedLedgerPayments([...appLedger, ...appPayments.map((entry) => ({
+      ...entry,
+      RecordType: 'Payment',
+      Description: lower(entry.FeeCategory) === 'school fee' ? 'School Fee' : (entry.FeeCategory || entry.Department || entry.FeeName || entry.FeeCode || 'Payment'),
+      Credit: entry.Amount,
+      Status: entry.Status || 'Paid'
+    }))]).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
+  }
+  return paymentHistoryFor(accountKeys(child), payments, ledger);
+}
+
 async function getAppsScriptAccountsOverview(env) {
   if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) return null;
   try {
@@ -634,7 +665,7 @@ async function getDashboard(env, body) {
     }).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
     child.WalletBalance = walletBalance(walletEntries);
     walletActivity[child.AccountRef] = walletEntries;
-    paymentRecords[child.AccountRef] = childCanShowFinanceHistory(child) ? paymentHistoryFor(keys, payments, ledger) : [];
+    paymentRecords[child.AccountRef] = paymentHistoryForChild(child, payments, ledger);
     payableItems[child.AccountRef] = [];
     dueNotifications[child.AccountRef] = invoiceDueNotifications(invoices, keys);
     clinicVisits[child.AccountRef] = clinic.filter((record) => {
@@ -710,7 +741,7 @@ async function getChildActivity(env, body) {
     accountRef: child.AccountRef,
     walletActivity: walletEntries,
     walletBalance: walletBalance(walletEntries),
-    paymentRecords: childCanShowFinanceHistory(child) ? paymentHistoryFor(keys, payments, ledger) : [],
+    paymentRecords: paymentHistoryForChild(child, payments, ledger),
     dueNotifications: invoiceDueNotifications(invoices, keys),
     clinicVisits: clinic.filter((record) => anyKeyMatches(record.AdmissionNo, keys)).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date))),
     entranceResults: result ? [result] : []
