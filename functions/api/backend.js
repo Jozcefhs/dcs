@@ -1200,6 +1200,24 @@ async function saveSchoolProfile(env, body) {
   return { ok: true, message: 'School profile saved to Firestore.', profile };
 }
 
+async function getSchoolProfile(env) {
+  const rows = await listCollection(env, 'settings');
+  const profile = rows.find((row) => row.__id === 'schoolProfile') || rows.find((row) => clean(row.SchoolName));
+  return {
+    ok: true,
+    profile: profile || {
+      SchoolName: 'Integrated School Management Suite',
+      SchoolAddress: '',
+      SchoolPhone: '',
+      SchoolEmail: '',
+      PortalHeadline: 'Admissions and parent services in one place',
+      PortalSubheading: 'Buy forms, complete applications, upload documents, pay fees, and monitor student activity from a secure school portal.',
+      PortalNotice: '',
+      ResultDisplayMode: 'subjects'
+    }
+  };
+}
+
 function applicationNotFound(id) {
   const err = new Error(id ? `Application not found: ${id}` : 'ApplicationID or ApplicationReference is required.');
   err.status = id ? 404 : 400;
@@ -1277,8 +1295,9 @@ async function updateEntranceResult(env, body) {
     ResultNextStep: body.ResultNextStep ?? body.NextStep ?? '',
     ResultUpdatedBy: clean(body.ResultUpdatedBy) || 'Admissions Office',
     ResultUpdatedAt: nowIso(),
-    ResultReadyOnline: clean(body.ResultReadyOnline || body.resultReadyOnline || body.ResultPublished || ''),
-    ResultPublished: clean(body.ResultPublished || body.resultPublished || body.ResultReadyOnline || ''),
+    ResultReadyOnline: clean(body.ResultReadyOnline || body.resultReadyOnline || body.ResultPublished || body.ShowResultOnPortal || ''),
+    ResultPublished: clean(body.ResultPublished || body.resultPublished || body.ResultReadyOnline || body.ShowResultOnPortal || ''),
+    ShowResultOnPortal: clean(body.ShowResultOnPortal || body.showResultOnPortal || body.ResultReadyOnline || body.ResultPublished || ''),
     UpdatedAt: nowIso()
   };
   if (resultStatus === 'Admitted') updates.Status = 'Accepted';
@@ -2361,6 +2380,8 @@ async function routeAction(env, action, body = {}) {
       return saveBrevoSettings(env, body);
     case 'saveSchoolProfile':
       return saveSchoolProfile(env, body);
+    case 'getSchoolProfile':
+      return getSchoolProfile(env);
     case 'getPayableFees':
       return getPayableFees(env, body);
     case 'getClinicRecords':
