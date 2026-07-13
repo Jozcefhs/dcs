@@ -278,7 +278,7 @@ function normalizePayment(row) {
     Term: pick(row, ['Term', 'term']),
     Amount: asMoneyNumber(pick(row, ['Amount', 'amount', 'Credit', 'credit'])),
     Currency: pick(row, ['Currency', 'currency'], 'NGN'),
-    Status: pick(row, ['Status', 'status'], 'Paid'),
+    Status: pick(row, ['Status', 'status']),
     Gateway: pick(row, ['Gateway', 'gateway']),
     Method: pick(row, ['Method', 'method']),
     Reference: pick(row, ['Reference', 'reference', 'TransactionReference', 'transactionReference', 'PaymentId', 'paymentId', '__id'])
@@ -468,15 +468,18 @@ function paymentGroupKey(entry) {
   return [
     schoolFeesBase ? schoolFeesBase[1] : reference,
     clean(entry.Date || ''),
-    clean(entry.AccountRef || ''),
-    clean(entry.Method || entry.Gateway || entry.Source || '')
+    clean(entry.AccountRef || '')
   ].join('||');
 }
 
 function isPaidRecord(entry) {
   const status = lower(entry.Status);
   if (['unpaid', 'pending', 'due', 'invoice', 'invoiced', 'failed', 'cancelled', 'canceled'].includes(status)) return false;
-  return asMoneyNumber(entry.Credit || entry.Amount) > 0;
+  const amount = asMoneyNumber(entry.Credit || entry.Amount);
+  if (amount <= 0) return false;
+  if (['paid', 'success', 'successful', 'completed', 'confirmed'].includes(status)) return true;
+  if (lower(entry.EntryType).includes('payment')) return true;
+  return Boolean(clean(entry.Reference || entry.GatewayReference || entry.TransactionReference || entry.PaymentId));
 }
 
 function childCanShowFinanceHistory(child) {
@@ -524,10 +527,13 @@ function hasMatchingLedgerPayment(payment, ledgerEntries) {
 
 function paymentHistoryFor(keys, payments, ledger) {
   const ledgerEntries = (ledger || []).filter((entry) => anyExactKeyMatches(entry.AccountRef, keys) && lower(entry.FeeCategory) !== 'wallet');
+  const paidLedgerEntries = ledgerEntries.filter(isPaidRecord);
+  if (paidLedgerEntries.length) {
+    return groupedLedgerPayments(paidLedgerEntries).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
+  }
   const directPayments = (payments || [])
     .filter((entry) => anyExactKeyMatches(entry.AccountRef, keys))
     .filter(isPaidRecord)
-    .filter((entry) => !hasMatchingLedgerPayment(entry, ledgerEntries))
     .map((entry) => ({
       ...entry,
       RecordType: 'Payment',
@@ -535,7 +541,7 @@ function paymentHistoryFor(keys, payments, ledger) {
       Credit: entry.Amount,
       Status: entry.Status || 'Paid'
     }));
-  return groupedLedgerPayments([...ledgerEntries, ...directPayments]).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
+  return groupedLedgerPayments(directPayments).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
 }
 
 function recordMatchesApplication(record, applicationRef) {
@@ -553,16 +559,19 @@ function paymentHistoryForChild(child, payments, ledger) {
     const appLedger = (ledger || []).filter((entry) => {
       return lower(entry.FeeCategory) !== 'wallet' && isPaidRecord(entry) && recordMatchesApplication(entry, appRef);
     });
+    if (appLedger.length) {
+      return groupedLedgerPayments(appLedger).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
+    }
     const appPayments = (payments || []).filter((entry) => {
       return isPaidRecord(entry) && recordMatchesApplication(entry, appRef);
     });
-    return groupedLedgerPayments([...appLedger, ...appPayments.map((entry) => ({
+    return groupedLedgerPayments(appPayments.map((entry) => ({
       ...entry,
       RecordType: 'Payment',
       Description: lower(entry.FeeCategory) === 'school fee' ? 'School Fee' : (entry.FeeCategory || entry.Department || entry.FeeName || entry.FeeCode || 'Payment'),
       Credit: entry.Amount,
       Status: entry.Status || 'Paid'
-    }))]).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
+    }))).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
   }
   return paymentHistoryFor(accountKeys(child), payments, ledger);
 }
