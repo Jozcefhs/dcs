@@ -542,15 +542,6 @@ function isWalletLedger(row) {
     normalizeMatchText(row && row.EntryType).includes('wallet');
 }
 
-function ledgerFeeKey(row) {
-  const code = normalizeMatchText(row && row.FeeCode);
-  if (code) return `code:${code}`;
-  const name = normalizeMatchText((row && (row.FeeName || row.Description)) || '');
-  const category = normalizeMatchText(row && row.FeeCategory);
-  if (name || category) return `text:${category}|${name}`;
-  return '';
-}
-
 function periodKey(key, session, term) {
   const cleanKey = clean(key);
   if (!cleanKey) return '';
@@ -1138,8 +1129,6 @@ async function getAccountsOverview(env) {
     let walletBalance = asMoneyNumber(account.WalletBalance);
     let lastPaymentAt = clean(account.LastPaymentAt);
     const countedLedgerKeys = new Set();
-    const ledgerDebitKeys = new Set();
-    const feeCreditRows = [];
     ledgerRows.forEach((row) => {
       const rowRefs = accountRefsFrom(row);
       const matched = rowRefs.some((ref) => referencesAny(ref, refs));
@@ -1160,12 +1149,9 @@ async function getAccountsOverview(env) {
       }
       if (debit > 0) {
         totalDebit += debit;
-        const feeKey = ledgerFeeKey(row);
-        if (feeKey) ledgerDebitKeys.add(feeKey);
       }
       if (credit > 0) {
         totalCredit += credit;
-        feeCreditRows.push(row);
       }
       if (credit > 0 && row.Date && (!lastPaymentAt || String(row.Date) > String(lastPaymentAt))) {
         lastPaymentAt = row.Date;
@@ -1185,7 +1171,7 @@ async function getAccountsOverview(env) {
           const category = normalizeMatchText(fee.FeeCategory || 'School Fee');
           const requiredForEnrollment = yesNo(fee.RequiredForEnrollment) === 'YES';
           if (isEnrolled) {
-            return category === 'school fee' && !requiredForEnrollment;
+            return true;
           }
           return category === 'admission' || requiredForEnrollment;
         })
@@ -1193,33 +1179,6 @@ async function getAccountsOverview(env) {
       const expectedFeeDebit = matchingExpectedFees.reduce((sum, fee) => sum + asMoneyNumber(fee.Amount), 0);
       if (expectedFeeDebit > totalDebit) {
         totalDebit = expectedFeeDebit;
-      }
-      if (isEnrolled) {
-        const paidPreEnrollmentFees = normalizedFeeItems
-          .filter((fee) => yesNo(fee.Active) === 'YES')
-          .filter((fee) => !isWalletFee(fee))
-          .filter((fee) => !isAcceptanceFeeLike(fee))
-          .filter((fee) => {
-            const category = normalizeMatchText(fee.FeeCategory || 'School Fee');
-            return category === 'admission' || yesNo(fee.RequiredForEnrollment) === 'YES';
-          })
-          .filter((fee) => feeMatchesApplication(fee, account));
-        feeCreditRows.forEach((row) => {
-          if (isAcceptanceFeeLike(row)) return;
-          const paidAmount = asMoneyNumber(row.Credit);
-          if (paidAmount <= 0) return;
-          const match = paidPreEnrollmentFees.find((fee) => {
-            if (sameText(fee.FeeCode, row.FeeCode) || sameText(fee.FeeName, row.FeeName) || sameText(fee.FeeName, row.Description)) return true;
-            const sameCategory = normalizeMatchText(fee.FeeCategory) === normalizeMatchText(row.FeeCategory);
-            return sameCategory && Math.abs(asMoneyNumber(fee.Amount) - paidAmount) < 0.01;
-          });
-          if (!match) return;
-          const rowKey = ledgerFeeKey(row);
-          const feeKey = ledgerFeeKey(match);
-          if ((rowKey && ledgerDebitKeys.has(rowKey)) || (feeKey && ledgerDebitKeys.has(feeKey))) return;
-          totalDebit += Math.min(paidAmount, asMoneyNumber(match.Amount) || paidAmount);
-          if (feeKey) ledgerDebitKeys.add(feeKey);
-        });
       }
     }
     return {
