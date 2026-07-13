@@ -887,6 +887,7 @@ export async function getPayableFees(env, body = {}) {
   const feeBalanceMap = {};
   const paymentCodeMap = {};
   const paymentNameMap = {};
+  const paidLedgerRows = [];
   const addPaid = (map, key, amount) => {
     const cleanKey = clean(key);
     const paidAmount = asMoneyNumber(amount);
@@ -911,10 +912,13 @@ export async function getPayableFees(env, body = {}) {
   ledgerRows.map(normalizeLedger).filter(rowMatchesAccount).filter(notStaleForApplication).forEach((row) => {
     const credit = asMoneyNumber(row.Credit);
     if (credit <= 0) return;
+    paidLedgerRows.push(row);
     addPaid(paymentCodeMap, row.FeeCode, credit);
     addPaid(paymentNameMap, row.FeeName, credit);
+    addPaid(paymentNameMap, row.Description, credit);
     addPaid(paymentCodeMap, periodKey(row.FeeCode, row.AcademicSession, row.Term), credit);
     addPaid(paymentNameMap, periodKey(row.FeeName, row.AcademicSession, row.Term), credit);
+    addPaid(paymentNameMap, periodKey(row.Description, row.AcademicSession, row.Term), credit);
   });
 
   let acceptanceCreditRemaining = enrolledForBilling && acceptanceAlreadyPaid ? asMoneyNumber(app.AcceptanceFeeAmount) : 0;
@@ -934,7 +938,18 @@ export async function getPayableFees(env, body = {}) {
     const scopedNamePaid = Math.max(asMoneyNumber(paymentNameMap[namePeriodKey]), asMoneyNumber((feeBalanceMap[namePeriodKey] || {}).credit));
     const exactCodePaid = Math.max(scopedCodePaid, periodSpecific ? 0 : asMoneyNumber(paymentCodeMap[feeCode]), periodSpecific ? 0 : asMoneyNumber((feeBalanceMap[feeCode] || {}).credit));
     const feeNamePaid = Math.max(scopedNamePaid, periodSpecific ? 0 : asMoneyNumber(paymentNameMap[feeName]), periodSpecific ? 0 : asMoneyNumber((feeBalanceMap[feeName] || {}).credit));
-    let paid = exactCodePaid > 0 ? exactCodePaid : feeNamePaid;
+    const ledgerMatchedPaid = paidLedgerRows.reduce((sum, row) => {
+      const rowCode = normalizeMatchText(row.FeeCode);
+      const rowName = normalizeMatchText(row.FeeName);
+      const rowDescription = normalizeMatchText(row.Description);
+      const rowCategory = normalizeMatchText(row.FeeCategory);
+      const feeCategory = normalizeMatchText(copy.FeeCategory);
+      const codeMatches = rowCode && rowCode === normalizeMatchText(feeCode);
+      const nameMatches = normalizeMatchText(feeName) && [rowName, rowDescription].includes(normalizeMatchText(feeName));
+      const categoryAmountMatches = feeCategory && feeCategory === rowCategory && Math.abs(asMoneyNumber(row.Credit) - originalAmount) < 0.01;
+      return (codeMatches || nameMatches || categoryAmountMatches) ? sum + asMoneyNumber(row.Credit) : sum;
+    }, 0);
+    let paid = Math.max(exactCodePaid, feeNamePaid, ledgerMatchedPaid);
     const acceptanceCreditApplied = (!isWalletFee(fee) && normalizeMatchText(fee.FeeCategory || 'School Fee') === 'school fee' && acceptanceCreditRemaining > 0)
       ? Math.min(originalAmount - Math.min(originalAmount, paid), acceptanceCreditRemaining)
       : 0;
