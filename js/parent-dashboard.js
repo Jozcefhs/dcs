@@ -136,9 +136,10 @@ function renderDueNotifications(child) {
   records.forEach((record) => {
     const item = document.createElement('div');
     item.className = 'activity-item';
+    const displayAmount = record.OriginalAmount || record.Amount;
     item.innerHTML = `
       <strong>${record.FeeName || record.FeeCode || 'Payment due'}</strong>
-      <span>${record.DueStatus || 'Due date set'} | ${record.DueDate || ''} | ${money(record.Amount)}</span>
+      <span>${record.DueStatus || 'Due date set'} | ${record.DueDate || ''} | ${money(displayAmount)}</span>
       <small>${[record.AcademicSession, record.Term].filter(Boolean).join(' | ')}</small>
     `;
     if (record.Components?.length) {
@@ -282,10 +283,16 @@ function renderPayableItems(child) {
     const period = [fee.AcademicSession, fee.Term].filter(Boolean).join(' | ');
     const allowAmountEntry = isWalletFee(fee) || isYes(fee.AllowInstallment);
     const defaultAmount = Number(fee.MinAmount || 0) > 0 ? fee.MinAmount : (isWalletFee(fee) ? '' : fee.Amount);
+    const displayAmount = fee.OriginalAmount || fee.Amount;
+    const creditApplied = Number(String(fee.CreditApplied || '0').replace(/,/g, ''));
+    const balanceNote = Number.isFinite(creditApplied) && creditApplied > 0
+      ? `<small>Amount to pay is ${money(fee.Amount)} because acceptance fee credit of ${money(creditApplied)} has already been deducted.</small>`
+      : '';
     item.innerHTML = `
       <strong>${fee.FeeName || fee.FeeCode}</strong>
-      <span>${money(fee.Amount)}${period ? ' | ' + period : ''}${fee.DueDate ? ' | Due: ' + fee.DueDate : ''}</span>
+      <span>${money(displayAmount)}${period ? ' | ' + period : ''}${fee.DueDate ? ' | Due: ' + fee.DueDate : ''}</span>
       <small>${fee.FeeCategory || ''}${isYes(fee.AllowInstallment) ? ' | Part payment allowed' : ''}</small>
+      ${balanceNote}
     `;
     if (fee.Components?.length) {
       renderComponents(item, fee.Components);
