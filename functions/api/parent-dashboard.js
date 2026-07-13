@@ -76,8 +76,9 @@ function nowIso() {
 
 function accountKeys(student) {
   return [
-    pick(student, ['AdmissionNo', 'admissionNo', 'AccountRef', '__id']),
-    pick(student, ['ApplicationReference', 'applicationReference'])
+    pick(student, ['AccountRef', 'accountRef', '__id']),
+    pick(student, ['AdmissionNo', 'admissionNo']),
+    pick(student, ['ApplicationReference', 'applicationReference', 'ApplicationID', 'applicationId'])
   ].map(clean).filter(Boolean);
 }
 
@@ -221,6 +222,8 @@ function normalizeLedger(row) {
   return {
     Date: toDisplayDate(pick(row, ['Date', 'date', 'CreatedAt', 'createdAt'])),
     AccountRef: pick(row, ['AccountRef', 'accountRef', 'AdmissionNo', 'admissionNo']),
+    ApplicationReference: pick(row, ['ApplicationReference', 'applicationReference']),
+    AdmissionNo: pick(row, ['AdmissionNo', 'admissionNo']),
     FeeCode: pick(row, ['FeeCode', 'feeCode']),
     FeeName: pick(row, ['FeeName', 'feeName']),
     EntryType: pick(row, ['EntryType', 'entryType']),
@@ -233,7 +236,8 @@ function normalizeLedger(row) {
     Balance: asMoneyNumber(pick(row, ['Balance', 'balance'])),
     Status: pick(row, ['Status', 'status']),
     RecordedBy: pick(row, ['RecordedBy', 'recordedBy']),
-    Source: pick(row, ['Source', 'source'])
+    Source: pick(row, ['Source', 'source']),
+    Reference: pick(row, ['Reference', 'reference', 'GatewayReference', 'gatewayReference', 'LedgerNo', 'ledgerNo', '__id'])
   };
 }
 
@@ -259,6 +263,8 @@ function normalizePayment(row) {
   return {
     Date: toDisplayDate(pick(row, ['Date', 'date', 'PaidAt', 'paidAt', 'CreatedAt', 'createdAt'])),
     AccountRef: pick(row, ['AccountRef', 'accountRef', 'AdmissionNo', 'admissionNo']),
+    ApplicationReference: pick(row, ['ApplicationReference', 'applicationReference']),
+    AdmissionNo: pick(row, ['AdmissionNo', 'admissionNo']),
     FeeCode: pick(row, ['FeeCode', 'feeCode']),
     FeeName: pick(row, ['FeeName', 'feeName']),
     FeeCategory: pick(row, ['FeeCategory', 'feeCategory']),
@@ -435,6 +441,22 @@ function buildPayableItems(fees, breakdown) {
   return items;
 }
 
+function walletTopupItem(account = {}) {
+  return {
+    FeeCode: 'WALLET_TOPUP',
+    FeeName: 'Student Wallet Top-up',
+    FeeCategory: 'Wallet',
+    Amount: 0,
+    Currency: 'NGN',
+    AllowInstallment: 'YES',
+    MinAmount: 500,
+    MaxAmount: '',
+    PaymentType: 'Wallet',
+    AcademicSession: account.AcademicSession || '',
+    Term: account.Term || ''
+  };
+}
+
 function paymentGroupKey(entry) {
   return [
     clean(entry.Reference || entry.GatewayReference || entry.TransactionReference || entry.PaymentNo || ''),
@@ -467,11 +489,15 @@ function groupedLedgerPayments(entries) {
 function hasMatchingLedgerPayment(payment, ledgerEntries) {
   return (ledgerEntries || []).some((entry) => {
     const sameReference = clean(payment.Reference) && sameText(entry.Reference, payment.Reference);
-    const sameAccount = anyKeyMatches(entry.AccountRef, accountKeys({
+    const sameAccount = [
+      entry.AccountRef,
+      entry.ApplicationReference,
+      entry.AdmissionNo
+    ].some((ref) => anyKeyMatches(ref, accountKeys({
       AccountRef: payment.AccountRef,
       AdmissionNo: payment.AdmissionNo,
       ApplicationReference: payment.ApplicationReference
-    }));
+    })));
     const sameAmount = Math.abs(asMoneyNumber(entry.Credit) - asMoneyNumber(payment.Amount)) < 0.01;
     return asMoneyNumber(entry.Credit) > 0 && sameAccount && sameAmount && (sameReference || sameText(entry.FeeCode, payment.FeeCode));
   });
@@ -711,6 +737,9 @@ async function getChildPayable(env, body) {
     AccountRef: body.accountRef || body.AccountRef || body.AdmissionNo
   });
   const items = buildPayableItems(payable.fees || [], payable.schoolFeeBreakdown || []);
+  if (!items.some(isWalletFee) && clean(payable.account && payable.account.AdmissionNo)) {
+    items.push(walletTopupItem(payable.account));
+  }
   const sources = await loadParentSources(env);
   const invoiceNotices = invoiceDueNotifications((sources.invoices || []).map(normalizeInvoice), [body.accountRef || body.AccountRef || body.AdmissionNo]);
   const itemNotices = items

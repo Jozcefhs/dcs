@@ -159,6 +159,21 @@ export async function onRequestPost(context) {
         }))
       };
     }
+    if (!fee && feeCode === 'WALLET_TOPUP') {
+      fee = {
+        FeeCode: 'WALLET_TOPUP',
+        FeeName: 'Student Wallet Top-up',
+        FeeCategory: 'Wallet',
+        Amount: 0,
+        Currency: 'NGN',
+        AllowInstallment: 'YES',
+        MinAmount: 500,
+        MaxAmount: '',
+        PaymentType: 'Wallet',
+        AcademicSession: feeData.account?.AcademicSession || '',
+        Term: feeData.account?.Term || ''
+      };
+    }
     if (!fee) {
       return Response.json({ ok: false, message: 'That fee is not currently payable.' }, { status: 400 });
     }

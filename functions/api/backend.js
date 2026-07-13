@@ -294,6 +294,12 @@ function normalizePayment(row) {
     ...row,
     PaymentId: pick(row, ['paymentId', 'PaymentId', '__id']),
     AccountRef: pick(row, ['accountRef', 'AccountRef']),
+    ApplicationReference: pick(row, ['applicationReference', 'ApplicationReference']),
+    AdmissionNo: pick(row, ['admissionNo', 'AdmissionNo']),
+    DisplayName: pick(row, ['displayName', 'DisplayName']),
+    ClassName: pick(row, ['className', 'ClassName']),
+    StudentType: pick(row, ['studentType', 'StudentType']),
+    BillingCategory: pick(row, ['billingCategory', 'BillingCategory']),
     FeeCode: pick(row, ['feeCode', 'FeeCode']),
     FeeName: pick(row, ['feeName', 'FeeName']),
     FeeCategory: pick(row, ['feeCategory', 'FeeCategory']),
@@ -999,7 +1005,8 @@ async function getAccountsOverview(env) {
   const normalizedStoredLedger = storedLedger.map(normalizeLedger);
   const hasStoredPaymentLedger = (payment) => normalizedStoredLedger.some((row) => {
     const sameReference = clean(payment.Reference) && (sameText(row.Reference, payment.Reference) || sameText(row.LedgerNo, payment.Reference));
-    const sameAccount = referencesMatch(row.AccountRef, payment.AccountRef) || sameText(row.AccountRef, payment.AccountRef);
+    const paymentRefs = accountRefsFrom(payment);
+    const sameAccount = accountRefsFrom(row).some((ref) => referencesAny(ref, paymentRefs));
     const sameAmount = Math.abs(asMoneyNumber(row.Credit) - asMoneyNumber(payment.Amount)) < 0.01;
     return asMoneyNumber(row.Credit) > 0 && sameAccount && sameAmount && (sameReference || sameText(row.FeeCode, payment.FeeCode));
   });
@@ -1174,6 +1181,23 @@ async function saveBrevoSettings(env, body) {
       HasBrevoApiKey: Boolean(apiKey)
     }
   };
+}
+
+async function saveSchoolProfile(env, body) {
+  const profile = {
+    SchoolName: clean(body.SchoolName || body.schoolName) || 'Integrated School Management Suite',
+    SchoolAddress: clean(body.SchoolAddress || body.schoolAddress),
+    SchoolPhone: clean(body.SchoolPhone || body.schoolPhone),
+    SchoolEmail: clean(body.SchoolEmail || body.schoolEmail),
+    PortalHeadline: clean(body.PortalHeadline || body.portalHeadline) || 'Admissions and parent services in one place',
+    PortalSubheading: clean(body.PortalSubheading || body.portalSubheading) || 'Buy forms, complete applications, upload documents, pay fees, and monitor student activity from a secure school portal.',
+    PortalNotice: clean(body.PortalNotice || body.portalNotice),
+    ResultDisplayMode: clean(body.ResultDisplayMode || body.resultDisplayMode) || 'subjects',
+    UpdatedAt: nowIso(),
+    UpdatedBy: clean(body.UserRole || body.UpdatedBy || body.updatedBy) || 'Super Admin'
+  };
+  await upsertDocument(env, 'settings', 'schoolProfile', profile);
+  return { ok: true, message: 'School profile saved to Firestore.', profile };
 }
 
 function applicationNotFound(id) {
@@ -2335,6 +2359,8 @@ async function routeAction(env, action, body = {}) {
       return getAccountsOverview(env);
     case 'saveBrevoSettings':
       return saveBrevoSettings(env, body);
+    case 'saveSchoolProfile':
+      return saveSchoolProfile(env, body);
     case 'getPayableFees':
       return getPayableFees(env, body);
     case 'getClinicRecords':

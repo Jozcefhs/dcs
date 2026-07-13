@@ -101,6 +101,29 @@ function isWalletFee(fee) {
   return String(fee.FeeCode || '').trim() === 'WALLET_TOPUP' || String(fee.FeeCategory || '').trim().toLowerCase() === 'wallet';
 }
 
+function renderComponents(parent, components) {
+  const groups = {};
+  (components || []).forEach((component) => {
+    const category = component.FeeCategory || component.Department || 'School Fee';
+    groups[category] = groups[category] || [];
+    groups[category].push(component);
+  });
+  Object.entries(groups).forEach(([category, rows]) => {
+    const heading = document.createElement('small');
+    heading.className = 'component-heading';
+    heading.textContent = category;
+    parent.appendChild(heading);
+    const list = document.createElement('ul');
+    list.className = 'component-list';
+    rows.forEach((component) => {
+      const line = document.createElement('li');
+      line.textContent = `${component.FeeName || component.FeeCode}: ${money(component.Amount)}`;
+      list.appendChild(line);
+    });
+    parent.appendChild(list);
+  });
+}
+
 function renderDueNotifications(child) {
   const records = dashboard.dueNotifications?.[child.AccountRef] || [];
   dueNotifications.innerHTML = records.length ? '' : '<p class="muted">No payment due date notifications at the moment.</p>';
@@ -113,14 +136,7 @@ function renderDueNotifications(child) {
       <small>${[record.AcademicSession, record.Term].filter(Boolean).join(' | ')}</small>
     `;
     if (record.Components?.length) {
-      const list = document.createElement('ul');
-      list.className = 'component-list';
-      record.Components.forEach((component) => {
-        const line = document.createElement('li');
-        line.textContent = `${component.FeeCategory || component.FeeName || component.FeeCode}: ${component.FeeName || component.FeeCode} - ${money(component.Amount)}`;
-        list.appendChild(line);
-      });
-      item.appendChild(list);
+      renderComponents(item, record.Components);
     }
     dueNotifications.appendChild(item);
   });
@@ -266,14 +282,7 @@ function renderPayableItems(child) {
       <small>${fee.FeeCategory || ''}${isYes(fee.AllowInstallment) ? ' | Part payment allowed' : ''}</small>
     `;
     if (fee.Components?.length) {
-      const list = document.createElement('ul');
-      list.className = 'component-list';
-      fee.Components.forEach((component) => {
-        const line = document.createElement('li');
-        line.textContent = `${component.FeeCategory || component.FeeName || component.FeeCode}: ${component.FeeName || component.FeeCode} - ${money(component.Amount)}`;
-        list.appendChild(line);
-      });
-      item.appendChild(list);
+      renderComponents(item, fee.Components);
     }
     if (allowAmountEntry) {
       const label = document.createElement('label');
