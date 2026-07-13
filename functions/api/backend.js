@@ -1171,7 +1171,7 @@ async function getAccountsOverview(env) {
           const category = normalizeMatchText(fee.FeeCategory || 'School Fee');
           const requiredForEnrollment = yesNo(fee.RequiredForEnrollment) === 'YES';
           if (isEnrolled) {
-            return true;
+            return !isAcceptanceFeeLike(fee);
           }
           return category === 'admission' || requiredForEnrollment;
         })
