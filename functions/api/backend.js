@@ -886,7 +886,6 @@ export async function getPayableFees(env, body = {}) {
       if (!admittedForPreEnrollment || yesNo(app.OfferSent) !== 'YES') return false;
       return category === 'admission' || requiredForEnrollment;
     }
-    if (category === 'admission' || requiredForEnrollment) return false;
     return true;
   }), billingApp);
 
@@ -916,6 +915,7 @@ export async function getPayableFees(env, body = {}) {
     }
   });
   ledgerRows.map(normalizeLedger).filter(rowMatchesAccount).filter(notStaleForApplication).forEach((row) => {
+    if (isWalletLedger(row)) return;
     const credit = asMoneyNumber(row.Credit);
     if (credit <= 0) return;
     paidLedgerRows.push(row);
