@@ -219,7 +219,17 @@ function amountInputId(fee) {
   return `amount-${String(fee.FeeCode || 'fee').replace(/[^A-Za-z0-9_-]/g, '-')}`;
 }
 
-function paymentAmountFor(fee) {
+function setPaymentStatus(container, message, type) {
+  const target = container && container.querySelector('.payment-status');
+  if (!target) {
+    setStatus(message, type);
+    return;
+  }
+  target.textContent = message || '';
+  target.className = 'payment-status status ' + (type || '');
+}
+
+function paymentAmountFor(fee, container) {
   const input = document.getElementById(amountInputId(fee));
   const amount = Number(String(fee.Amount || '0').replace(/,/g, ''));
   if (!isWalletFee(fee) && !isYes(fee.AllowInstallment)) return amount;
@@ -227,25 +237,26 @@ function paymentAmountFor(fee) {
   const entered = input ? input.value : '';
   const value = Number(String(entered || '0').replace(/,/g, ''));
   if (!Number.isFinite(value) || value <= 0) {
-    setStatus('Enter a valid amount.', 'bad');
+    setPaymentStatus(container, 'Enter a valid amount.', 'bad');
     return null;
   }
   if (Number.isFinite(min) && min > 0 && value < min) {
-    setStatus(`Minimum amount is ${money(min)}.`, 'bad');
+    setPaymentStatus(container, `Minimum amount is ${money(min)}.`, 'bad');
     return null;
   }
   if (Number.isFinite(amount) && amount > 0 && value > amount) {
-    setStatus(`Maximum amount is ${money(amount)}.`, 'bad');
+    setPaymentStatus(container, `Maximum amount is ${money(amount)}.`, 'bad');
     return null;
   }
+  setPaymentStatus(container, '', '');
   return value;
 }
 
-async function payItem(child, fee) {
-  const amount = paymentAmountFor(fee);
+async function payItem(child, fee, container) {
+  const amount = paymentAmountFor(fee, container);
   if (amount === null) return;
   try {
-    setStatus('Starting secure checkout...', '');
+    setPaymentStatus(container, 'Starting secure checkout...', '');
     const response = await fetch('/api/init-payment', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -263,7 +274,7 @@ async function payItem(child, fee) {
     }
     window.location.href = data.authorizationUrl;
   } catch (error) {
-    setStatus(error.message, 'bad');
+    setPaymentStatus(container, error.message, 'bad');
   }
 }
 
@@ -310,8 +321,11 @@ function renderPayableItems(child) {
     const button = document.createElement('button');
     button.type = 'button';
     button.textContent = 'Pay Now';
-    button.addEventListener('click', () => payItem(child, fee));
+    button.addEventListener('click', () => payItem(child, fee, item));
     item.appendChild(button);
+    const inlineStatus = document.createElement('small');
+    inlineStatus.className = 'payment-status status';
+    item.appendChild(inlineStatus);
     payableItems.appendChild(item);
   });
 }

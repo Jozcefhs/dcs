@@ -103,3 +103,13 @@ button,.btn{display:inline-block;border:0;border-radius:8px;background:var(--blu
   from { background-position: 200% 0; }
   to { background-position: -200% 0; }
 }
+
+.payment-status {
+  display: inline-block;
+  margin-left: 10px;
+  vertical-align: middle;
+}
+
+.payment-status:empty {
+  display: none;
+}
