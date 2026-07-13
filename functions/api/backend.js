@@ -844,11 +844,6 @@ export async function getPayableFees(env, body = {}) {
   const resultStatus = normalizeMatchText(app.ResultStatus);
   const admittedForPreEnrollment = resultStatus === 'admitted' || ['admitted', 'accepted', 'admission letter sent'].includes(applicationStatus);
   const acceptanceAlreadyPaid = yesNo(app.AcceptanceFeePaid) === 'YES' ||
-    paymentRows.map(normalizePayment).filter(rowMatchesAccount).some((row) => {
-      const status = normalizeMatchText(row.Status || 'Paid');
-      if (status && status !== 'paid') return false;
-      return isAcceptanceFeeLike(row);
-    }) ||
     ledgerRows.map(normalizeLedger).filter(rowMatchesAccount).some((row) => {
       if (asMoneyNumber(row.Credit) <= 0) return false;
       return isAcceptanceFeeLike(row);
@@ -904,28 +899,6 @@ export async function getPayableFees(env, body = {}) {
     addPaid(paymentNameMap, row.FeeName, credit);
     addPaid(paymentCodeMap, periodKey(row.FeeCode, row.AcademicSession, row.Term), credit);
     addPaid(paymentNameMap, periodKey(row.FeeName, row.AcademicSession, row.Term), credit);
-  });
-  paymentRows.map(normalizePayment).filter(rowMatchesAccount).forEach((row) => {
-    const status = normalizeMatchText(row.Status || 'Paid');
-    if (status && status !== 'paid') return;
-    const metadata = row.metadata && typeof row.metadata === 'object' ? row.metadata : {};
-    const nested = metadata.metadata && typeof metadata.metadata === 'object' ? metadata.metadata : {};
-    const metadataItems = parseFeeItems(metadata.feeItems || metadata.FeeItems || metadata.components || metadata.Components || nested.feeItems || nested.FeeItems || nested.components || nested.Components);
-    if ((clean(row.FeeCode) === 'SCHOOL_FEES_TOTAL' || clean(metadata.paymentType || nested.paymentType) === 'SchoolFeesTotal') && metadataItems.length) {
-      metadataItems.forEach((item) => {
-        addPaid(paymentCodeMap, item.FeeCode, item.Amount);
-        addPaid(paymentNameMap, item.FeeName, item.Amount);
-        addPaid(paymentCodeMap, periodKey(item.FeeCode, item.AcademicSession || row.AcademicSession || nested.academicSession, item.Term || row.Term || nested.term), item.Amount);
-        addPaid(paymentNameMap, periodKey(item.FeeName, item.AcademicSession || row.AcademicSession || nested.academicSession, item.Term || row.Term || nested.term), item.Amount);
-      });
-      return;
-    }
-    addPaid(paymentCodeMap, row.FeeCode, row.Amount);
-    addPaid(paymentCodeMap, metadata.feeCode || metadata.componentFeeCode || nested.feeCode || nested.componentFeeCode, row.Amount);
-    addPaid(paymentNameMap, row.FeeName, row.Amount);
-    addPaid(paymentCodeMap, periodKey(row.FeeCode, row.AcademicSession || nested.academicSession, row.Term || nested.term), row.Amount);
-    addPaid(paymentCodeMap, periodKey(metadata.feeCode || metadata.componentFeeCode || nested.feeCode || nested.componentFeeCode, row.AcademicSession || nested.academicSession, row.Term || nested.term), row.Amount);
-    addPaid(paymentNameMap, periodKey(row.FeeName, row.AcademicSession || nested.academicSession, row.Term || nested.term), row.Amount);
   });
 
   let acceptanceCreditRemaining = enrolledForBilling && acceptanceAlreadyPaid ? asMoneyNumber(app.AcceptanceFeeAmount) : 0;
@@ -1003,13 +976,6 @@ async function getAccountsOverview(env) {
   const normalizedPayments = payments.map(normalizePayment);
   const normalizedInvoices = invoices.map(normalizeInvoice);
   const normalizedStoredLedger = storedLedger.map(normalizeLedger);
-  const hasStoredPaymentLedger = (payment) => normalizedStoredLedger.some((row) => {
-    const sameReference = clean(payment.Reference) && (sameText(row.Reference, payment.Reference) || sameText(row.LedgerNo, payment.Reference));
-    const paymentRefs = accountRefsFrom(payment);
-    const sameAccount = accountRefsFrom(row).some((ref) => referencesAny(ref, paymentRefs));
-    const sameAmount = Math.abs(asMoneyNumber(row.Credit) - asMoneyNumber(payment.Amount)) < 0.01;
-    return asMoneyNumber(row.Credit) > 0 && sameAccount && sameAmount && (sameReference || sameText(row.FeeCode, payment.FeeCode));
-  });
   const accountMap = new Map();
   const putAccount = (row) => {
     const normalized = normalizeAccount(row || {});
@@ -1058,7 +1024,7 @@ async function getAccountsOverview(env) {
     Term: app.Term,
     Status: app.Status
   }));
-  [...normalizedPayments, ...normalizedInvoices, ...normalizedStoredLedger].forEach((row) => putAccount({
+  [...normalizedInvoices, ...normalizedStoredLedger].forEach((row) => putAccount({
     AccountRef: row.AccountRef || row.AdmissionNo || row.ApplicationReference,
     ApplicationReference: row.ApplicationReference,
     AdmissionNo: row.AdmissionNo,
@@ -1083,17 +1049,6 @@ async function getAccountsOverview(env) {
       Reference: row.InvoiceId,
       RecordedBy: ''
     })),
-    ...normalizedPayments.filter((row) => !hasStoredPaymentLedger(row)).map((row) => ({
-      AccountRef: row.AccountRef,
-      Date: row.Date,
-      EntryType: 'Payment',
-      FeeCategory: '',
-      Description: row.FeeCode || 'Payment',
-      Debit: 0,
-      Credit: row.Amount,
-      Reference: row.Reference,
-      RecordedBy: row.RecordedBy
-    }))
   ];
   const ledgerRows = ledger.map(normalizeLedger);
   const normalizedFeeItems = feeItems.map(normalizeFeeItem);
