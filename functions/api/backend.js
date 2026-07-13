@@ -1012,7 +1012,11 @@ async function getAccountsOverview(env) {
       BillingCategory: clean(existing.BillingCategory || normalized.BillingCategory) || 'Regular',
       AcademicSession: clean(existing.AcademicSession || normalized.AcademicSession),
       Term: clean(existing.Term || normalized.Term),
-    Status: clean(existing.Status || normalized.Status)
+      Status: clean(existing.Status || normalized.Status),
+      ResultStatus: clean(existing.ResultStatus || normalized.ResultStatus),
+      OfferSent: clean(existing.OfferSent || normalized.OfferSent),
+      Enrolled: clean(existing.Enrolled || normalized.Enrolled),
+      AdmissionLetterSent: clean(existing.AdmissionLetterSent || normalized.AdmissionLetterSent)
     });
   };
   const applicationCreatedMap = new Map();
@@ -1035,7 +1039,8 @@ async function getAccountsOverview(env) {
     BillingCategory: student.BillingCategory,
     AcademicSession: student.AcademicSession,
     Term: student.Term,
-    Status: student.Status || 'Active'
+    Status: student.Status || 'Active',
+    Enrolled: 'YES'
   }));
   applications.map(normalizeApplication).forEach((app) => putAccount({
     AccountRef: app.AdmissionNo || app.AdmissionNumber || app.ApplicationReference || app.ApplicationID,
@@ -1047,7 +1052,11 @@ async function getAccountsOverview(env) {
     BillingCategory: app.BillingCategory || 'Regular',
     AcademicSession: app.AcademicSession,
     Term: app.Term,
-    Status: app.Status
+    Status: app.Status,
+    ResultStatus: app.ResultStatus,
+    OfferSent: app.OfferSent,
+    Enrolled: app.Enrolled,
+    AdmissionLetterSent: app.AdmissionLetterSent
   }));
   [...normalizedInvoices, ...normalizedStoredLedger].forEach((row) => putAccount({
     AccountRef: row.AccountRef || row.AdmissionNo || row.ApplicationReference,
@@ -1103,17 +1112,28 @@ async function getAccountsOverview(env) {
         lastPaymentAt = row.Date;
       }
     });
-    const accountStatus = normalizeMatchText(account.Status || 'Active');
-    if (!['new', 'pending', 'submitted', 'not admitted', 'rejected'].includes(accountStatus)) {
-      const expectedSchoolFeeDebit = normalizedFeeItems
+    const accountStatus = normalizeMatchText(account.Status || '');
+    const resultStatus = normalizeMatchText(account.ResultStatus || '');
+    const isEnrolled = yesNo(account.Enrolled) === 'YES' || accountStatus === 'enrolled';
+    const isAdmitted = resultStatus === 'admitted' || ['admitted', 'accepted', 'admission letter sent'].includes(accountStatus);
+    const offerSent = yesNo(account.OfferSent) === 'YES';
+    if (isEnrolled || (isAdmitted && offerSent)) {
+      const expectedFeeDebit = normalizedFeeItems
         .filter((fee) => yesNo(fee.Active) === 'YES')
         .filter((fee) => yesNo(fee.PayableOnline || 'YES') === 'YES')
         .filter((fee) => !isWalletFee(fee))
-        .filter((fee) => normalizeMatchText(fee.FeeCategory || 'School Fee') === 'school fee')
+        .filter((fee) => {
+          const category = normalizeMatchText(fee.FeeCategory || 'School Fee');
+          const requiredForEnrollment = yesNo(fee.RequiredForEnrollment) === 'YES';
+          if (isEnrolled) {
+            return category === 'school fee' && !requiredForEnrollment;
+          }
+          return category === 'admission' || requiredForEnrollment;
+        })
         .filter((fee) => feeMatchesApplication(fee, account))
         .reduce((sum, fee) => sum + asMoneyNumber(fee.Amount), 0);
-      if (expectedSchoolFeeDebit > totalDebit) {
-        totalDebit = expectedSchoolFeeDebit;
+      if (expectedFeeDebit > totalDebit) {
+        totalDebit = expectedFeeDebit;
       }
     }
     return {
