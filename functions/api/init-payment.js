@@ -186,6 +186,9 @@ export async function onRequestPost(context) {
     }
     const minAmount = toAmount(fee.MinAmount);
     const maxAmount = toAmount(fee.MaxAmount);
+    if (isWallet && String(fee.WalletLimitReached || '').trim().toUpperCase() === 'YES') {
+      return Response.json({ ok: false, message: 'This wallet has reached the maximum balance allowed for this class.' }, { status: 400 });
+    }
     if (isWallet && minAmount > 0 && amount < minAmount) {
       return Response.json({ ok: false, message: `Minimum wallet top-up is ${minAmount}.` }, { status: 400 });
     }

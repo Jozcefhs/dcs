@@ -1011,6 +1011,10 @@ export async function getPayableFees(env, body = {}) {
     addPaid(paymentNameMap, periodKey(row.FeeName, row.AcademicSession, row.Term), credit);
     addPaid(paymentNameMap, periodKey(row.Description, row.AcademicSession, row.Term), credit);
   });
+  const currentWalletBalance = ledgerRows.map(normalizeLedger).filter(rowMatchesAccount).reduce((sum, row) => {
+    if (!isWalletLedger(row)) return sum;
+    return sum + asMoneyNumber(row.Credit) - asMoneyNumber(row.Debit);
+  }, 0);
   const accountCreditDebits = ledgerRows.map(normalizeLedger).filter(rowMatchesAccount).filter(notStaleForApplication).reduce((sum, row) => {
     if (isWalletLedger(row)) return sum;
     if (normalizeMatchText(row.FeeCategory) !== 'account credit') return sum;
@@ -1111,14 +1115,24 @@ export async function getPayableFees(env, body = {}) {
       paid += generalFeeCreditApplied;
       generalFeeCreditRemaining -= generalFeeCreditApplied;
     }
-    const balance = isWalletFee(fee) ? originalAmount : Math.max(0, originalAmount - paid);
+    const walletLimit = isWalletFee(fee) ? asMoneyNumber(copy.MaxAmount) : 0;
+    const walletTopupRemaining = walletLimit > 0 ? Math.max(0, walletLimit - currentWalletBalance) : originalAmount;
+    const balance = isWalletFee(fee) ? walletTopupRemaining : Math.max(0, originalAmount - paid);
     copy.OriginalAmount = originalAmount;
     copy.PaidAmount = paid;
     copy.AcceptanceCreditApplied = acceptanceCreditApplied;
     copy.SchoolFeesTotalCreditApplied = schoolFeesTotalCreditApplied;
     copy.GeneralFeeCreditApplied = generalFeeCreditApplied;
     copy.BalanceAmount = balance;
-    if (!isWalletFee(fee)) copy.Amount = balance;
+    if (!isWalletFee(fee)) {
+      copy.Amount = balance;
+    } else if (walletLimit > 0) {
+      copy.Amount = balance;
+      copy.MaxAmount = balance;
+      copy.WalletLimit = walletLimit;
+      copy.WalletBalance = currentWalletBalance;
+      copy.WalletLimitReached = balance <= 0 ? 'YES' : 'NO';
+    }
     if (asMoneyNumber(copy.MinAmount) > balance) copy.MinAmount = balance;
     if (asMoneyNumber(copy.MaxAmount) <= 0 || asMoneyNumber(copy.MaxAmount) > balance) copy.MaxAmount = balance;
     copy.PaymentType = isWalletFee(fee) ? 'Wallet' : 'Fee';

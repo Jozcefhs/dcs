@@ -89,6 +89,25 @@ function renderWallet(child) {
 
   const entries = dashboard.walletActivity?.[child.AccountRef] || [];
   walletLedger.innerHTML = entries.length ? '' : '<p class="muted">No wallet activity found.</p>';
+  if (entries.length > 5) {
+    const details = document.createElement('details');
+    details.className = 'collapsible-activity';
+    const summary = document.createElement('summary');
+    summary.textContent = `Show ${entries.length} wallet purchase / top-up activities`;
+    details.appendChild(summary);
+    walletLedger.appendChild(details);
+    entries.slice(0, 100).forEach((entry) => {
+      const item = document.createElement('div');
+      item.className = 'activity-item';
+      item.innerHTML = `
+        <strong>${entry.Description || entry.EntryType || 'Wallet activity'}</strong>
+        <span>${entry.Date || ''} | ${entry.Debit ? '-' + money(entry.Debit) : '+' + money(entry.Credit)}</span>
+        <small>${entry.RecordedBy || entry.Source || ''}</small>
+      `;
+      details.appendChild(item);
+    });
+    return;
+  }
   entries.slice(0, 20).forEach((entry) => {
     const item = document.createElement('div');
     item.className = 'activity-item';
@@ -279,6 +298,11 @@ function setPaymentStatus(container, message, type) {
 function paymentAmountFor(fee, container) {
   const input = document.getElementById(amountInputId(fee));
   const amount = Number(String(fee.Amount || '0').replace(/,/g, ''));
+  const max = Number(String(fee.MaxAmount || '0').replace(/,/g, ''));
+  if (isWalletFee(fee) && isYes(fee.WalletLimitReached)) {
+    setPaymentStatus(container, 'This wallet has reached the maximum balance allowed for this class.', 'bad');
+    return null;
+  }
   if (!isWalletFee(fee) && !isYes(fee.AllowInstallment)) return amount;
   const min = Number(String(fee.MinAmount || '0').replace(/,/g, ''));
   const entered = input ? input.value : '';
@@ -291,8 +315,9 @@ function paymentAmountFor(fee, container) {
     setPaymentStatus(container, `Minimum amount is ${money(min)}.`, 'bad');
     return null;
   }
-  if (Number.isFinite(amount) && amount > 0 && value > amount) {
-    setPaymentStatus(container, `Maximum amount is ${money(amount)}.`, 'bad');
+  const limit = isWalletFee(fee) && Number.isFinite(max) && max > 0 ? max : amount;
+  if (Number.isFinite(limit) && limit > 0 && value > limit) {
+    setPaymentStatus(container, `Maximum amount is ${money(limit)}.`, 'bad');
     return null;
   }
   setPaymentStatus(container, '', '');
@@ -347,6 +372,11 @@ function renderPayableItems(child) {
       <small>${fee.FeeCategory || ''}${isYes(fee.AllowInstallment) ? ' | Part payment allowed' : ''}</small>
       ${balanceNote}
     `;
+    if (isWalletFee(fee) && Number(fee.WalletLimit || 0) > 0) {
+      const walletNote = document.createElement('small');
+      walletNote.textContent = `Wallet balance: ${money(fee.WalletBalance)} | Class wallet limit: ${money(fee.WalletLimit)} | Maximum top-up now: ${money(fee.MaxAmount || fee.Amount)}`;
+      item.appendChild(walletNote);
+    }
     if (fee.Components?.length) {
       renderComponents(item, fee.Components);
     }
@@ -358,16 +388,23 @@ function renderPayableItems(child) {
       input.id = amountInputId(fee);
       input.type = 'number';
       input.min = fee.MinAmount || '1';
-      if (!isWalletFee(fee) && fee.MaxAmount) input.max = fee.MaxAmount;
+      if (fee.MaxAmount) input.max = fee.MaxAmount;
       input.step = '0.01';
       input.value = defaultAmount;
       input.inputMode = 'decimal';
+      if (isWalletFee(fee) && isYes(fee.WalletLimitReached)) {
+        input.disabled = true;
+        input.value = '';
+      }
       item.appendChild(label);
       item.appendChild(input);
     }
     const button = document.createElement('button');
     button.type = 'button';
     button.textContent = 'Pay Now';
+    if (isWalletFee(fee) && isYes(fee.WalletLimitReached)) {
+      button.disabled = true;
+    }
     button.addEventListener('click', () => payItem(child, fee, item));
     item.appendChild(button);
     const inlineStatus = document.createElement('small');
