@@ -29,6 +29,12 @@ function profileFromForm() {
     SchoolPhone: data.get('SchoolPhone'),
     SchoolSignatoryName: data.get('SchoolSignatoryName'),
     SchoolSignatoryTitle: data.get('SchoolSignatoryTitle'),
+    ResultSignatoryName: data.get('ResultSignatoryName'),
+    ResultSignatoryTitle: data.get('ResultSignatoryTitle'),
+    OfferSignatoryName: data.get('OfferSignatoryName'),
+    OfferSignatoryTitle: data.get('OfferSignatoryTitle'),
+    AdmissionSignatoryName: data.get('AdmissionSignatoryName'),
+    AdmissionSignatoryTitle: data.get('AdmissionSignatoryTitle'),
     EmailGreetingTemplate: data.get('EmailGreetingTemplate'),
     PortalHeadline: data.get('PortalHeadline'),
     PortalSubheading: data.get('PortalSubheading'),
@@ -58,6 +64,12 @@ async function loadProfile(password = '') {
     setField('schoolPhone', profile.SchoolPhone);
     setField('schoolSignatoryName', profile.SchoolSignatoryName);
     setField('schoolSignatoryTitle', profile.SchoolSignatoryTitle);
+    setField('resultSignatoryName', profile.ResultSignatoryName);
+    setField('resultSignatoryTitle', profile.ResultSignatoryTitle);
+    setField('offerSignatoryName', profile.OfferSignatoryName);
+    setField('offerSignatoryTitle', profile.OfferSignatoryTitle);
+    setField('admissionSignatoryName', profile.AdmissionSignatoryName);
+    setField('admissionSignatoryTitle', profile.AdmissionSignatoryTitle);
     setField('emailGreetingTemplate', profile.EmailGreetingTemplate || 'Dear Parent/Guardian,');
     setField('portalHeadline', profile.PortalHeadline);
     setField('portalSubheading', profile.PortalSubheading);
