@@ -597,8 +597,8 @@ function isGeneralFeeCredit(row) {
   const compactCode = normalizeReferenceText(row.FeeCode);
   const compactName = normalizeReferenceText(row.FeeName);
   const compactDescription = normalizeReferenceText(row.Description);
-  if (['manualpayment', 'generalpayment', 'accountcredit', 'feecredit'].includes(compactCode)) return true;
-  if (['manual_payment', 'general_payment', 'account_credit', 'fee_credit'].includes(feeCode)) return true;
+  if (['manualpayment', 'generalpayment', 'accountcredit', 'feecredit', 'credittransferin', 'creditadjustment'].includes(compactCode)) return true;
+  if (['manual_payment', 'general_payment', 'account_credit', 'fee_credit', 'credit_transfer_in', 'credit_adjustment'].includes(feeCode)) return true;
   if (!category && ['payment', 'manualpayment', 'generalpayment', 'accountcredit', 'feecredit'].includes(compactName || compactDescription)) return true;
   return false;
 }
@@ -2114,6 +2114,23 @@ async function walletBalanceForAccount(env, accountRef) {
   }).reduce((balance, row) => balance + asMoneyNumber(row.Credit) - asMoneyNumber(row.Debit), 0);
 }
 
+async function accountCreditBalanceForAccount(env, accountRef) {
+  const overview = await getAccountsOverview(env);
+  const account = (overview.accounts || []).find((row) => {
+    return sameText(row.AccountRef, accountRef) ||
+      sameText(row.AdmissionNo, accountRef) ||
+      referencesMatch(row.AccountRef, accountRef) ||
+      referencesMatch(row.AdmissionNo, accountRef);
+  });
+  if (!account) return 0;
+  return Math.max(
+    asMoneyNumber(account.ExcessCredit),
+    asMoneyNumber(account.CreditBalance),
+    Math.max(0, asMoneyNumber(account.TotalCredit) - asMoneyNumber(account.TotalDebit)),
+    Math.max(0, -asMoneyNumber(account.Balance))
+  );
+}
+
 async function walletSpentTodayForAccount(env, accountRef) {
   const rows = (await listCollection(env, 'ledger')).map(normalizeLedger);
   return rows.filter((row) => {
@@ -2273,6 +2290,166 @@ async function recordWalletPurchase(env, body) {
     ledger: entry,
     balance: await walletBalanceForAccount(env, account.AccountRef),
     account: await walletAccountPayload(env, student)
+  };
+}
+
+async function recordCreditAction(env, body) {
+  const accountRef = clean(body.AccountRef || body.accountRef || body.AdmissionNo || body.admissionNo);
+  const action = clean(body.CreditAction || body.ActionType || body.actionType || body.Type).toLowerCase();
+  const amount = asMoneyNumber(body.Amount || body.amount);
+  const recordedBy = clean(body.RecordedBy || body.recordedBy) || 'Accounts Office';
+  const notes = clean(body.Notes || body.notes);
+  if (!accountRef) {
+    const err = new Error('AccountRef is required.');
+    err.status = 400;
+    throw err;
+  }
+  if (amount <= 0) {
+    const err = new Error('Amount must be greater than zero.');
+    err.status = 400;
+    throw err;
+  }
+  const student = await findStudentByAccountRef(env, accountRef);
+  if (!student) throw applicationNotFound(accountRef);
+  const account = await walletAccountPayload(env, student);
+  const availableCredit = await accountCreditBalanceForAccount(env, account.AccountRef);
+  const isManualCredit = action === 'manual credit adjustment' || action === 'manual_credit' || action === 'credit_adjustment';
+  if (!isManualCredit && amount > availableCredit) {
+    const err = new Error(`Amount exceeds available account credit (${formatNairaAmount(availableCredit)}).`);
+    err.status = 400;
+    throw err;
+  }
+  const reference = clean(body.Reference || body.reference) || ledgerDocumentId('CREDIT');
+  const entries = [];
+  const base = {
+    Date: nowIso(),
+    AccountRef: account.AccountRef,
+    ApplicationReference: account.ApplicationReference,
+    AdmissionNo: account.AdmissionNo,
+    DisplayName: account.DisplayName,
+    ClassName: account.ClassName,
+    FeeCategory: 'Account Credit',
+    Currency: 'NGN',
+    Reference: reference,
+    RecordedBy: recordedBy,
+    Source: 'Accounts Credit Action'
+  };
+  const addLedger = async (entry, prefix = 'CREDIT') => {
+    const ledgerNo = ledgerDocumentId(prefix);
+    const payload = {
+      LedgerNo: ledgerNo,
+      ...entry,
+      Metadata: JSON.stringify({
+        creditAction: action,
+        notes,
+        targetAccountRef: clean(body.TargetAccountRef || body.targetAccountRef),
+        availableCreditBefore: availableCredit
+      })
+    };
+    await upsertDocument(env, 'ledger', safeDocumentId(ledgerNo), payload);
+    entries.push(payload);
+  };
+
+  if (action === 'refund to parent' || action === 'refund') {
+    await addLedger({
+      ...base,
+      EntryType: 'Credit Refund',
+      FeeCode: 'CREDIT_REFUND',
+      FeeName: 'Credit Refund',
+      Description: notes || 'Refund of account credit to parent',
+      Debit: amount,
+      Credit: 0
+    });
+  } else if (action === 'transfer to wallet' || action === 'wallet') {
+    await addLedger({
+      ...base,
+      EntryType: 'Credit Transfer',
+      FeeCode: 'CREDIT_TO_WALLET',
+      FeeName: 'Credit Transfer to Wallet',
+      Description: notes || 'Account credit transferred to student wallet',
+      Debit: amount,
+      Credit: 0
+    });
+    await addLedger({
+      ...base,
+      EntryType: 'Wallet Deposit',
+      FeeCode: 'WALLET_TOPUP',
+      FeeName: 'Student Wallet Top-up',
+      FeeCategory: 'Wallet',
+      Description: notes || 'Account credit transferred to wallet',
+      Debit: 0,
+      Credit: amount
+    }, 'WALLET');
+  } else if (action === 'transfer to sibling' || action === 'sibling') {
+    const targetRef = clean(body.TargetAccountRef || body.targetAccountRef);
+    if (!targetRef) {
+      const err = new Error('Target sibling/account is required.');
+      err.status = 400;
+      throw err;
+    }
+    const targetStudent = await findStudentByAccountRef(env, targetRef);
+    if (!targetStudent) {
+      const err = new Error('Target sibling/account was not found.');
+      err.status = 404;
+      throw err;
+    }
+    const targetAccount = await walletAccountPayload(env, targetStudent);
+    await addLedger({
+      ...base,
+      EntryType: 'Credit Transfer',
+      FeeCode: 'CREDIT_TRANSFER_OUT',
+      FeeName: 'Credit Transfer Out',
+      Description: notes || `Account credit transferred to ${targetAccount.DisplayName || targetAccount.AccountRef}`,
+      Debit: amount,
+      Credit: 0
+    });
+    await addLedger({
+      Date: nowIso(),
+      AccountRef: targetAccount.AccountRef,
+      ApplicationReference: targetAccount.ApplicationReference,
+      AdmissionNo: targetAccount.AdmissionNo,
+      DisplayName: targetAccount.DisplayName,
+      ClassName: targetAccount.ClassName,
+      EntryType: 'Credit Transfer',
+      FeeCode: 'CREDIT_TRANSFER_IN',
+      FeeName: 'Credit Transfer In',
+      FeeCategory: 'Account Credit',
+      Description: notes || `Account credit transferred from ${account.DisplayName || account.AccountRef}`,
+      Debit: 0,
+      Credit: amount,
+      Currency: 'NGN',
+      Reference: reference,
+      RecordedBy: recordedBy,
+      Source: 'Accounts Credit Action'
+    });
+  } else if (action === 'manual credit adjustment' || action === 'manual debit adjustment' || isManualCredit || action === 'debit_adjustment') {
+    const isDebit = action === 'manual debit adjustment' || action === 'debit_adjustment';
+    if (isDebit && amount > availableCredit) {
+      const err = new Error(`Amount exceeds available account credit (${formatNairaAmount(availableCredit)}).`);
+      err.status = 400;
+      throw err;
+    }
+    await addLedger({
+      ...base,
+      EntryType: isDebit ? 'Credit Adjustment Debit' : 'Credit Adjustment',
+      FeeCode: isDebit ? 'CREDIT_ADJUSTMENT_DEBIT' : 'CREDIT_ADJUSTMENT',
+      FeeName: isDebit ? 'Credit Adjustment Debit' : 'Credit Adjustment',
+      Description: notes || (isDebit ? 'Manual debit adjustment to account credit' : 'Manual credit adjustment'),
+      Debit: isDebit ? amount : 0,
+      Credit: isDebit ? 0 : amount
+    });
+  } else {
+    const err = new Error('Choose a valid credit action.');
+    err.status = 400;
+    throw err;
+  }
+
+  return {
+    ok: true,
+    message: 'Credit action recorded.',
+    entries,
+    availableCreditBefore: availableCredit,
+    availableCreditAfter: await accountCreditBalanceForAccount(env, account.AccountRef)
   };
 }
 
@@ -2481,6 +2658,8 @@ async function routeAction(env, action, body = {}) {
       return saveWalletCard(env, body);
     case 'recordWalletPurchase':
       return recordWalletPurchase(env, body);
+    case 'recordCreditAction':
+      return recordCreditAction(env, body);
     case 'updateStudentBillingCategory':
       return updateStudentBillingCategory(env, body);
     case 'updateStudentStatus':
