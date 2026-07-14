@@ -1028,10 +1028,6 @@ export async function getPayableFees(env, body = {}) {
     if (!currentTermRank) return true;
     return rowTermRank === currentTermRank;
   };
-  const rowIsPriorPeriod = (row) => {
-    const rowTermRank = termRank(row.Term);
-    return currentTermRank && rowTermRank && rowTermRank < currentTermRank && rowSessionApplies(row);
-  };
   const priorSchoolFeeCharge = currentTermRank ? applyBillingCategoryOverrides(allFees.filter((fee) => {
     if (yesNo(fee.Active) !== 'YES') return false;
     if (isWalletFee(fee) || isAcceptanceFeeLike(fee)) return false;
@@ -1039,16 +1035,20 @@ export async function getPayableFees(env, body = {}) {
     const feeRank = termRank(fee.Term);
     return feeRank && feeRank < currentTermRank && feeMatchesAccountBase(fee, billingApp);
   }), billingApp).reduce((sum, fee) => sum + asMoneyNumber(fee.Amount), 0) : 0;
-  const priorSchoolFeeCredit = currentTermRank ? paidLedgerRows.reduce((sum, row) => {
+  const schoolFeeRelatedCredit = currentTermRank ? paidLedgerRows.reduce((sum, row) => {
     const schoolRelated = isAcceptanceFeeLike(row) ||
       isSchoolFeesTotalPayment(row) ||
       normalizeMatchText(row.FeeCategory) === 'school fee' ||
       isGeneralFeeCredit(row);
-    if (!schoolRelated) return sum;
-    if (isAcceptanceFeeLike(row)) return sum + asMoneyNumber(row.Credit);
-    return rowIsPriorPeriod(row) ? sum + asMoneyNumber(row.Credit) : sum;
+    return schoolRelated ? sum + asMoneyNumber(row.Credit) : sum;
   }, 0) : 0;
-  const carryForwardSchoolCredit = Math.max(0, priorSchoolFeeCredit - priorSchoolFeeCharge);
+  const currentPeriodSchoolFeeCredit = currentTermRank ? paidLedgerRows.reduce((sum, row) => {
+    const schoolRelated = isSchoolFeesTotalPayment(row) ||
+      normalizeMatchText(row.FeeCategory) === 'school fee' ||
+      isGeneralFeeCredit(row);
+    return schoolRelated && rowIsCurrentPeriod(row) ? sum + asMoneyNumber(row.Credit) : sum;
+  }, 0) : 0;
+  const carryForwardSchoolCredit = Math.max(0, schoolFeeRelatedCredit - currentPeriodSchoolFeeCredit - priorSchoolFeeCharge);
   if (currentTermRank > 1) {
     acceptanceCreditRemaining = 0;
   }
