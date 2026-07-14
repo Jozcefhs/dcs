@@ -36,12 +36,29 @@
               <input id="schoolName" name="SchoolName" required>
             </div>
             <div>
+              <label for="schoolCode">School Code</label>
+              <input id="schoolCode" name="SchoolCode" placeholder="DCA">
+            </div>
+            <div>
               <label for="schoolEmail">School Email</label>
               <input id="schoolEmail" name="SchoolEmail" type="email">
             </div>
             <div>
               <label for="schoolPhone">School Phone</label>
               <input id="schoolPhone" name="SchoolPhone" inputmode="tel">
+            </div>
+            <div>
+              <label for="schoolSignatoryName">Document Signatory Name</label>
+              <input id="schoolSignatoryName" name="SchoolSignatoryName" placeholder="Example: Principal name">
+            </div>
+            <div>
+              <label for="schoolSignatoryTitle">Signatory Title</label>
+              <input id="schoolSignatoryTitle" name="SchoolSignatoryTitle" placeholder="Example: Principal">
+            </div>
+            <div class="full">
+              <label for="emailGreetingTemplate">Email Greeting Template</label>
+              <input id="emailGreetingTemplate" name="EmailGreetingTemplate" placeholder="Dear Parent/Guardian,">
+              <p class="muted">You can use {FULL_NAME}, {FIRST_NAME}, and {SCHOOL_NAME}.</p>
             </div>
             <div>
               <label for="resultDisplayMode">Parent Result Display</label>

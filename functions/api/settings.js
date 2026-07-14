@@ -4,6 +4,10 @@ function clean(value) {
   return String(value ?? '').trim();
 }
 
+function normalizeSchoolCode(value) {
+  return clean(value).toUpperCase().replace(/[^A-Z0-9]/g, '') || 'DCA';
+}
+
 function requireAdmin(env, password) {
   const expected = clean(env.ADMIN_WEB_PASSWORD);
   if (!expected) {
@@ -21,9 +25,13 @@ function requireAdmin(env, password) {
 function defaultProfile(env) {
   return {
     SchoolName: clean(env.SCHOOL_NAME) || 'Integrated School Management Suite',
+    SchoolCode: normalizeSchoolCode(env.SCHOOL_CODE),
     SchoolAddress: clean(env.SCHOOL_ADDRESS) || '',
     SchoolPhone: clean(env.SCHOOL_PHONE) || '',
     SchoolEmail: clean(env.SCHOOL_EMAIL) || '',
+    SchoolSignatoryName: clean(env.SCHOOL_SIGNATORY_NAME) || '',
+    SchoolSignatoryTitle: clean(env.SCHOOL_SIGNATORY_TITLE) || '',
+    EmailGreetingTemplate: clean(env.EMAIL_GREETING_TEMPLATE) || 'Dear Parent/Guardian,',
     PortalHeadline: clean(env.PORTAL_HEADLINE) || 'Admissions and parent services in one place',
     PortalSubheading: clean(env.PORTAL_SUBHEADING) || 'Buy forms, complete applications, upload documents, pay fees, and monitor student activity from a secure school portal.',
     PortalNotice: clean(env.PORTAL_NOTICE) || '',
@@ -71,9 +79,13 @@ export async function onRequestPost(context) {
     const profile = {
       ...defaultProfile(env),
       SchoolName: clean(incoming.SchoolName) || 'Integrated School Management Suite',
+      SchoolCode: normalizeSchoolCode(incoming.SchoolCode),
       SchoolAddress: clean(incoming.SchoolAddress),
       SchoolPhone: clean(incoming.SchoolPhone),
       SchoolEmail: clean(incoming.SchoolEmail),
+      SchoolSignatoryName: clean(incoming.SchoolSignatoryName),
+      SchoolSignatoryTitle: clean(incoming.SchoolSignatoryTitle),
+      EmailGreetingTemplate: clean(incoming.EmailGreetingTemplate) || 'Dear Parent/Guardian,',
       PortalHeadline: clean(incoming.PortalHeadline),
       PortalSubheading: clean(incoming.PortalSubheading),
       PortalNotice: clean(incoming.PortalNotice),

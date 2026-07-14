@@ -4,6 +4,21 @@ function clean(value) {
   return String(value ?? '').trim();
 }
 
+function normalizeSchoolCode(value) {
+  return clean(value).toUpperCase().replace(/[^A-Z0-9]/g, '') || 'DCA';
+}
+
+export async function getSchoolCode(env) {
+  try {
+    requireFirestoreEnv(env);
+    const rows = await listCollection(env, 'settings');
+    const profile = rows.find((row) => row.__id === 'schoolProfile') || rows.find((row) => clean(row.SchoolName));
+    return normalizeSchoolCode((profile && profile.SchoolCode) || env.SCHOOL_CODE);
+  } catch (_err) {
+    return normalizeSchoolCode(env.SCHOOL_CODE);
+  }
+}
+
 function lower(value) {
   return clean(value).toLowerCase();
 }
@@ -1430,9 +1445,13 @@ async function saveBrevoSettings(env, body) {
 async function saveSchoolProfile(env, body) {
   const profile = {
     SchoolName: clean(body.SchoolName || body.schoolName) || 'Integrated School Management Suite',
+    SchoolCode: normalizeSchoolCode(body.SchoolCode || body.schoolCode),
     SchoolAddress: clean(body.SchoolAddress || body.schoolAddress),
     SchoolPhone: clean(body.SchoolPhone || body.schoolPhone),
     SchoolEmail: clean(body.SchoolEmail || body.schoolEmail),
+    SchoolSignatoryName: clean(body.SchoolSignatoryName || body.schoolSignatoryName),
+    SchoolSignatoryTitle: clean(body.SchoolSignatoryTitle || body.schoolSignatoryTitle),
+    EmailGreetingTemplate: clean(body.EmailGreetingTemplate || body.emailGreetingTemplate) || 'Dear Parent/Guardian,',
     PortalHeadline: clean(body.PortalHeadline || body.portalHeadline) || 'Admissions and parent services in one place',
     PortalSubheading: clean(body.PortalSubheading || body.portalSubheading) || 'Buy forms, complete applications, upload documents, pay fees, and monitor student activity from a secure school portal.',
     PortalNotice: clean(body.PortalNotice || body.portalNotice),
@@ -1452,9 +1471,13 @@ async function getSchoolProfile(env) {
     ok: true,
     profile: profile || {
       SchoolName: 'Integrated School Management Suite',
+      SchoolCode: normalizeSchoolCode(env.SCHOOL_CODE),
       SchoolAddress: '',
       SchoolPhone: '',
       SchoolEmail: '',
+      SchoolSignatoryName: '',
+      SchoolSignatoryTitle: '',
+      EmailGreetingTemplate: 'Dear Parent/Guardian,',
       PortalHeadline: 'Admissions and parent services in one place',
       PortalSubheading: 'Buy forms, complete applications, upload documents, pay fees, and monitor student activity from a secure school portal.',
       PortalNotice: '',
@@ -1566,16 +1589,17 @@ async function updateApplicantIntelligence(env, body) {
   return { ok: true, message: 'Applicant intelligence updated.', application: saved };
 }
 
-function nextStudentAdmissionNo(students, session = '') {
+function nextStudentAdmissionNo(students, session = '', schoolCode = 'DCA') {
   const yearMatch = clean(session).match(/20(\d{2})/);
   const yearCode = yearMatch ? yearMatch[1] : String(new Date().getFullYear()).slice(-2);
+  const prefix = normalizeSchoolCode(schoolCode);
   let maxNo = 0;
   students.forEach((row) => {
     const admissionNo = pick(row, ['AdmissionNo', 'admissionNo', '__id']);
-    const match = clean(admissionNo).match(/(\d+)$/);
+    const match = clean(admissionNo).match(new RegExp(`^${prefix}/${yearCode}/(\\d+)$`, 'i')) || clean(admissionNo).match(/(\d+)$/);
     if (match) maxNo = Math.max(maxNo, Number(match[1]));
   });
-  return `DCA/${yearCode}/${String(maxNo + 1).padStart(6, '0')}`;
+  return `${prefix}/${yearCode}/${String(maxNo + 1).padStart(6, '0')}`;
 }
 
 async function importStudents(env, body) {
@@ -1586,6 +1610,7 @@ async function importStudents(env, body) {
     throw err;
   }
   const existingStudents = await listCollection(env, 'students');
+  const schoolCode = await getSchoolCode(env);
   const importedBy = clean(body.ImportedBy || body.importedBy) || 'Admissions Office';
   let imported = 0;
   let skipped = 0;
@@ -1608,7 +1633,7 @@ async function importStudents(env, body) {
       failures.push(`Row ${rowNo}: missing class.`);
       continue;
     }
-    if (!admissionNo) admissionNo = nextStudentAdmissionNo([...existingStudents, ...savedStudents], input.AcademicSession || input.Session || '');
+    if (!admissionNo) admissionNo = nextStudentAdmissionNo([...existingStudents, ...savedStudents], input.AcademicSession || input.Session || '', schoolCode);
     const duplicate = await findStudent(env, admissionNo, appRef);
     if (duplicate) {
       skipped += 1;
@@ -1780,9 +1805,10 @@ export async function recordSale(env, body) {
     err.status = 400;
     throw err;
   }
+  const schoolCode = await getSchoolCode(env);
   const sale = {
     Time: body.Time || nowIso(),
-    ReceiptNo: receiptNo || `DCA-FORM-${Date.now()}`,
+    ReceiptNo: receiptNo || `${schoolCode}-FORM-${Date.now()}`,
     ApplicantName: clean(body.ApplicantName),
     Email: email,
     Phone: clean(body.Phone),

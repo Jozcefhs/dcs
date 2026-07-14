@@ -1,4 +1,5 @@
 import { listCollection, requireFirestoreEnv, upsertDocument } from '../lib/firestore.js';
+import { getSchoolCode } from './backend.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -33,15 +34,16 @@ function duplicateKey(application) {
   return first && surname && parentEmail ? `${first}|${surname}|${parentEmail}` : '';
 }
 
-function nextApplicationReference(applications) {
+function nextApplicationReference(applications, schoolCode = 'DCA') {
   const yearCode = String(new Date().getFullYear()).slice(-2);
+  const prefix = clean(schoolCode).toUpperCase().replace(/[^A-Z0-9]/g, '') || 'DCA';
   let maxNo = 0;
   (applications || []).forEach((row) => {
     const value = clean(row.ApplicationReference || row.ApplicationID || row.__id);
-    const match = value.match(/(\d+)$/);
+    const match = value.match(new RegExp(`^${prefix}/${yearCode}/(\\d+)$`, 'i')) || value.match(/(\d+)$/);
     if (match) maxNo = Math.max(maxNo, Number(match[1]));
   });
-  return `DCA/${yearCode}/${String(maxNo + 1).padStart(6, '0')}`;
+  return `${prefix}/${yearCode}/${String(maxNo + 1).padStart(6, '0')}`;
 }
 
 async function submitToFirestore(env, email, code, receiptNo, application) {
@@ -54,7 +56,7 @@ async function submitToFirestore(env, email, code, receiptNo, application) {
   }
 
   const applications = await listCollection(env, 'applications');
-  const reference = nextApplicationReference(applications);
+  const reference = nextApplicationReference(applications, await getSchoolCode(env));
   const now = new Date().toISOString();
   const parentEmail = lower(application.ParentEmail || application.parentEmail || email);
   if (!parentEmail) {

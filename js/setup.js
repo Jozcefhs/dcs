@@ -23,9 +23,13 @@ function profileFromForm() {
   const data = new FormData(setupForm);
   return {
     SchoolName: data.get('SchoolName'),
+    SchoolCode: data.get('SchoolCode'),
     SchoolAddress: data.get('SchoolAddress'),
     SchoolEmail: data.get('SchoolEmail'),
     SchoolPhone: data.get('SchoolPhone'),
+    SchoolSignatoryName: data.get('SchoolSignatoryName'),
+    SchoolSignatoryTitle: data.get('SchoolSignatoryTitle'),
+    EmailGreetingTemplate: data.get('EmailGreetingTemplate'),
     PortalHeadline: data.get('PortalHeadline'),
     PortalSubheading: data.get('PortalSubheading'),
     PortalNotice: data.get('PortalNotice'),
@@ -48,9 +52,13 @@ async function loadProfile(password = '') {
     if (!response.ok || !data.ok) throw new Error(data.message || 'Could not load setup.');
     const profile = data.profile || {};
     setField('schoolName', profile.SchoolName);
+    setField('schoolCode', profile.SchoolCode || 'DCA');
     setField('schoolAddress', profile.SchoolAddress);
     setField('schoolEmail', profile.SchoolEmail);
     setField('schoolPhone', profile.SchoolPhone);
+    setField('schoolSignatoryName', profile.SchoolSignatoryName);
+    setField('schoolSignatoryTitle', profile.SchoolSignatoryTitle);
+    setField('emailGreetingTemplate', profile.EmailGreetingTemplate || 'Dear Parent/Guardian,');
     setField('portalHeadline', profile.PortalHeadline);
     setField('portalSubheading', profile.PortalSubheading);
     setField('portalNotice', profile.PortalNotice);

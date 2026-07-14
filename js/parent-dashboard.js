@@ -182,6 +182,18 @@ function renderComponents(parent, components) {
   });
 }
 
+function activityTarget(container, records, label) {
+  container.innerHTML = '';
+  if ((records || []).length <= 5) return container;
+  const details = document.createElement('details');
+  details.className = 'collapsible-activity';
+  const summary = document.createElement('summary');
+  summary.textContent = `Show ${records.length} ${label}`;
+  details.appendChild(summary);
+  container.appendChild(details);
+  return details;
+}
+
 function renderDueNotifications(child) {
   const records = dashboard.dueNotifications?.[child.AccountRef] || [];
   dueNotifications.innerHTML = records.length ? '' : '<p class="muted">No payment due date notifications at the moment.</p>';
@@ -417,8 +429,12 @@ function renderPayableItems(child) {
 
 function renderClinic(child) {
   const records = dashboard.clinicVisits?.[child.AccountRef] || [];
-  clinicRecords.innerHTML = records.length ? '' : '<p class="muted">No clinic visits found.</p>';
-  records.slice(0, 20).forEach((record) => {
+  if (!records.length) {
+    clinicRecords.innerHTML = '<p class="muted">No clinic visits found.</p>';
+    return;
+  }
+  const target = activityTarget(clinicRecords, records, 'clinic visits');
+  records.slice(0, 100).forEach((record) => {
     const item = document.createElement('div');
     item.className = 'activity-item';
     item.innerHTML = `
@@ -426,14 +442,18 @@ function renderClinic(child) {
       <span>${record.Date || ''} | ${record.Disposition || ''}</span>
       <small>${record.Treatment || ''}</small>
     `;
-    clinicRecords.appendChild(item);
+    target.appendChild(item);
   });
 }
 
 function renderPayments(child) {
   const records = dashboard.paymentRecords?.[child.AccountRef] || [];
-  paymentRecords.innerHTML = records.length ? '' : '<p class="muted">No payment records found.</p>';
-  records.slice(0, 40).forEach((record) => {
+  if (!records.length) {
+    paymentRecords.innerHTML = '<p class="muted">No payment records found.</p>';
+    return;
+  }
+  const target = activityTarget(paymentRecords, records, 'payment records');
+  records.slice(0, 100).forEach((record) => {
     const isCredit = Number(record.Credit || record.Amount || 0) > 0 && Number(record.Debit || 0) === 0;
     const amount = record.Amount || record.Credit || record.Debit || 0;
     const period = [record.AcademicSession, record.Term].filter(Boolean).join(' | ');
@@ -445,7 +465,7 @@ function renderPayments(child) {
       <span>${record.Date || ''}${period ? ' | ' + period : ''} | ${isCredit ? '+' : ''}${money(amount)}</span>
       <small>${record.RecordType || ''}${record.Status ? ' | Status: ' + record.Status : ''}${record.Reference ? ' | Ref: ' + record.Reference : ''}</small>
     `;
-    paymentRecords.appendChild(item);
+    target.appendChild(item);
   });
 }
 

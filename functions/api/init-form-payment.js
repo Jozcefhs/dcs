@@ -1,7 +1,7 @@
 // Cloudflare Pages Function: /api/init-form-payment
 // Starts Paystack checkout for admission form purchase.
 
-import { getAdmissionClasses } from './backend.js';
+import { getAdmissionClasses, getSchoolCode } from './backend.js';
 import { requireFirestoreEnv } from '../lib/firestore.js';
 
 const PAYSTACK_INIT_URL = 'https://api.paystack.co/transaction/initialize';
@@ -96,7 +96,7 @@ export async function onRequestPost(context) {
     }
 
     const origin = new URL(request.url).origin;
-    const reference = cleanReference(`DCA-FORM-${Date.now()}`);
+    const reference = cleanReference(`${await getSchoolCode(env)}-FORM-${Date.now()}`);
     const callbackUrl = `${origin}/payment-success.html?type=form&reference=${encodeURIComponent(reference)}`;
 
     const paystackRes = await fetch(PAYSTACK_INIT_URL, {

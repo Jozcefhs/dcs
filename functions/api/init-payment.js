@@ -1,7 +1,7 @@
 // Cloudflare Pages Function: /api/init-payment
 // Initializes Paystack checkout from the backend so the secret key stays private.
 
-import { getPayableFees } from './backend.js';
+import { getPayableFees, getSchoolCode } from './backend.js';
 import { requireFirestoreEnv } from '../lib/firestore.js';
 
 const PAYSTACK_INIT_URL = 'https://api.paystack.co/transaction/initialize';
@@ -210,7 +210,8 @@ export async function onRequestPost(context) {
 
     const account = feeData.account || {};
     const origin = new URL(request.url).origin;
-    const reference = cleanReference(`DCA-${feeCode}-${account.ApplicationReference || account.AccountRef}-${Date.now()}`);
+    const schoolCode = await getSchoolCode(env);
+    const reference = cleanReference(`${schoolCode}-${feeCode}-${account.ApplicationReference || account.AccountRef}-${Date.now()}`);
     const callbackUrl = `${origin}/payment-success.html?reference=${encodeURIComponent(reference)}`;
 
     const paystackRes = await fetch(PAYSTACK_INIT_URL, {

@@ -1,7 +1,7 @@
 // Cloudflare Pages Function: /api/verify-form-payment
 // Verifies a Paystack admission form purchase and records the form sale.
 
-import { recordSale as recordSaleInFirestore } from './backend.js';
+import { getSchoolCode, recordSale as recordSaleInFirestore } from './backend.js';
 import { requireFirestoreEnv } from '../lib/firestore.js';
 
 function extractMetadata(data) {
@@ -38,10 +38,11 @@ function formatDateOnly(date) {
   return date.toISOString().slice(0, 10);
 }
 
-function makeReceiptNo(reference) {
+function makeReceiptNo(reference, schoolCode = 'DCA') {
   const year = new Date().getFullYear();
+  const prefix = String(schoolCode || 'DCA').toUpperCase().replace(/[^A-Z0-9]/g, '') || 'DCA';
   const suffix = String(reference || '').replace(/[^A-Za-z0-9]/g, '').slice(-6).toUpperCase();
-  return `DCA/FORM/${year}/${suffix || Date.now().toString().slice(-6)}`;
+  return `${prefix}/FORM/${year}/${suffix || Date.now().toString().slice(-6)}`;
 }
 
 function formatNairaAmount(value) {
@@ -118,7 +119,7 @@ export async function onRequestPost(context) {
     const amount = Number(tx.amount || 0) / 100;
     const amountPaid = formatNairaAmount(amount);
     const expiryDays = Number(env.ADMISSION_FORM_EXPIRY_DAYS || 30);
-    const receiptNo = makeReceiptNo(tx.reference || reference);
+    const receiptNo = makeReceiptNo(tx.reference || reference, await getSchoolCode(env));
     const basePayload = {
       ReceiptNo: receiptNo,
       ApplicantName: meta.applicantName || '',
