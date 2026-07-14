@@ -594,8 +594,12 @@ function isGeneralFeeCredit(row) {
   const feeName = normalizeMatchText(row.FeeName);
   const description = normalizeMatchText(row.Description);
   const category = normalizeMatchText(row.FeeCategory);
-  if (['manualpayment', 'manual payment', 'generalpayment', 'general payment', 'accountcredit', 'account credit'].includes(feeCode)) return true;
-  if (!category && ['payment', 'manual payment', 'general payment', 'account credit'].includes(feeName || description)) return true;
+  const compactCode = normalizeReferenceText(row.FeeCode);
+  const compactName = normalizeReferenceText(row.FeeName);
+  const compactDescription = normalizeReferenceText(row.Description);
+  if (['manualpayment', 'generalpayment', 'accountcredit', 'feecredit'].includes(compactCode)) return true;
+  if (['manual_payment', 'general_payment', 'account_credit', 'fee_credit'].includes(feeCode)) return true;
+  if (!category && ['payment', 'manualpayment', 'generalpayment', 'accountcredit', 'feecredit'].includes(compactName || compactDescription)) return true;
   return false;
 }
 
