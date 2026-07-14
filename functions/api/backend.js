@@ -2189,17 +2189,40 @@ async function generateSchoolFeeInvoices(env, body) {
     throw err;
   }
   const existing = (await listCollection(env, 'invoices')).map(normalizeInvoice);
+  const ledgerRows = (await listCollection(env, 'ledger')).map(normalizeLedger).filter((row) => {
+    return sameText(row.AccountRef, accountRef) || referencesMatch(row.AccountRef, accountRef) || sameText(row.AdmissionNo, accountRef);
+  });
+  let availableSchoolCredit = ledgerRows.reduce((sum, row) => {
+    if (isWalletLedger(row)) return sum;
+    const credit = asMoneyNumber(row.Credit);
+    if (credit <= 0) return sum;
+    const schoolRelated = isAcceptanceFeeLike(row) ||
+      isSchoolFeesTotalPayment(row) ||
+      normalizeMatchText(row.FeeCategory) === 'school fee' ||
+      isGeneralFeeCredit(row);
+    return schoolRelated ? sum + credit : sum;
+  }, 0);
+  availableSchoolCredit = Math.max(0, availableSchoolCredit - ledgerRows.reduce((sum, row) => {
+    if (isWalletLedger(row)) return sum;
+    return normalizeMatchText(row.FeeCategory) === 'account credit' ? sum + asMoneyNumber(row.Debit) : sum;
+  }, 0));
   let created = 0;
+  let updated = 0;
   for (const fee of fees) {
-    const duplicate = existing.some((invoice) => {
+    const debit = asMoneyNumber(fee.Amount);
+    const credit = Math.min(debit, availableSchoolCredit);
+    availableSchoolCredit = Math.max(0, availableSchoolCredit - credit);
+    const balance = Math.max(0, debit - credit);
+    const status = balance <= 0 ? 'Paid' : credit > 0 ? 'Part Paid' : 'Unpaid';
+    const duplicate = existing.find((invoice) => {
       return sameText(invoice.AccountRef, accountRef) &&
         sameText(invoice.FeeCode, fee.FeeCode) &&
         feeFieldMatches(invoice.AcademicSession || 'All', fee.AcademicSession || 'All', true) &&
         feeFieldMatches(invoice.Term || 'All', fee.Term || 'All', true);
     });
-    if (duplicate) continue;
-    const invoiceId = ledgerDocumentId('INV');
+    const invoiceId = duplicate ? duplicate.InvoiceId : ledgerDocumentId('INV');
     await upsertDocument(env, 'invoices', safeDocumentId(invoiceId), {
+      ...(duplicate || {}),
       InvoiceId: invoiceId,
       AccountRef: accountRef,
       ApplicationReference: student.ApplicationReference || '',
@@ -2211,22 +2234,24 @@ async function generateSchoolFeeInvoices(env, body) {
       FeeCode: fee.FeeCode,
       FeeName: fee.FeeName,
       FeeCategory: fee.FeeCategory,
-      Amount: asMoneyNumber(fee.Amount),
-      Debit: asMoneyNumber(fee.Amount),
-      Credit: 0,
-      Balance: asMoneyNumber(fee.Amount),
+      Amount: debit,
+      Debit: debit,
+      Credit: credit,
+      Balance: balance,
       Currency: fee.Currency || 'NGN',
       AcademicSession: fee.AcademicSession || student.AcademicSession || '',
       Term: fee.Term || student.Term || '',
       DueDate: fee.DueDate || '',
-      Status: 'Unpaid',
-      Date: nowIso(),
-      CreatedAt: nowIso(),
-      RecordedBy: clean(body.RecordedBy) || 'Accounts Office'
+      Status: status,
+      Date: duplicate?.Date || nowIso(),
+      CreatedAt: duplicate?.CreatedAt || nowIso(),
+      UpdatedAt: nowIso(),
+      RecordedBy: clean(body.RecordedBy) || duplicate?.RecordedBy || 'Accounts Office'
     });
-    created += 1;
+    if (duplicate) updated += 1;
+    else created += 1;
   }
-  return { ok: true, message: `${created} school fee invoice item(s) generated.`, created };
+  return { ok: true, message: `${created} school fee invoice item(s) generated, ${updated} updated.`, created, updated };
 }
 
 function ledgerDocumentId(prefix = 'LED') {

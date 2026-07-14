@@ -656,19 +656,22 @@ function dueStatus(dueDate) {
   return `Due ${text}`;
 }
 
-function invoiceDueNotifications(invoices, keys) {
+function invoiceDueNotifications(invoices, keys, accountSummary = null) {
+  if (accountSummary && asMoneyNumber(accountSummary.OutstandingBalance) <= 0) return [];
   return (invoices || [])
     .filter((invoice) => anyKeyMatches(invoice.AccountRef, keys))
     .filter((invoice) => {
       const status = lower(invoice.Status);
-      const balance = asMoneyNumber(invoice.Balance || invoice.Debit) - asMoneyNumber(invoice.Credit);
+      const balance = invoice.Balance !== undefined && invoice.Balance !== ''
+        ? asMoneyNumber(invoice.Balance)
+        : Math.max(0, asMoneyNumber(invoice.Debit) - asMoneyNumber(invoice.Credit));
       return clean(invoice.DueDate) && status !== 'paid' && balance > 0;
     })
     .map((invoice) => ({
       FeeCode: invoice.FeeCode,
       FeeName: invoice.FeeName || invoice.FeeCode || 'Payment due',
       FeeCategory: invoice.FeeCategory,
-      Amount: invoice.Balance || invoice.Debit,
+      Amount: invoice.Balance !== undefined && invoice.Balance !== '' ? invoice.Balance : Math.max(0, asMoneyNumber(invoice.Debit) - asMoneyNumber(invoice.Credit)),
       Currency: 'NGN',
       AcademicSession: invoice.AcademicSession || '',
       Term: invoice.Term || '',
@@ -733,7 +736,7 @@ async function getDashboard(env, body) {
     walletActivity[child.AccountRef] = walletEntries;
     paymentRecords[child.AccountRef] = paymentHistoryForChild(child, payments, ledger);
     payableItems[child.AccountRef] = [];
-    dueNotifications[child.AccountRef] = invoiceDueNotifications(invoices, keys);
+    dueNotifications[child.AccountRef] = invoiceDueNotifications(invoices, keys, accountSummary);
     clinicVisits[child.AccountRef] = clinic.filter((record) => {
       return anyKeyMatches(record.AdmissionNo, keys);
     }).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
@@ -818,7 +821,7 @@ async function getChildActivity(env, body) {
     walletBalance: walletBalance(walletEntries),
     accountSummary,
     paymentRecords: paymentHistoryForChild(child, payments, ledger),
-    dueNotifications: invoiceDueNotifications(invoices, keys),
+    dueNotifications: invoiceDueNotifications(invoices, keys, accountSummary),
     clinicVisits: clinic.filter((record) => anyKeyMatches(record.AdmissionNo, keys)).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date))),
     showResultsOnline: schoolResultsAreVisible(schoolProfile),
     entranceResults: result ? [result] : []
@@ -866,7 +869,11 @@ async function getChildPayable(env, body) {
     items.push(walletTopupItem(payable.account));
   }
   const sources = await loadParentSources(env);
-  const invoiceNotices = invoiceDueNotifications((sources.invoices || []).map(normalizeInvoice), [body.accountRef || body.AccountRef || body.AdmissionNo]);
+  const accountOverview = await getAccountsOverview(env).catch(() => null);
+  const accountSummary = accountOverview && accountOverview.ok
+    ? accountSummaryForKeys(accountOverview.accounts || [], [body.accountRef || body.AccountRef || body.AdmissionNo], [])
+    : null;
+  const invoiceNotices = invoiceDueNotifications((sources.invoices || []).map(normalizeInvoice), [body.accountRef || body.AccountRef || body.AdmissionNo], accountSummary);
   const itemNotices = items
     .filter((item) => clean(item.DueDate))
     .map((item) => ({

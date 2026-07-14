@@ -1,3 +1,4 @@
+import { getAccountsOverview } from './backend.js';
 import { listCollection, requireFirestoreEnv } from '../lib/firestore.js';
 
 function clean(value) {
@@ -40,6 +41,37 @@ function sortRecent(rows, dateKeys) {
   });
 }
 
+function accountKey(value) {
+  return clean(value).toLowerCase();
+}
+
+function reconcileInvoiceDisplay(invoices, accounts) {
+  const accountMap = new Map();
+  (accounts || []).forEach((account) => {
+    const keys = [
+      account.AccountRef,
+      account.AdmissionNo,
+      account.ApplicationReference,
+      account.__id
+    ].map(accountKey).filter(Boolean);
+    keys.forEach((key) => accountMap.set(key, account));
+  });
+  return (invoices || []).map((invoice) => {
+    const account = accountMap.get(accountKey(invoice.AccountRef)) ||
+      accountMap.get(accountKey(invoice.AdmissionNo)) ||
+      accountMap.get(accountKey(invoice.ApplicationReference));
+    if (!account || toNumber(account.OutstandingBalance) > 0) return invoice;
+    const debit = toNumber(invoice.Debit || invoice.Amount);
+    const currentCredit = toNumber(invoice.Credit || invoice.PaidAmount);
+    return {
+      ...invoice,
+      Credit: currentCredit > 0 ? currentCredit : debit,
+      Balance: 0,
+      Status: 'Paid'
+    };
+  });
+}
+
 export async function onRequestPost(context) {
   try {
     const { request, env } = context;
@@ -73,6 +105,13 @@ export async function onRequestPost(context) {
       listCollection(env, 'kitchenMovements')
     ]);
 
+    let accountOverview = null;
+    try {
+      accountOverview = await getAccountsOverview(env);
+    } catch (_err) {
+      accountOverview = null;
+    }
+    const displayInvoices = reconcileInvoiceDisplay(invoices, accountOverview && accountOverview.ok ? accountOverview.accounts : []);
     const walletPurchases = ledger.filter((row) => clean(row.EntryType).toLowerCase() === 'wallet purchase');
     const lowClinic = clinicInventory.filter((row) => toNumber(row.ReorderLevel) > 0 && toNumber(row.Quantity) <= toNumber(row.ReorderLevel));
     const lowKitchen = kitchenInventory.filter((row) => toNumber(row.ReorderLevel) > 0 && toNumber(row.Quantity) <= toNumber(row.ReorderLevel));
@@ -99,7 +138,7 @@ export async function onRequestPost(context) {
         formPurchases: publicRows(sortRecent(formSales, ['PaymentDate', 'UpdatedAt', 'CreatedAt']), 80),
         accounts: {
           payments: publicRows(sortRecent(payments, ['PaidAt', 'Date', 'RecordedAt']), 80),
-          invoices: publicRows(sortRecent(invoices, ['Date', 'CreatedAt', 'DueDate']), 80),
+          invoices: publicRows(sortRecent(displayInvoices, ['Date', 'CreatedAt', 'DueDate']), 80),
           ledger: publicRows(sortRecent(ledger, ['Date', 'CreatedAt']), 100)
         },
         clinic: {
