@@ -68,7 +68,7 @@ function renderChildren() {
     button.addEventListener('click', () => {
       selectedAccountRef = child.AccountRef;
       renderDashboard();
-      loadPayablesForSelected();
+      loadPayablesForSelected(true);
     });
     childrenList.appendChild(button);
   });
@@ -181,9 +181,11 @@ function renderDueNotifications(child) {
   });
 }
 
-async function loadPayablesForSelected() {
+async function loadPayablesForSelected(force = false) {
   const child = selectedChild();
-  if (!child || loadedPayables.has(child.AccountRef)) return;
+  if (!child) return;
+  if (!force && loadedPayables.has(child.AccountRef)) return;
+  loadedPayables.delete(child.AccountRef);
   loadedPayables.add(child.AccountRef);
   dashboard.payableItems = dashboard.payableItems || {};
   dashboard.payableErrors = dashboard.payableErrors || {};
