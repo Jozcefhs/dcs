@@ -1437,6 +1437,7 @@ async function saveSchoolProfile(env, body) {
     PortalSubheading: clean(body.PortalSubheading || body.portalSubheading) || 'Buy forms, complete applications, upload documents, pay fees, and monitor student activity from a secure school portal.',
     PortalNotice: clean(body.PortalNotice || body.portalNotice),
     ResultDisplayMode: clean(body.ResultDisplayMode || body.resultDisplayMode) || 'subjects',
+    ShowResultsOnline: yesNo(body.ShowResultsOnline ?? body.showResultsOnline ?? 'NO') || 'NO',
     UpdatedAt: nowIso(),
     UpdatedBy: clean(body.UserRole || body.UpdatedBy || body.updatedBy) || 'Super Admin'
   };
@@ -1457,7 +1458,8 @@ async function getSchoolProfile(env) {
       PortalHeadline: 'Admissions and parent services in one place',
       PortalSubheading: 'Buy forms, complete applications, upload documents, pay fees, and monitor student activity from a secure school portal.',
       PortalNotice: '',
-      ResultDisplayMode: 'subjects'
+      ResultDisplayMode: 'subjects',
+      ShowResultsOnline: 'NO'
     }
   };
 }

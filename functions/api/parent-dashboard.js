@@ -434,12 +434,26 @@ function isYes(value) {
   return ['yes', 'y', 'true', '1'].includes(lower(value));
 }
 
-function resultIsVisible(application) {
+function schoolResultsAreVisible(profile = {}) {
+  return isYes(profile.ShowResultsOnline || profile.showResultsOnline || profile.ResultsOnline || profile.resultsOnline);
+}
+
+async function getSchoolProfile(env) {
+  try {
+    const rows = await listCollection(env, 'settings');
+    return rows.find((row) => row.__id === 'schoolProfile') || {};
+  } catch (_err) {
+    return {};
+  }
+}
+
+function resultIsVisible(application, profile = {}) {
+  if (!schoolResultsAreVisible(profile)) return false;
   return isYes(pick(application, ['ResultReadyOnline', 'resultReadyOnline', 'ResultPublished', 'resultPublished', 'ShowResultOnPortal', 'showResultOnPortal']));
 }
 
-function buildEntranceResult(application) {
-  if (!application || !resultIsVisible(application)) return null;
+function buildEntranceResult(application, profile = {}) {
+  if (!application || !resultIsVisible(application, profile)) return null;
   return {
     ApplicationReference: pick(application, ['ApplicationReference', 'applicationReference', 'ApplicationID', 'applicationId', '__id']),
     ApplicantName: pick(application, ['ApplicantName', 'applicantName', 'DisplayName', 'displayName', 'Name', 'name']),
@@ -668,6 +682,7 @@ async function getDashboard(env, body) {
   const email = lower(body.email || body.ParentEmail || body.Email);
   const code = clean(body.code || body.VerificationCode).toUpperCase();
   const sources = await loadParentSources(env, 'full');
+  const schoolProfile = await getSchoolProfile(env);
   const { applications, matchingApplications } = await assertParentAccess(sources, email, code);
   const allStudents = (sources.students || []).map(normalizeStudent);
   const children = allStudents.filter((student) => parentOwnsStudent(student, email, applications, matchingApplications));
@@ -726,7 +741,7 @@ async function getDashboard(env, body) {
       const appRef = pick(app, ['ApplicationReference', 'applicationReference', 'ApplicationID', 'applicationId', '__id']);
       return keys.some((key) => referencesMatch(appRef, key) || sameText(appRef, key));
     }) || (child.SourceType === 'Application' ? child : null);
-    const result = buildEntranceResult(resultSource);
+    const result = buildEntranceResult(resultSource, schoolProfile);
     entranceResults[child.AccountRef] = result ? [result] : [];
   }
 
@@ -740,6 +755,7 @@ async function getDashboard(env, body) {
     payableItems,
     payableErrors,
     dueNotifications,
+    showResultsOnline: schoolResultsAreVisible(schoolProfile),
     entranceResults,
     clinicVisits
   };
@@ -750,6 +766,7 @@ async function getChildActivity(env, body) {
   const code = clean(body.code || body.VerificationCode).toUpperCase();
   const accountRef = clean(body.accountRef || body.AccountRef || body.AdmissionNo);
   const sources = await loadParentSources(env, 'full');
+  const schoolProfile = await getSchoolProfile(env);
   const { applications, matchingApplications } = await assertParentAccess(sources, email, code);
   const allStudents = (sources.students || []).map(normalizeStudent);
   const children = allStudents.filter((student) => parentOwnsStudent(student, email, applications, matchingApplications));
@@ -793,7 +810,7 @@ async function getChildActivity(env, body) {
     const appRef = pick(app, ['ApplicationReference', 'applicationReference', 'ApplicationID', 'applicationId', '__id']);
     return keys.some((key) => referencesMatch(appRef, key) || sameText(appRef, key));
   }) || (child.SourceType === 'Application' ? child : null);
-  const result = buildEntranceResult(resultSource);
+  const result = buildEntranceResult(resultSource, schoolProfile);
   return {
     ok: true,
     accountRef: child.AccountRef,
@@ -803,6 +820,7 @@ async function getChildActivity(env, body) {
     paymentRecords: paymentHistoryForChild(child, payments, ledger),
     dueNotifications: invoiceDueNotifications(invoices, keys),
     clinicVisits: clinic.filter((record) => anyKeyMatches(record.AdmissionNo, keys)).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date))),
+    showResultsOnline: schoolResultsAreVisible(schoolProfile),
     entranceResults: result ? [result] : []
   };
 }

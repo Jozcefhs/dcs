@@ -28,6 +28,7 @@ function defaultProfile(env) {
     PortalSubheading: clean(env.PORTAL_SUBHEADING) || 'Buy forms, complete applications, upload documents, pay fees, and monitor student activity from a secure school portal.',
     PortalNotice: clean(env.PORTAL_NOTICE) || '',
     ResultDisplayMode: clean(env.RESULT_DISPLAY_MODE) || 'subjects',
+    ShowResultsOnline: clean(env.SHOW_RESULTS_ONLINE) || 'NO',
     ProductKeyMode: clean(env.PRODUCT_KEY_MODE) || 'off',
     UpdatedAt: ''
   };
@@ -77,6 +78,7 @@ export async function onRequestPost(context) {
       PortalSubheading: clean(incoming.PortalSubheading),
       PortalNotice: clean(incoming.PortalNotice),
       ResultDisplayMode: ['subjects', 'percentage'].includes(clean(incoming.ResultDisplayMode)) ? clean(incoming.ResultDisplayMode) : 'subjects',
+      ShowResultsOnline: ['YES', 'NO'].includes(clean(incoming.ShowResultsOnline).toUpperCase()) ? clean(incoming.ShowResultsOnline).toUpperCase() : 'NO',
       ProductKeyMode: ['off', 'required'].includes(clean(incoming.ProductKeyMode)) ? clean(incoming.ProductKeyMode) : 'off',
       UpdatedAt: new Date().toISOString()
     };

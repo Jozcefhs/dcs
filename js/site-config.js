@@ -5,7 +5,8 @@ async function loadSiteProfile() {
     PortalHeadline: 'Admissions and parent services in one place',
     PortalSubheading: 'Buy forms, complete applications, upload documents, pay fees, and monitor student activity from a secure school portal.',
     PortalNotice: '',
-    ResultDisplayMode: 'subjects'
+    ResultDisplayMode: 'subjects',
+    ShowResultsOnline: 'NO'
   };
   try {
     const response = await fetch('/api/settings');

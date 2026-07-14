@@ -30,6 +30,7 @@ function profileFromForm() {
     PortalSubheading: data.get('PortalSubheading'),
     PortalNotice: data.get('PortalNotice'),
     ResultDisplayMode: data.get('ResultDisplayMode'),
+    ShowResultsOnline: data.get('ShowResultsOnline'),
     ProductKeyMode: data.get('ProductKeyMode')
   };
 }
@@ -54,6 +55,7 @@ async function loadProfile(password = '') {
     setField('portalSubheading', profile.PortalSubheading);
     setField('portalNotice', profile.PortalNotice);
     setField('resultDisplayMode', profile.ResultDisplayMode || 'subjects');
+    setField('showResultsOnline', profile.ShowResultsOnline || 'NO');
     setField('productKeyMode', profile.ProductKeyMode || 'off');
   } catch (error) {
     setStatus(error.message, 'bad');

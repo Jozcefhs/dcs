@@ -8,6 +8,7 @@ const dueNotifications = document.getElementById('dueNotifications');
 const payableItems = document.getElementById('payableItems');
 const accountCreditSummary = document.getElementById('accountCreditSummary');
 const paymentRecords = document.getElementById('paymentRecords');
+const entranceResultPanel = document.getElementById('entranceResultPanel');
 const entranceResults = document.getElementById('entranceResults');
 const clinicRecords = document.getElementById('clinicRecords');
 const restrictionForm = document.getElementById('restrictionForm');
@@ -452,7 +453,20 @@ function resultDisplayMode() {
   return window.SCHOOL_PROFILE?.ResultDisplayMode || 'subjects';
 }
 
+function resultsOnlineEnabled() {
+  const profileValue = String(window.SCHOOL_PROFILE?.ShowResultsOnline || '').trim().toUpperCase();
+  if (profileValue) return profileValue === 'YES';
+  return dashboard?.showResultsOnline === true;
+}
+
 function renderEntranceResults(child) {
+  if (entranceResultPanel) {
+    entranceResultPanel.hidden = !resultsOnlineEnabled();
+  }
+  if (!resultsOnlineEnabled()) {
+    entranceResults.innerHTML = '';
+    return;
+  }
   const records = dashboard.entranceResults?.[child.AccountRef] || [];
   entranceResults.innerHTML = records.length ? '' : '<p class="muted">Entrance result is not available yet.</p>';
   records.forEach((record) => {
@@ -580,3 +594,8 @@ if (refreshDashboardBtn) {
     }
   });
 }
+
+window.addEventListener('school-profile-ready', () => {
+  const child = selectedChild();
+  if (child) renderEntranceResults(child);
+});
