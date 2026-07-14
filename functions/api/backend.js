@@ -1185,6 +1185,7 @@ export async function getAccountsOverview(env) {
     const refs = accountRefsFrom(account);
     let totalDebit = 0;
     let totalCredit = 0;
+    let accountCreditDebit = 0;
     let walletBalance = asMoneyNumber(account.WalletBalance);
     let lastPaymentAt = clean(account.LastPaymentAt);
     const countedLedgerKeys = new Set();
@@ -1208,6 +1209,9 @@ export async function getAccountsOverview(env) {
       }
       if (debit > 0) {
         totalDebit += debit;
+        if (normalizeMatchText(row.FeeCategory) === 'account credit') {
+          accountCreditDebit += debit;
+        }
       }
       if (credit > 0) {
         totalCredit += credit;
@@ -1236,8 +1240,9 @@ export async function getAccountsOverview(env) {
         })
         .filter((fee) => feeMatchesApplication(fee, account));
       const expectedFeeDebit = matchingExpectedFees.reduce((sum, fee) => sum + asMoneyNumber(fee.Amount), 0);
-      if (expectedFeeDebit > totalDebit) {
-        totalDebit = expectedFeeDebit;
+      const expectedDebitWithCreditActions = expectedFeeDebit + accountCreditDebit;
+      if (expectedDebitWithCreditActions > totalDebit) {
+        totalDebit = expectedDebitWithCreditActions;
       }
     }
     return {
