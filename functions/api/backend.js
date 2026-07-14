@@ -588,6 +588,17 @@ function isSchoolFeesTotalPayment(row) {
   return normalizeMatchText(metadata.paymentType || nested.paymentType) === 'schoolfeestotal';
 }
 
+function isGeneralFeeCredit(row) {
+  if (!row || isWalletLedger(row) || isAcceptanceFeeLike(row) || isSchoolFeesTotalPayment(row)) return false;
+  const feeCode = normalizeMatchText(row.FeeCode);
+  const feeName = normalizeMatchText(row.FeeName);
+  const description = normalizeMatchText(row.Description);
+  const category = normalizeMatchText(row.FeeCategory);
+  if (['manualpayment', 'manual payment', 'generalpayment', 'general payment', 'accountcredit', 'account credit'].includes(feeCode)) return true;
+  if (!category && ['payment', 'manual payment', 'general payment', 'account credit'].includes(feeName || description)) return true;
+  return false;
+}
+
 async function findStudentForApplication(env, app) {
   const students = (await listCollection(env, 'students')).map(normalizeStudent);
   const refs = [
@@ -956,6 +967,9 @@ export async function getPayableFees(env, body = {}) {
   let schoolFeesTotalCreditRemaining = paidLedgerRows.reduce((sum, row) => {
     return isSchoolFeesTotalPayment(row) ? sum + asMoneyNumber(row.Credit) : sum;
   }, 0);
+  let generalFeeCreditRemaining = paidLedgerRows.reduce((sum, row) => {
+    return isGeneralFeeCredit(row) ? sum + asMoneyNumber(row.Credit) : sum;
+  }, 0);
 
   const fees = matchedFees.map((fee) => {
     const copy = { ...fee };
@@ -995,11 +1009,19 @@ export async function getPayableFees(env, body = {}) {
       paid += schoolFeesTotalCreditApplied;
       schoolFeesTotalCreditRemaining -= schoolFeesTotalCreditApplied;
     }
+    const generalFeeCreditApplied = (!isWalletFee(fee) && normalizeMatchText(fee.FeeCategory || 'School Fee') === 'school fee' && generalFeeCreditRemaining > 0)
+      ? Math.min(originalAmount - Math.min(originalAmount, paid), generalFeeCreditRemaining)
+      : 0;
+    if (generalFeeCreditApplied > 0) {
+      paid += generalFeeCreditApplied;
+      generalFeeCreditRemaining -= generalFeeCreditApplied;
+    }
     const balance = isWalletFee(fee) ? originalAmount : Math.max(0, originalAmount - paid);
     copy.OriginalAmount = originalAmount;
     copy.PaidAmount = paid;
     copy.AcceptanceCreditApplied = acceptanceCreditApplied;
     copy.SchoolFeesTotalCreditApplied = schoolFeesTotalCreditApplied;
+    copy.GeneralFeeCreditApplied = generalFeeCreditApplied;
     copy.BalanceAmount = balance;
     if (!isWalletFee(fee)) copy.Amount = balance;
     if (asMoneyNumber(copy.MinAmount) > balance) copy.MinAmount = balance;
@@ -1218,7 +1240,9 @@ async function getAccountsOverview(env) {
       ...account,
       TotalDebit: totalDebit,
       TotalCredit: totalCredit,
-      Balance: Math.max(0, totalDebit - totalCredit),
+      Balance: totalDebit - totalCredit,
+      OutstandingBalance: Math.max(0, totalDebit - totalCredit),
+      ExcessCredit: Math.max(0, totalCredit - totalDebit),
       WalletBalance: walletBalance,
       LastPaymentAt: lastPaymentAt
     };
