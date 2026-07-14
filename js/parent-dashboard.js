@@ -118,11 +118,15 @@ function accountSummaryFor(child) {
 function renderAccountCredit(child) {
   if (!accountCreditSummary) return;
   const summary = accountSummaryFor(child);
+  const creditNote = summary.CreditBalance > 0
+    ? `<p class="credit-note">This credit will be applied automatically to future school charges unless Accounts refunds or reallocates it.</p>`
+    : '';
   accountCreditSummary.innerHTML = `
     <div><strong>${money(summary.TotalDebit)}</strong><span>Total Fee Charges</span></div>
     <div><strong>${money(summary.TotalCredit)}</strong><span>Total Fee Payments</span></div>
     <div><strong>${money(summary.OutstandingBalance)}</strong><span>Outstanding Balance</span></div>
     <div class="${summary.CreditBalance > 0 ? 'credit-good' : ''}"><strong>${money(summary.CreditBalance)}</strong><span>Credit Balance</span></div>
+    ${creditNote}
   `;
 }
 
