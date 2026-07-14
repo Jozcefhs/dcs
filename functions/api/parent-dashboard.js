@@ -407,7 +407,6 @@ function schoolFeeTotalItem(breakdown) {
   if (total <= 0) return null;
   const originalTotal = items.reduce((sum, fee) => sum + asMoneyNumber(fee.OriginalAmount || fee.Amount), 0);
   const creditApplied = Math.max(0, originalTotal - total);
-  const nonInstallmentTotal = items.reduce((sum, fee) => sum + (isYes(fee.AllowInstallment) ? 0 : asMoneyNumber(fee.Amount)), 0);
   const installmentItems = items.filter((fee) => isYes(fee.AllowInstallment));
   const installmentMinimum = items.reduce((sum, fee) => {
     if (!isYes(fee.AllowInstallment)) return sum;
@@ -415,7 +414,7 @@ function schoolFeeTotalItem(breakdown) {
     return sum + (min > 0 ? min : 0);
   }, 0);
   const minimumInstallmentPortion = installmentItems.length && installmentMinimum <= 0 ? 1 : installmentMinimum;
-  const minAmount = Math.min(total, nonInstallmentTotal + minimumInstallmentPortion);
+  const minAmount = Math.min(total, minimumInstallmentPortion);
   const allowInstallment = installmentItems.length > 0;
   return {
     FeeCode: 'SCHOOL_FEES_TOTAL',

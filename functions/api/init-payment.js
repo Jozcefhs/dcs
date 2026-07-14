@@ -31,16 +31,13 @@ function isYes(value) {
 function schoolFeeInstallmentRules(components) {
   const total = (components || []).reduce((sum, item) => sum + toAmount(item.Amount), 0);
   const installmentItems = (components || []).filter((item) => isYes(item.AllowInstallment));
-  const nonInstallmentTotal = (components || []).reduce((sum, item) => {
-    return sum + (isYes(item.AllowInstallment) ? 0 : toAmount(item.Amount));
-  }, 0);
   const installmentMinimum = (components || []).reduce((sum, item) => {
     if (!isYes(item.AllowInstallment)) return sum;
     const min = toAmount(item.MinAmount);
     return sum + (min > 0 ? min : 0);
   }, 0);
   const minimumInstallmentPortion = installmentItems.length && installmentMinimum <= 0 ? 1 : installmentMinimum;
-  const minAmount = Math.min(total, nonInstallmentTotal + minimumInstallmentPortion);
+  const minAmount = Math.min(total, minimumInstallmentPortion);
   const allowInstallment = installmentItems.length > 0 && minAmount < total;
   return { total, minAmount, maxAmount: total, allowInstallment };
 }
