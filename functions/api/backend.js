@@ -581,6 +581,27 @@ function isPeriodSpecificFee(fee) {
   return Boolean((session && session !== 'all' && session !== '*') || (term && term !== 'all' && term !== '*'));
 }
 
+function periodMatchesFee(row, fee) {
+  const feeSession = normalizeMatchText(fee.AcademicSession || '');
+  const feeTerm = normalizeMatchText(fee.Term || '');
+  const rowSession = normalizeMatchText(row.AcademicSession || '');
+  const rowTerm = normalizeMatchText(row.Term || '');
+  if (feeSession && feeSession !== 'all' && feeSession !== '*' && rowSession && rowSession !== feeSession) return false;
+  if (feeTerm && feeTerm !== 'all' && feeTerm !== '*' && rowTerm && rowTerm !== feeTerm) return false;
+  return true;
+}
+
+function feeMatchesAccountBase(fee, app) {
+  const appClass = app.ClassApplyingFor || app.ClassAdmitted || app.ClassName || '';
+  const appType = app.StudentType || '';
+  const appBillingCategory = app.BillingCategory || 'Regular';
+  const appSession = app.AcademicSession || '';
+  return feeFieldMatches(fee.ClassName, appClass) &&
+    feeFieldMatches(fee.StudentType, appType) &&
+    feeFieldMatches(fee.BillingCategory || 'All', appBillingCategory, true) &&
+    feeFieldMatches(fee.AcademicSession, appSession, true);
+}
+
 function parseFeeItems(value) {
   if (!value) return [];
   if (Array.isArray(value)) return value;
@@ -995,11 +1016,47 @@ export async function getPayableFees(env, body = {}) {
   if (acceptanceCreditRemaining <= 0 && enrolledForBilling) {
     acceptanceCreditRemaining = Math.max(asMoneyNumber(paymentCodeMap.ACCEPTANCE_FEE), asMoneyNumber(paymentNameMap['Acceptance Fee']));
   }
+  const currentTermRank = termRank(billingApp.Term);
+  const currentSession = normalizeMatchText(billingApp.AcademicSession || '');
+  const rowSessionApplies = (row) => {
+    const rowSession = normalizeMatchText(row.AcademicSession || '');
+    return !currentSession || !rowSession || rowSession === currentSession || rowSession === 'all' || rowSession === '*';
+  };
+  const rowIsCurrentPeriod = (row) => {
+    const rowTermRank = termRank(row.Term);
+    if (!rowSessionApplies(row)) return false;
+    if (!currentTermRank) return true;
+    return rowTermRank === currentTermRank;
+  };
+  const rowIsPriorPeriod = (row) => {
+    const rowTermRank = termRank(row.Term);
+    return currentTermRank && rowTermRank && rowTermRank < currentTermRank && rowSessionApplies(row);
+  };
+  const priorSchoolFeeCharge = currentTermRank ? applyBillingCategoryOverrides(allFees.filter((fee) => {
+    if (yesNo(fee.Active) !== 'YES') return false;
+    if (isWalletFee(fee) || isAcceptanceFeeLike(fee)) return false;
+    if (normalizeMatchText(fee.FeeCategory || 'School Fee') !== 'school fee') return false;
+    const feeRank = termRank(fee.Term);
+    return feeRank && feeRank < currentTermRank && feeMatchesAccountBase(fee, billingApp);
+  }), billingApp).reduce((sum, fee) => sum + asMoneyNumber(fee.Amount), 0) : 0;
+  const priorSchoolFeeCredit = currentTermRank ? paidLedgerRows.reduce((sum, row) => {
+    const schoolRelated = isAcceptanceFeeLike(row) ||
+      isSchoolFeesTotalPayment(row) ||
+      normalizeMatchText(row.FeeCategory) === 'school fee' ||
+      isGeneralFeeCredit(row);
+    if (!schoolRelated) return sum;
+    if (isAcceptanceFeeLike(row)) return sum + asMoneyNumber(row.Credit);
+    return rowIsPriorPeriod(row) ? sum + asMoneyNumber(row.Credit) : sum;
+  }, 0) : 0;
+  const carryForwardSchoolCredit = Math.max(0, priorSchoolFeeCredit - priorSchoolFeeCharge);
+  if (currentTermRank > 1) {
+    acceptanceCreditRemaining = 0;
+  }
   let schoolFeesTotalCreditRemaining = paidLedgerRows.reduce((sum, row) => {
-    return isSchoolFeesTotalPayment(row) ? sum + asMoneyNumber(row.Credit) : sum;
-  }, 0);
+    return isSchoolFeesTotalPayment(row) && rowIsCurrentPeriod(row) ? sum + asMoneyNumber(row.Credit) : sum;
+  }, carryForwardSchoolCredit);
   let generalFeeCreditRemaining = paidLedgerRows.reduce((sum, row) => {
-    return isGeneralFeeCredit(row) ? sum + asMoneyNumber(row.Credit) : sum;
+    return isGeneralFeeCredit(row) && rowIsCurrentPeriod(row) ? sum + asMoneyNumber(row.Credit) : sum;
   }, 0);
 
   const fees = matchedFees.map((fee) => {
@@ -1015,6 +1072,7 @@ export async function getPayableFees(env, body = {}) {
     const exactCodePaid = Math.max(scopedCodePaid, periodSpecific ? 0 : asMoneyNumber(paymentCodeMap[feeCode]), periodSpecific ? 0 : asMoneyNumber((feeBalanceMap[feeCode] || {}).credit));
     const feeNamePaid = Math.max(scopedNamePaid, periodSpecific ? 0 : asMoneyNumber(paymentNameMap[feeName]), periodSpecific ? 0 : asMoneyNumber((feeBalanceMap[feeName] || {}).credit));
     const ledgerMatchedPaid = paidLedgerRows.reduce((sum, row) => {
+      if (!periodMatchesFee(row, copy)) return sum;
       const rowCode = normalizeMatchText(row.FeeCode);
       const rowName = normalizeMatchText(row.FeeName);
       const rowDescription = normalizeMatchText(row.Description);
