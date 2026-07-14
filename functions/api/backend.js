@@ -1059,7 +1059,7 @@ export async function getPayableFees(env, body = {}) {
   };
 }
 
-async function getAccountsOverview(env) {
+export async function getAccountsOverview(env) {
   const [accounts, payments, invoices, feeItems, storedLedger, applications, students] = await Promise.all([
     listCollection(env, 'accounts'),
     listCollection(env, 'payments'),

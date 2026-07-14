@@ -1,7 +1,7 @@
 // Cloudflare Pages Function: /api/parent-dashboard
 // Parent-facing dashboard for child activity and wallet restrictions.
 
-import { getPayableFees } from './backend.js';
+import { getAccountsOverview, getPayableFees } from './backend.js';
 import { listCollection, requireFirestoreEnv, upsertDocument } from '../lib/firestore.js';
 
 function clean(value) {
@@ -160,8 +160,18 @@ async function loadParentSources(env, scope = 'full') {
     full ? appsScriptAction(env, 'getAccountsOverview') : Promise.resolve(null),
     full ? appsScriptAction(env, 'getClinicRecords') : Promise.resolve(null)
   ]);
+  let accountOverview = null;
+  if (full) {
+    try {
+      accountOverview = await getAccountsOverview(env);
+    } catch (_err) {
+      accountOverview = null;
+    }
+  }
   const preferFirestore = (firestoreRows, sheetRows) => firestoreRows.length ? firestoreRows : (sheetRows || []);
   return {
+    accounts: (accountOverview && accountOverview.ok && accountOverview.accounts) ||
+      ((sheetFinance && sheetFinance.ok && sheetFinance.accounts) || []),
     sales: preferFirestore(firestoreSales, (sheetSales && sheetSales.ok && sheetSales.sales) || []),
     applications: preferFirestore(firestoreApplications, (sheetApplications && sheetApplications.ok && sheetApplications.applications) || []),
     students: preferFirestore(firestoreStudents, (sheetStudents && sheetStudents.ok && sheetStudents.students) || []),
@@ -382,6 +392,34 @@ function feeAccountSummary(entries) {
     OutstandingBalance: Math.max(0, debit - credit),
     CreditBalance: Math.max(0, credit - debit)
   };
+}
+
+function normalizeAccountSummary(row) {
+  if (!row) return null;
+  const totalDebit = asMoneyNumber(pick(row, ['TotalDebit', 'totalDebit']));
+  const totalCredit = asMoneyNumber(pick(row, ['TotalCredit', 'totalCredit']));
+  const balance = pick(row, ['Balance', 'balance']);
+  const outstanding = pick(row, ['OutstandingBalance', 'outstandingBalance']);
+  const credit = pick(row, ['ExcessCredit', 'excessCredit', 'CreditBalance', 'creditBalance']);
+  const computedBalance = totalDebit - totalCredit;
+  return {
+    TotalDebit: totalDebit,
+    TotalCredit: totalCredit,
+    OutstandingBalance: outstanding !== '' ? asMoneyNumber(outstanding) : Math.max(0, asMoneyNumber(balance || computedBalance)),
+    CreditBalance: credit !== '' ? asMoneyNumber(credit) : Math.max(0, -asMoneyNumber(balance || computedBalance))
+  };
+}
+
+function accountSummaryForKeys(accounts, keys, ledgerEntries) {
+  const account = (accounts || []).find((row) => {
+    const rowKeys = [
+      pick(row, ['AccountRef', 'accountRef', '__id']),
+      pick(row, ['AdmissionNo', 'admissionNo']),
+      pick(row, ['ApplicationReference', 'applicationReference'])
+    ].map(clean).filter(Boolean);
+    return rowKeys.some((key) => anyKeyMatches(key, keys));
+  });
+  return normalizeAccountSummary(account) || feeAccountSummary(ledgerEntries);
 }
 
 function isWalletFee(fee) {
@@ -629,7 +667,7 @@ function invoiceDueNotifications(invoices, keys) {
 async function getDashboard(env, body) {
   const email = lower(body.email || body.ParentEmail || body.Email);
   const code = clean(body.code || body.VerificationCode).toUpperCase();
-  const sources = await loadParentSources(env, 'identity');
+  const sources = await loadParentSources(env, 'full');
   const { applications, matchingApplications } = await assertParentAccess(sources, email, code);
   const allStudents = (sources.students || []).map(normalizeStudent);
   const children = allStudents.filter((student) => parentOwnsStudent(student, email, applications, matchingApplications));
@@ -671,7 +709,7 @@ async function getDashboard(env, body) {
         lower(entry.FeeCategory) === 'wallet';
     }).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
     child.WalletBalance = walletBalance(walletEntries);
-    const accountSummary = feeAccountSummary(childLedger);
+    const accountSummary = accountSummaryForKeys(sources.accounts, keys, childLedger);
     child.TotalDebit = accountSummary.TotalDebit;
     child.TotalCredit = accountSummary.TotalCredit;
     child.OutstandingBalance = accountSummary.OutstandingBalance;
@@ -746,7 +784,7 @@ async function getChildActivity(env, body) {
   const walletEntries = ledger.filter((entry) => anyKeyMatches(entry.AccountRef, keys) && lower(entry.FeeCategory) === 'wallet')
     .sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
   const childLedger = ledger.filter((entry) => anyKeyMatches(entry.AccountRef, keys));
-  const accountSummary = feeAccountSummary(childLedger);
+  const accountSummary = accountSummaryForKeys(sources.accounts, keys, childLedger);
   child.TotalDebit = accountSummary.TotalDebit;
   child.TotalCredit = accountSummary.TotalCredit;
   child.OutstandingBalance = accountSummary.OutstandingBalance;
