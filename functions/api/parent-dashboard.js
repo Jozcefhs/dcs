@@ -366,6 +366,24 @@ function walletBalance(entries) {
   return entries.reduce((balance, row) => balance + asMoneyNumber(row.Credit) - asMoneyNumber(row.Debit), 0);
 }
 
+function isWalletLedger(entry) {
+  return clean(entry && entry.FeeCode).toUpperCase() === 'WALLET_TOPUP' ||
+    lower(entry && entry.FeeCategory) === 'wallet' ||
+    lower(entry && entry.EntryType).includes('wallet');
+}
+
+function feeAccountSummary(entries) {
+  const rows = (entries || []).filter((entry) => !isWalletLedger(entry));
+  const debit = rows.reduce((sum, row) => sum + asMoneyNumber(row.Debit), 0);
+  const credit = rows.reduce((sum, row) => sum + asMoneyNumber(row.Credit), 0);
+  return {
+    TotalDebit: debit,
+    TotalCredit: credit,
+    OutstandingBalance: Math.max(0, debit - credit),
+    CreditBalance: Math.max(0, credit - debit)
+  };
+}
+
 function isWalletFee(fee) {
   return clean(fee.FeeCode) === 'WALLET_TOPUP' || lower(fee.FeeCategory) === 'wallet';
 }
@@ -643,14 +661,22 @@ async function getDashboard(env, body) {
   const dueNotifications = {};
   const clinicVisits = {};
   const entranceResults = {};
+  const accountSummaries = {};
 
   for (const child of children) {
     const keys = accountKeys(child);
+    const childLedger = ledger.filter((entry) => anyKeyMatches(entry.AccountRef, keys));
     const walletEntries = ledger.filter((entry) => {
       return anyKeyMatches(entry.AccountRef, keys) &&
         lower(entry.FeeCategory) === 'wallet';
     }).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
     child.WalletBalance = walletBalance(walletEntries);
+    const accountSummary = feeAccountSummary(childLedger);
+    child.TotalDebit = accountSummary.TotalDebit;
+    child.TotalCredit = accountSummary.TotalCredit;
+    child.OutstandingBalance = accountSummary.OutstandingBalance;
+    child.CreditBalance = accountSummary.CreditBalance;
+    accountSummaries[child.AccountRef] = accountSummary;
     walletActivity[child.AccountRef] = walletEntries;
     paymentRecords[child.AccountRef] = paymentHistoryForChild(child, payments, ledger);
     payableItems[child.AccountRef] = [];
@@ -672,6 +698,7 @@ async function getDashboard(env, body) {
     children,
     walletActivity,
     paymentRecords,
+    accountSummaries,
     payableItems,
     payableErrors,
     dueNotifications,
@@ -718,6 +745,12 @@ async function getChildActivity(env, body) {
   const clinic = (sources.clinic || []).map(normalizeClinicRecord);
   const walletEntries = ledger.filter((entry) => anyKeyMatches(entry.AccountRef, keys) && lower(entry.FeeCategory) === 'wallet')
     .sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
+  const childLedger = ledger.filter((entry) => anyKeyMatches(entry.AccountRef, keys));
+  const accountSummary = feeAccountSummary(childLedger);
+  child.TotalDebit = accountSummary.TotalDebit;
+  child.TotalCredit = accountSummary.TotalCredit;
+  child.OutstandingBalance = accountSummary.OutstandingBalance;
+  child.CreditBalance = accountSummary.CreditBalance;
   const resultSource = applications.find((app) => {
     const appRef = pick(app, ['ApplicationReference', 'applicationReference', 'ApplicationID', 'applicationId', '__id']);
     return keys.some((key) => referencesMatch(appRef, key) || sameText(appRef, key));
@@ -728,6 +761,7 @@ async function getChildActivity(env, body) {
     accountRef: child.AccountRef,
     walletActivity: walletEntries,
     walletBalance: walletBalance(walletEntries),
+    accountSummary,
     paymentRecords: paymentHistoryForChild(child, payments, ledger),
     dueNotifications: invoiceDueNotifications(invoices, keys),
     clinicVisits: clinic.filter((record) => anyKeyMatches(record.AdmissionNo, keys)).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date))),

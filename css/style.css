@@ -113,3 +113,12 @@ button,.btn{display:inline-block;border:0;border-radius:8px;background:var(--blu
 .payment-status:empty {
   display: none;
 }
+
+.metric-row .credit-good {
+  border-color: #bfe3cc;
+  background: #f3fbf6;
+}
+
+.metric-row .credit-good strong {
+  color: var(--ok);
+}

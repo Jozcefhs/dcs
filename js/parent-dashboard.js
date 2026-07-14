@@ -6,6 +6,7 @@ const walletSummary = document.getElementById('walletSummary');
 const walletLedger = document.getElementById('walletLedger');
 const dueNotifications = document.getElementById('dueNotifications');
 const payableItems = document.getElementById('payableItems');
+const accountCreditSummary = document.getElementById('accountCreditSummary');
 const paymentRecords = document.getElementById('paymentRecords');
 const entranceResults = document.getElementById('entranceResults');
 const clinicRecords = document.getElementById('clinicRecords');
@@ -100,6 +101,31 @@ function renderWallet(child) {
   });
 }
 
+function accountSummaryFor(child) {
+  const summary = dashboard.accountSummaries?.[child.AccountRef] || child || {};
+  const totalDebit = Number(String(summary.TotalDebit || '0').replace(/,/g, ''));
+  const totalCredit = Number(String(summary.TotalCredit || '0').replace(/,/g, ''));
+  const outstanding = Number(String(summary.OutstandingBalance || '0').replace(/,/g, ''));
+  const creditBalance = Number(String(summary.CreditBalance || '0').replace(/,/g, ''));
+  return {
+    TotalDebit: Number.isFinite(totalDebit) ? totalDebit : 0,
+    TotalCredit: Number.isFinite(totalCredit) ? totalCredit : 0,
+    OutstandingBalance: Number.isFinite(outstanding) ? outstanding : 0,
+    CreditBalance: Number.isFinite(creditBalance) ? creditBalance : 0
+  };
+}
+
+function renderAccountCredit(child) {
+  if (!accountCreditSummary) return;
+  const summary = accountSummaryFor(child);
+  accountCreditSummary.innerHTML = `
+    <div><strong>${money(summary.TotalDebit)}</strong><span>Total Fee Charges</span></div>
+    <div><strong>${money(summary.TotalCredit)}</strong><span>Total Fee Payments</span></div>
+    <div><strong>${money(summary.OutstandingBalance)}</strong><span>Outstanding Balance</span></div>
+    <div class="${summary.CreditBalance > 0 ? 'credit-good' : ''}"><strong>${money(summary.CreditBalance)}</strong><span>Credit Balance</span></div>
+  `;
+}
+
 function isYes(value) {
   return ['yes', 'y', 'true', '1'].includes(String(value || '').trim().toLowerCase());
 }
@@ -158,6 +184,7 @@ async function loadPayablesForSelected() {
   dashboard.payableItems = dashboard.payableItems || {};
   dashboard.payableErrors = dashboard.payableErrors || {};
   dashboard.dueNotifications = dashboard.dueNotifications || {};
+  dashboard.accountSummaries = dashboard.accountSummaries || {};
   dashboard.walletActivity = dashboard.walletActivity || {};
   dashboard.paymentRecords = dashboard.paymentRecords || {};
   dashboard.clinicVisits = dashboard.clinicVisits || {};
@@ -204,6 +231,10 @@ async function loadPayablesForSelected() {
     }
     if (activityResponse.ok && activityData.ok) {
       dashboard.walletActivity[child.AccountRef] = activityData.walletActivity || [];
+      if (activityData.accountSummary) {
+        dashboard.accountSummaries[child.AccountRef] = activityData.accountSummary;
+        Object.assign(child, activityData.accountSummary);
+      }
       dashboard.paymentRecords[child.AccountRef] = activityData.paymentRecords || [];
       dashboard.clinicVisits[child.AccountRef] = activityData.clinicVisits || [];
       dashboard.entranceResults[child.AccountRef] = activityData.entranceResults || [];
@@ -218,6 +249,7 @@ async function loadPayablesForSelected() {
   }
   renderPayableItems(child);
   renderDueNotifications(child);
+  renderAccountCredit(child);
   renderWallet(child);
   renderPayments(child);
   renderClinic(child);
@@ -419,6 +451,7 @@ function renderDashboard() {
   if (!child) return;
   renderDueNotifications(child);
   renderPayableItems(child);
+  renderAccountCredit(child);
   renderEntranceResults(child);
   renderWallet(child);
   renderPayments(child);
