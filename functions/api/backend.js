@@ -1011,6 +1011,11 @@ export async function getPayableFees(env, body = {}) {
     addPaid(paymentNameMap, periodKey(row.FeeName, row.AcademicSession, row.Term), credit);
     addPaid(paymentNameMap, periodKey(row.Description, row.AcademicSession, row.Term), credit);
   });
+  const accountCreditDebits = ledgerRows.map(normalizeLedger).filter(rowMatchesAccount).filter(notStaleForApplication).reduce((sum, row) => {
+    if (isWalletLedger(row)) return sum;
+    if (normalizeMatchText(row.FeeCategory) !== 'account credit') return sum;
+    return sum + asMoneyNumber(row.Debit);
+  }, 0);
 
   let acceptanceCreditRemaining = enrolledForBilling && acceptanceAlreadyPaid ? asMoneyNumber(app.AcceptanceFeeAmount) : 0;
   if (acceptanceCreditRemaining <= 0 && enrolledForBilling) {
@@ -1048,7 +1053,7 @@ export async function getPayableFees(env, body = {}) {
       isGeneralFeeCredit(row);
     return schoolRelated && rowIsCurrentPeriod(row) ? sum + asMoneyNumber(row.Credit) : sum;
   }, 0) : 0;
-  const carryForwardSchoolCredit = Math.max(0, schoolFeeRelatedCredit - currentPeriodSchoolFeeCredit - priorSchoolFeeCharge);
+  const carryForwardSchoolCredit = Math.max(0, schoolFeeRelatedCredit - currentPeriodSchoolFeeCredit - priorSchoolFeeCharge - accountCreditDebits);
   if (currentTermRank > 1) {
     acceptanceCreditRemaining = 0;
   }
