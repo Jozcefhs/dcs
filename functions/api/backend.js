@@ -497,6 +497,33 @@ function feeMatchesApplication(fee, app) {
     feeFieldMatches(fee.Term, appTerm, true);
 }
 
+function termRank(value) {
+  const term = normalizeMatchText(value);
+  if (!term || term === 'all' || term === '*') return 0;
+  if (term.includes('first') || term === '1' || term === 'term1') return 1;
+  if (term.includes('second') || term === '2' || term === 'term2') return 2;
+  if (term.includes('third') || term === '3' || term === 'term3') return 3;
+  return 0;
+}
+
+function feeMatchesAccountPeriod(fee, app) {
+  const appClass = app.ClassApplyingFor || app.ClassAdmitted || app.ClassName || '';
+  const appType = app.StudentType || '';
+  const appBillingCategory = app.BillingCategory || 'Regular';
+  const appSession = app.AcademicSession || '';
+  const appTerm = app.Term || '';
+  if (!feeFieldMatches(fee.ClassName, appClass)) return false;
+  if (!feeFieldMatches(fee.StudentType, appType)) return false;
+  if (!feeFieldMatches(fee.BillingCategory || 'All', appBillingCategory, true)) return false;
+  if (!feeFieldMatches(fee.AcademicSession, appSession, true)) return false;
+  const feeTerm = normalizeMatchText(fee.Term || 'All');
+  if (!feeTerm || feeTerm === 'all' || feeTerm === '*') return true;
+  const feeTermRank = termRank(fee.Term);
+  const appTermRank = termRank(appTerm);
+  if (feeTermRank && appTermRank) return feeTermRank <= appTermRank;
+  return feeFieldMatches(fee.Term, appTerm, true);
+}
+
 function feeBillingSpecificity(fee, app) {
   const rule = normalizeMatchText(fee.BillingCategory || 'All');
   const actual = normalizeMatchText(app.BillingCategory || 'Regular');
@@ -1238,7 +1265,7 @@ export async function getAccountsOverview(env) {
           }
           return category === 'admission' || requiredForEnrollment;
         })
-        .filter((fee) => feeMatchesApplication(fee, account));
+        .filter((fee) => feeMatchesAccountPeriod(fee, account));
       const expectedFeeDebit = matchingExpectedFees.reduce((sum, fee) => sum + asMoneyNumber(fee.Amount), 0);
       const expectedDebitWithCreditActions = expectedFeeDebit + accountCreditDebit;
       if (expectedDebitWithCreditActions > totalDebit) {
