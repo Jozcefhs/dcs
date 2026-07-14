@@ -566,6 +566,28 @@ function parseFeeItems(value) {
   }
 }
 
+function parseMetadata(value) {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  try {
+    const parsed = JSON.parse(String(value));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_err) {
+    return {};
+  }
+}
+
+function isSchoolFeesTotalPayment(row) {
+  const feeCode = clean(row && row.FeeCode).toUpperCase();
+  const feeName = normalizeMatchText(row && row.FeeName);
+  const description = normalizeMatchText(row && row.Description);
+  if (feeCode === 'SCHOOL_FEES_TOTAL') return true;
+  if (feeName === 'school fees total' || description === 'school fees total') return true;
+  const metadata = parseMetadata(row && row.Metadata);
+  const nested = metadata.metadata && typeof metadata.metadata === 'object' ? metadata.metadata : {};
+  return normalizeMatchText(metadata.paymentType || nested.paymentType) === 'schoolfeestotal';
+}
+
 async function findStudentForApplication(env, app) {
   const students = (await listCollection(env, 'students')).map(normalizeStudent);
   const refs = [
@@ -931,6 +953,9 @@ export async function getPayableFees(env, body = {}) {
   if (acceptanceCreditRemaining <= 0 && enrolledForBilling) {
     acceptanceCreditRemaining = Math.max(asMoneyNumber(paymentCodeMap.ACCEPTANCE_FEE), asMoneyNumber(paymentNameMap['Acceptance Fee']));
   }
+  let schoolFeesTotalCreditRemaining = paidLedgerRows.reduce((sum, row) => {
+    return isSchoolFeesTotalPayment(row) ? sum + asMoneyNumber(row.Credit) : sum;
+  }, 0);
 
   const fees = matchedFees.map((fee) => {
     const copy = { ...fee };
@@ -963,10 +988,18 @@ export async function getPayableFees(env, body = {}) {
       paid += acceptanceCreditApplied;
       acceptanceCreditRemaining -= acceptanceCreditApplied;
     }
+    const schoolFeesTotalCreditApplied = (!isWalletFee(fee) && normalizeMatchText(fee.FeeCategory || 'School Fee') === 'school fee' && schoolFeesTotalCreditRemaining > 0)
+      ? Math.min(originalAmount - Math.min(originalAmount, paid), schoolFeesTotalCreditRemaining)
+      : 0;
+    if (schoolFeesTotalCreditApplied > 0) {
+      paid += schoolFeesTotalCreditApplied;
+      schoolFeesTotalCreditRemaining -= schoolFeesTotalCreditApplied;
+    }
     const balance = isWalletFee(fee) ? originalAmount : Math.max(0, originalAmount - paid);
     copy.OriginalAmount = originalAmount;
     copy.PaidAmount = paid;
     copy.AcceptanceCreditApplied = acceptanceCreditApplied;
+    copy.SchoolFeesTotalCreditApplied = schoolFeesTotalCreditApplied;
     copy.BalanceAmount = balance;
     if (!isWalletFee(fee)) copy.Amount = balance;
     if (asMoneyNumber(copy.MinAmount) > balance) copy.MinAmount = balance;
