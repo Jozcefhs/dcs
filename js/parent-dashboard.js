@@ -20,6 +20,13 @@ let dashboard = null;
 let selectedAccountRef = '';
 const loadedPayables = new Set();
 
+function freshBody(payload) {
+  return JSON.stringify({
+    ...payload,
+    _ts: Date.now()
+  });
+}
+
 function setStatus(message, type) {
   statusEl.textContent = message || '';
   statusEl.className = 'status ' + (type || '');
@@ -170,16 +177,18 @@ async function loadPayablesForSelected() {
     };
     const payableRequest = fetch('/api/parent-dashboard', {
       method: 'POST',
+      cache: 'no-store',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+      body: freshBody({
         action: 'getChildPayable',
         ...baseBody
       })
     });
     const activityRequest = fetch('/api/parent-dashboard', {
       method: 'POST',
+      cache: 'no-store',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+      body: freshBody({
         action: 'getChildActivity',
         ...baseBody
       })
@@ -425,8 +434,9 @@ async function loadDashboard() {
   setStatus('Loading dashboard...', '');
   const response = await fetch('/api/parent-dashboard', {
     method: 'POST',
+    cache: 'no-store',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'getDashboard', ...payload })
+    body: freshBody({ action: 'getDashboard', ...payload })
   });
   const data = await response.json();
   if (!response.ok || !data.ok) {
@@ -462,8 +472,9 @@ restrictionForm.addEventListener('submit', async (event) => {
     setStatus('Saving wallet restrictions...', '');
     const response = await fetch('/api/parent-dashboard', {
       method: 'POST',
+      cache: 'no-store',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+      body: freshBody({
         action: 'updateWalletRestrictions',
         ...authPayload(),
         accountRef: child.AccountRef,

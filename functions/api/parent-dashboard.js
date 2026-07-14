@@ -821,11 +821,22 @@ export async function onRequestPost(context) {
     } else {
       data = await getDashboard(env, body);
     }
-    return Response.json(data);
+    return Response.json(data, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+        Pragma: 'no-cache'
+      }
+    });
   } catch (err) {
     return Response.json({
       ok: false,
       message: String(err && err.message ? err.message : err)
-    }, { status: err.status || 500 });
+    }, {
+      status: err.status || 500,
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+        Pragma: 'no-cache'
+      }
+    });
   }
 }
