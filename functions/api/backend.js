@@ -1063,6 +1063,7 @@ export async function getPayableFees(env, body = {}) {
   let generalFeeCreditRemaining = paidLedgerRows.reduce((sum, row) => {
     return isGeneralFeeCredit(row) && rowIsCurrentPeriod(row) ? sum + asMoneyNumber(row.Credit) : sum;
   }, 0);
+  const priorSchoolFeeBalance = Math.max(0, priorSchoolFeeCharge + accountCreditDebits - (schoolFeeRelatedCredit - currentPeriodSchoolFeeCredit));
 
   const fees = matchedFees.map((fee) => {
     const copy = { ...fee };
@@ -1124,6 +1125,29 @@ export async function getPayableFees(env, body = {}) {
     copy.AppliesTo = [copy.ClassName || 'All', copy.StudentType || 'All', copy.AcademicSession || 'All', copy.Term || 'All'].join(' / ');
     return copy;
   }).filter((fee) => isWalletFee(fee) || asMoneyNumber(fee.Amount) > 0);
+
+  if (priorSchoolFeeBalance > 0 && currentTermRank > 1) {
+    const firstSchoolFee = fees.find((fee) => !isWalletFee(fee) && normalizeMatchText(fee.FeeCategory || 'School Fee') === 'school fee') || matchedFees.find((fee) => normalizeMatchText(fee.FeeCategory || 'School Fee') === 'school fee') || {};
+    fees.unshift({
+      FeeCode: 'PREVIOUS_SCHOOL_FEE_BALANCE',
+      FeeName: 'Previous Balance',
+      FeeCategory: 'School Fee',
+      Amount: priorSchoolFeeBalance,
+      OriginalAmount: priorSchoolFeeBalance,
+      PaidAmount: 0,
+      BalanceAmount: priorSchoolFeeBalance,
+      Currency: firstSchoolFee.Currency || 'NGN',
+      PayableOnline: 'YES',
+      AllowInstallment: 'NO',
+      MinAmount: '',
+      MaxAmount: priorSchoolFeeBalance,
+      AcademicSession: billingApp.AcademicSession || firstSchoolFee.AcademicSession || '',
+      Term: billingApp.Term || firstSchoolFee.Term || '',
+      DueDate: firstSchoolFee.DueDate || '',
+      PaymentType: 'Fee',
+      AppliesTo: 'Previous unpaid school fee balance'
+    });
+  }
 
   const schoolFeeBreakdown = fees.filter((fee) => !isWalletFee(fee) && normalizeMatchText(fee.FeeCategory || 'School Fee') === 'school fee');
   const schoolFeeTotal = schoolFeeBreakdown.reduce((total, fee) => total + asMoneyNumber(fee.Amount), 0);
