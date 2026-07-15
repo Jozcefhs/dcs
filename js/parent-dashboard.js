@@ -158,6 +158,44 @@ function isWalletFee(fee) {
   return String(fee.FeeCode || '').trim() === 'WALLET_TOPUP' || String(fee.FeeCategory || '').trim().toLowerCase() === 'wallet';
 }
 
+function feeCategory(fee) {
+  return String(fee.FeeCategory || '').trim().toLowerCase();
+}
+
+function isBusFee(fee) {
+  return feeCategory(fee) === 'bus service' || feeCategory(fee) === 'transport';
+}
+
+function isClubFee(fee) {
+  return feeCategory(fee) === 'club';
+}
+
+function busModeFor(fee) {
+  const text = `${fee.FeeName || ''} ${fee.FeeCode || ''}`.toLowerCase();
+  if (text.includes('one way') || text.includes('one-way') || text.includes('single')) return 'One Way';
+  if (text.includes('two way') || text.includes('two-way') || text.includes('return')) return 'Two Way';
+  return 'General';
+}
+
+function busRouteFor(fee) {
+  let name = String(fee.FeeName || fee.FeeCode || 'Bus Route').trim();
+  name = name
+    .replace(/bus\s*route/ig, '')
+    .replace(/bus\s*service/ig, '')
+    .replace(/transport/ig, '')
+    .replace(/one[-\s]*way/ig, '')
+    .replace(/two[-\s]*way/ig, '')
+    .replace(/return/ig, '')
+    .replace(/single/ig, '')
+    .replace(/^[\s:|/-]+|[\s:|/-]+$/g, '')
+    .trim();
+  return name || 'Route';
+}
+
+function clubNameFor(fee) {
+  return String(fee.FeeName || fee.FeeCode || 'Club').replace(/paid\s*club|club\s*subscription/ig, '').replace(/^[\s:|/-]+|[\s:|/-]+$/g, '').trim() || String(fee.FeeName || fee.FeeCode || 'Club');
+}
+
 function renderComponents(parent, components) {
   const groups = {};
   (components || []).forEach((component) => {
@@ -180,6 +218,108 @@ function renderComponents(parent, components) {
     });
     parent.appendChild(list);
   });
+}
+
+function renderSubscriptionSelector(child, title, fees, options = {}) {
+  if (!fees.length) return null;
+  const box = document.createElement('div');
+  box.className = 'activity-item payment-action subscription-selector';
+  const selectedFee = { current: null };
+  const status = document.createElement('small');
+  status.className = 'payment-status status';
+  const amountLine = document.createElement('span');
+  amountLine.className = 'subscription-amount muted';
+
+  const heading = document.createElement('strong');
+  heading.textContent = title;
+  box.appendChild(heading);
+
+  const routeSelect = document.createElement('select');
+  const modeSelect = document.createElement('select');
+  const clubSelect = document.createElement('select');
+
+  if (options.kind === 'bus') {
+    const routes = [...new Set(fees.map(busRouteFor))].sort();
+    routes.forEach((route) => {
+      const opt = document.createElement('option');
+      opt.value = route;
+      opt.textContent = route;
+      routeSelect.appendChild(opt);
+    });
+    ['One Way', 'Two Way', 'General'].forEach((mode) => {
+      if (!fees.some((fee) => busModeFor(fee) === mode)) return;
+      const opt = document.createElement('option');
+      opt.value = mode;
+      opt.textContent = mode;
+      modeSelect.appendChild(opt);
+    });
+    box.appendChild(document.createTextNode('Route'));
+    box.appendChild(routeSelect);
+    box.appendChild(document.createTextNode('Mode'));
+    box.appendChild(modeSelect);
+  } else {
+    fees.forEach((fee, index) => {
+      const opt = document.createElement('option');
+      opt.value = String(index);
+      opt.textContent = `${clubNameFor(fee)} - ${money(fee.Amount)}`;
+      clubSelect.appendChild(opt);
+    });
+    box.appendChild(document.createTextNode('Club'));
+    box.appendChild(clubSelect);
+  }
+
+  function chooseFee() {
+    if (options.kind === 'bus') {
+      selectedFee.current = fees.find((fee) => busRouteFor(fee) === routeSelect.value && busModeFor(fee) === modeSelect.value) || null;
+    } else {
+      selectedFee.current = fees[Number(clubSelect.value || 0)] || null;
+    }
+    amountLine.textContent = selectedFee.current
+      ? `Amount: ${money(selectedFee.current.Amount)}${selectedFee.current.Term ? ' | ' + selectedFee.current.Term : ''}`
+      : 'No price has been set for this selection.';
+    status.textContent = '';
+    status.className = 'payment-status status';
+  }
+
+  routeSelect.addEventListener('change', chooseFee);
+  modeSelect.addEventListener('change', chooseFee);
+  clubSelect.addEventListener('change', chooseFee);
+
+  const loadButton = document.createElement('button');
+  loadButton.type = 'button';
+  loadButton.textContent = 'Load Amount';
+  const payButton = document.createElement('button');
+  payButton.type = 'button';
+  payButton.textContent = 'Pay Selected';
+  payButton.disabled = true;
+  loadButton.addEventListener('click', () => {
+    chooseFee();
+    if (!selectedFee.current) {
+      status.textContent = 'No matching amount was found for this selection.';
+      status.className = 'payment-status status bad';
+      payButton.disabled = true;
+      return;
+    }
+    status.textContent = 'Amount loaded. Click Pay Selected to continue.';
+    status.className = 'payment-status status ok';
+    payButton.disabled = false;
+  });
+  payButton.addEventListener('click', () => {
+    chooseFee();
+    if (!selectedFee.current) {
+      status.textContent = 'No matching amount was found for this selection.';
+      status.className = 'payment-status status bad';
+      payButton.disabled = true;
+      return;
+    }
+    payItem(child, selectedFee.current, box);
+  });
+  box.appendChild(amountLine);
+  box.appendChild(loadButton);
+  box.appendChild(payButton);
+  box.appendChild(status);
+  chooseFee();
+  return box;
 }
 
 function activityTarget(container, records, label) {
@@ -365,10 +505,17 @@ async function payItem(child, fee, container) {
 
 function renderPayableItems(child) {
   const records = dashboard.payableItems?.[child.AccountRef] || [];
+  const busFees = records.filter(isBusFee);
+  const clubFees = records.filter(isClubFee);
+  const directRecords = records.filter((fee) => !isBusFee(fee) && !isClubFee(fee));
   const payableError = dashboard.payableErrors?.[child.AccountRef] || '';
   const loading = !loadedPayables.has(child.AccountRef);
   payableItems.innerHTML = records.length ? '' : `<p class="${payableError ? 'status bad' : 'muted'}">${payableError || (loading ? 'Loading payable items...' : 'There are no online payment items due at the moment.')}</p>`;
-  records.forEach((fee) => {
+  const busSelector = renderSubscriptionSelector(child, 'Bus Service Subscription', busFees, { kind: 'bus' });
+  if (busSelector) payableItems.appendChild(busSelector);
+  const clubSelector = renderSubscriptionSelector(child, 'Paid Club Subscription', clubFees, { kind: 'club' });
+  if (clubSelector) payableItems.appendChild(clubSelector);
+  directRecords.forEach((fee) => {
     const item = document.createElement('div');
     item.className = 'activity-item payment-action';
     const period = [fee.AcademicSession, fee.Term].filter(Boolean).join(' | ');

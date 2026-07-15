@@ -95,7 +95,7 @@ async function sendSchoolFormPurchaseEmail(env, sale) {
   }
 
   const schoolAddress = String(profile.SchoolAddress || env.SCHOOL_ADDRESS || '').trim();
-  const office = String(profile.OfferSignatoryTitle || profile.SchoolSignatoryTitle || env.SCHOOL_SIGNATORY_TITLE || 'Admissions Office').trim();
+  const office = 'School Office';
   const greeting = renderGreeting(profile.EmailGreetingTemplate || env.EMAIL_GREETING_TEMPLATE, sale.ApplicantName, schoolName);
   const textContent = `${greeting}
 
