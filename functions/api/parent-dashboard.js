@@ -382,8 +382,13 @@ function isWalletLedger(entry) {
     lower(entry && entry.EntryType).includes('wallet');
 }
 
+function isOptionalSubscriptionEntry(entry) {
+  const category = lower(entry && entry.FeeCategory);
+  return category === 'bus service' || category === 'club';
+}
+
 function feeAccountSummary(entries) {
-  const rows = (entries || []).filter((entry) => !isWalletLedger(entry));
+  const rows = (entries || []).filter((entry) => !isWalletLedger(entry) && !isOptionalSubscriptionEntry(entry));
   const debit = rows.reduce((sum, row) => sum + asMoneyNumber(row.Debit), 0);
   const credit = rows.reduce((sum, row) => sum + asMoneyNumber(row.Credit), 0);
   return {

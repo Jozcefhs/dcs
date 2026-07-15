@@ -1355,6 +1355,12 @@ export async function getAccountsOverview(env) {
         walletBalance += credit - debit;
         return;
       }
+      if (isOptionalSubscriptionFee(row)) {
+        if (credit > 0 && row.Date && (!lastPaymentAt || String(row.Date) > String(lastPaymentAt))) {
+          lastPaymentAt = row.Date;
+        }
+        return;
+      }
       if (debit > 0) {
         totalDebit += debit;
         if (normalizeMatchText(row.FeeCategory) === 'account credit') {
