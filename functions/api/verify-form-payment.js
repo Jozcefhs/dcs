@@ -1,8 +1,8 @@
 // Cloudflare Pages Function: /api/verify-form-payment
-// Verifies a Paystack admission form purchase and records the form sale.
+// Verifies a Paystack admission form purchase, records the form sale, and sends the school email.
 
 import { getSchoolCode, recordSale as recordSaleInFirestore } from './backend.js';
-import { requireFirestoreEnv } from '../lib/firestore.js';
+import { listCollection, requireFirestoreEnv } from '../lib/firestore.js';
 
 function extractMetadata(data) {
   const metadata = data && data.metadata;
@@ -52,6 +52,107 @@ function formatNairaAmount(value) {
     minimumFractionDigits: Number.isInteger(number) ? 0 : 2,
     maximumFractionDigits: 2
   })}`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[char]));
+}
+
+async function getSettingsDocument(env, id) {
+  try {
+    requireFirestoreEnv(env);
+    const rows = await listCollection(env, 'settings');
+    return rows.find((row) => row.__id === id) || {};
+  } catch (_err) {
+    return {};
+  }
+}
+
+function renderGreeting(template, applicantName, schoolName) {
+  const name = String(applicantName || '').trim();
+  const firstName = name.split(/\s+/)[0] || '';
+  return String(template || 'Dear Parent/Guardian,')
+    .replaceAll('{FULL_NAME}', name)
+    .replaceAll('{FIRST_NAME}', firstName)
+    .replaceAll('{SCHOOL_NAME}', schoolName || '');
+}
+
+async function sendSchoolFormPurchaseEmail(env, sale) {
+  const profile = await getSettingsDocument(env, 'schoolProfile');
+  const brevo = await getSettingsDocument(env, 'brevo');
+  const apiKey = String(brevo.BrevoApiKey || env.BREVO_API_KEY || '').trim();
+  const senderEmail = String(brevo.BrevoSenderEmail || env.BREVO_SENDER_EMAIL || env.SCHOOL_EMAIL || '').trim();
+  const schoolName = String(profile.SchoolName || env.SCHOOL_NAME || 'Integrated School Management Suite').trim();
+  const senderName = String(brevo.BrevoSenderName || env.BREVO_SENDER_NAME || schoolName).trim();
+  if (!apiKey || !senderEmail || !sale.Email) {
+    return { ok: false, skipped: true, message: 'Brevo API key, sender email, or recipient email is missing.' };
+  }
+
+  const schoolAddress = String(profile.SchoolAddress || env.SCHOOL_ADDRESS || '').trim();
+  const office = String(profile.OfferSignatoryTitle || profile.SchoolSignatoryTitle || env.SCHOOL_SIGNATORY_TITLE || 'Admissions Office').trim();
+  const greeting = renderGreeting(profile.EmailGreetingTemplate || env.EMAIL_GREETING_TEMPLATE, sale.ApplicantName, schoolName);
+  const textContent = `${greeting}
+
+Thank you for purchasing the ${schoolName} admission form for ${sale.ApplicantName}.
+
+Amount Paid: ${sale.AmountPaid}
+Receipt No: ${sale.ReceiptNo}
+Verification Code: ${sale.VerificationCode}
+Code Expiry Date: ${sale.ExpiryDate}
+
+Kindly complete the online application form using the link below:
+${sale.FormLink}
+
+Regards,
+${schoolName}
+${office}`;
+
+  const htmlContent = `
+    <div style="font-family:Arial,sans-serif; color:#2b2b2b; max-width:680px; border:1px solid #dbe6f2;">
+      <div style="background:#eaf2ff; padding:18px 22px;">
+        <h2 style="margin:0; color:#1f4e79; font-size:20px; letter-spacing:.3px;">${escapeHtml(schoolName)}</h2>
+        ${schoolAddress ? `<p style="margin:8px 0 0; font-size:13px;">${escapeHtml(schoolAddress)}</p>` : ''}
+      </div>
+      <div style="padding:22px;">
+        <h3 style="color:#1f4e79; margin-top:0;">Admission Application Form Link</h3>
+        <p>${escapeHtml(greeting)}</p>
+        <p>Thank you for purchasing the ${escapeHtml(schoolName)} admission form for <strong>${escapeHtml(sale.ApplicantName)}</strong>.</p>
+        <div style="background:#f7f9fc; border:1px solid #dde5ef; border-radius:8px; padding:12px 14px; margin:14px 0;">
+          <p style="margin:0 0 6px;"><strong>Amount Paid:</strong> ${escapeHtml(sale.AmountPaid)}</p>
+          <p style="margin:0 0 6px;"><strong>Receipt No:</strong> ${escapeHtml(sale.ReceiptNo)}</p>
+          <p style="margin:0 0 6px;"><strong>Verification Code:</strong> ${escapeHtml(sale.VerificationCode)}</p>
+          <p style="margin:0;"><strong>Code Expiry Date:</strong> ${escapeHtml(sale.ExpiryDate)}</p>
+        </div>
+        <p>When the form opens, click <strong>Register</strong> and verify using the email address used for this purchase and the verification code above.</p>
+        <p><a href="${escapeHtml(sale.FormLink)}" style="display:inline-block; background:#1f4e79; color:#ffffff; padding:10px 14px; border-radius:6px; text-decoration:none;">Open Application Form</a></p>
+        <p>If the button does not open, copy and paste this link into your browser:<br>${escapeHtml(sale.FormLink)}</p>
+        <p style="margin-top:24px;">Regards,<br><strong>${escapeHtml(schoolName)}</strong><br>${escapeHtml(office)}</p>
+      </div>
+    </div>`;
+
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'api-key': apiKey,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify({
+      sender: { name: senderName, email: senderEmail },
+      to: [{ email: sale.Email, name: sale.ApplicantName || sale.Email }],
+      subject: `Admission Application Form Link - ${schoolName}`,
+      textContent,
+      htmlContent
+    })
+  });
+  const detail = await response.text().catch(() => '');
+  return { ok: response.ok, status: response.status, message: detail };
 }
 
 async function recordSaleInAppsScript(env, payload) {
@@ -150,18 +251,26 @@ export async function onRequestPost(context) {
       return Response.json({ ok: false, message: 'Could not generate a unique verification code. Please contact the Admissions Office.' }, { status: 500 });
     }
 
+    const verificationCode = recordData.verificationCode || recordData.VerificationCode || '';
+    const emailResult = await sendSchoolFormPurchaseEmail(env, {
+      ...basePayload,
+      VerificationCode: verificationCode
+    }).catch((err) => ({ ok: false, message: String(err && err.message ? err.message : err) }));
+
     return Response.json({
       ok: true,
       message: recordData.duplicate ? 'Admission form purchase was already recorded.' : 'Admission form purchase verified and recorded.',
       applicantName: basePayload.ApplicantName,
       email: basePayload.Email,
       receiptNo,
-      verificationCode: recordData.verificationCode || recordData.VerificationCode || '',
+      verificationCode,
       amount,
       currency: tx.currency || 'NGN',
       reference: tx.reference || reference,
       formLink: basePayload.FormLink,
-      expiryDate: recordData.expiryDate || basePayload.ExpiryDate
+      expiryDate: recordData.expiryDate || basePayload.ExpiryDate,
+      schoolEmailSent: Boolean(emailResult && emailResult.ok),
+      schoolEmailMessage: emailResult && emailResult.message ? String(emailResult.message).slice(0, 300) : ''
     });
   } catch (err) {
     return Response.json({ ok: false, message: String(err) }, { status: 500 });

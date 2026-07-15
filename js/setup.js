@@ -79,6 +79,7 @@ async function loadProfile(password = '') {
     setField('productKeyMode', profile.ProductKeyMode || 'off');
   } catch (error) {
     setStatus(error.message, 'bad');
+    throw error;
   }
 }
 
