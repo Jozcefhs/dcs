@@ -578,6 +578,11 @@ function isWalletFee(fee) {
   return clean(fee && fee.FeeCode) === 'WALLET_TOPUP' || normalizeMatchText(fee && fee.FeeCategory) === 'wallet';
 }
 
+function isOptionalSubscriptionFee(fee) {
+  const category = normalizeMatchText(fee && fee.FeeCategory);
+  return category === 'bus service' || category === 'club';
+}
+
 function isWalletLedger(row) {
   return clean(row && row.FeeCode).toUpperCase() === 'WALLET_TOPUP' ||
     normalizeMatchText(row && row.FeeCategory) === 'wallet' ||
@@ -1373,6 +1378,7 @@ export async function getAccountsOverview(env) {
         .filter((fee) => yesNo(fee.Active) === 'YES')
         .filter((fee) => yesNo(fee.PayableOnline || 'YES') === 'YES')
         .filter((fee) => !isWalletFee(fee))
+        .filter((fee) => !isOptionalSubscriptionFee(fee))
         .filter((fee) => {
           const category = normalizeMatchText(fee.FeeCategory || 'School Fee');
           const requiredForEnrollment = yesNo(fee.RequiredForEnrollment) === 'YES';
@@ -1599,6 +1605,28 @@ async function updateApplicantIntelligence(env, body) {
   });
   const saved = await saveApplication(env, { ...existing, ...updates });
   return { ok: true, message: 'Applicant intelligence updated.', application: saved };
+}
+
+async function updateApplicationDetails(env, body) {
+  const id = applicationIdFrom(body);
+  const existing = id ? await findApplication(env, id) : null;
+  if (!existing) throw applicationNotFound(id);
+  const ignored = new Set(['Secret', 'secret', 'Action', 'action', 'id', '__id']);
+  const updates = { UpdatedAt: nowIso(), UpdatedBy: clean(body.UpdatedBy || body.UserRole) || 'Super Admin' };
+  Object.entries(body || {}).forEach(([key, value]) => {
+    if (!ignored.has(key)) updates[key] = value;
+  });
+  const saved = await saveApplication(env, { ...existing, ...updates });
+  return { ok: true, message: 'Application details updated.', application: saved };
+}
+
+async function deleteApplication(env, body) {
+  const id = applicationIdFrom(body);
+  const existing = id ? await findApplication(env, id) : null;
+  if (!existing) throw applicationNotFound(id);
+  const docId = safeDocumentId(pick(existing, ['ApplicationReference', 'ApplicationID', '__id']) || id);
+  await deleteDocument(env, 'applications', docId);
+  return { ok: true, message: 'Application deleted.', applicationReference: id };
 }
 
 function nextStudentAdmissionNo(students, session = '', schoolCode = 'DCA') {
@@ -2912,6 +2940,10 @@ async function routeAction(env, action, body = {}) {
       return updateEntranceResult(env, body);
     case 'updateApplicantIntelligence':
       return updateApplicantIntelligence(env, body);
+    case 'updateApplicationDetails':
+      return updateApplicationDetails(env, body);
+    case 'deleteApplication':
+      return deleteApplication(env, body);
     case 'importStudents':
       return importStudents(env, body);
     case 'promoteStudents':
