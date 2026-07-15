@@ -661,6 +661,7 @@ function invoiceDueNotifications(invoices, keys, accountSummary = null) {
   return (invoices || [])
     .filter((invoice) => anyKeyMatches(invoice.AccountRef, keys))
     .filter((invoice) => {
+      if (isSchoolFee(invoice)) return false;
       const status = lower(invoice.Status);
       const balance = invoice.Balance !== undefined && invoice.Balance !== ''
         ? asMoneyNumber(invoice.Balance)
