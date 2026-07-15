@@ -384,7 +384,7 @@ function isWalletLedger(entry) {
 
 function isOptionalSubscriptionEntry(entry) {
   const category = lower(entry && entry.FeeCategory);
-  return category === 'bus service' || category === 'club';
+  return category === 'bus service' || category === 'club' || category === 'others';
 }
 
 function feeAccountSummary(entries) {

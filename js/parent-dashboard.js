@@ -170,6 +170,10 @@ function isClubFee(fee) {
   return feeCategory(fee) === 'club';
 }
 
+function isOtherOptionalFee(fee) {
+  return feeCategory(fee) === 'others';
+}
+
 function busModeFor(fee) {
   const text = `${fee.FeeName || ''} ${fee.FeeCode || ''}`.toLowerCase();
   if (text.includes('one way') || text.includes('one-way') || text.includes('single')) return 'One Way';
@@ -194,6 +198,10 @@ function busRouteFor(fee) {
 
 function clubNameFor(fee) {
   return String(fee.FeeName || fee.FeeCode || 'Club').replace(/paid\s*club|club\s*subscription/ig, '').replace(/^[\s:|/-]+|[\s:|/-]+$/g, '').trim() || String(fee.FeeName || fee.FeeCode || 'Club');
+}
+
+function optionalNameFor(fee) {
+  return String(fee.FeeName || fee.FeeCode || 'Optional Service').replace(/optional\s*service|others/ig, '').replace(/^[\s:|/-]+|[\s:|/-]+$/g, '').trim() || String(fee.FeeName || fee.FeeCode || 'Optional Service');
 }
 
 function renderComponents(parent, components) {
@@ -261,10 +269,11 @@ function renderSubscriptionSelector(child, title, fees, options = {}) {
     fees.forEach((fee, index) => {
       const opt = document.createElement('option');
       opt.value = String(index);
-      opt.textContent = `${clubNameFor(fee)} - ${money(fee.Amount)}`;
+      const label = options.kind === 'club' ? clubNameFor(fee) : optionalNameFor(fee);
+      opt.textContent = `${label} - ${money(fee.Amount)}`;
       clubSelect.appendChild(opt);
     });
-    box.appendChild(document.createTextNode('Club'));
+    box.appendChild(document.createTextNode(options.kind === 'club' ? 'Club' : 'Item'));
     box.appendChild(clubSelect);
   }
 
@@ -507,7 +516,8 @@ function renderPayableItems(child) {
   const records = dashboard.payableItems?.[child.AccountRef] || [];
   const busFees = records.filter(isBusFee);
   const clubFees = records.filter(isClubFee);
-  const directRecords = records.filter((fee) => !isBusFee(fee) && !isClubFee(fee));
+  const otherFees = records.filter(isOtherOptionalFee);
+  const directRecords = records.filter((fee) => !isBusFee(fee) && !isClubFee(fee) && !isOtherOptionalFee(fee));
   const payableError = dashboard.payableErrors?.[child.AccountRef] || '';
   const loading = !loadedPayables.has(child.AccountRef);
   payableItems.innerHTML = records.length ? '' : `<p class="${payableError ? 'status bad' : 'muted'}">${payableError || (loading ? 'Loading payable items...' : 'There are no online payment items due at the moment.')}</p>`;
@@ -515,6 +525,8 @@ function renderPayableItems(child) {
   if (busSelector) payableItems.appendChild(busSelector);
   const clubSelector = renderSubscriptionSelector(child, 'Paid Club Subscription', clubFees, { kind: 'club' });
   if (clubSelector) payableItems.appendChild(clubSelector);
+  const otherSelector = renderSubscriptionSelector(child, 'Other Optional Payments', otherFees, { kind: 'others' });
+  if (otherSelector) payableItems.appendChild(otherSelector);
   directRecords.forEach((fee) => {
     const item = document.createElement('div');
     item.className = 'activity-item payment-action';
