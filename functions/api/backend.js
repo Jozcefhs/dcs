@@ -1415,18 +1415,19 @@ export async function getAccountsOverview(env) {
         })
         .filter((fee) => feeMatchesAccountPeriod(fee, account));
       const expectedFeeDebit = matchingExpectedFees.reduce((sum, fee) => sum + asMoneyNumber(fee.Amount), 0);
-      const expectedDebitWithCreditActions = expectedFeeDebit + accountCreditDebit;
-      if (expectedDebitWithCreditActions > totalDebit) {
-        totalDebit = expectedDebitWithCreditActions;
+      if (expectedFeeDebit > totalDebit) {
+        totalDebit = expectedFeeDebit;
       }
     }
+    const netBalance = totalDebit + accountCreditDebit - totalCredit;
     return {
       ...account,
       TotalDebit: totalDebit,
       TotalCredit: totalCredit,
-      Balance: totalDebit - totalCredit,
-      OutstandingBalance: Math.max(0, totalDebit - totalCredit),
-      ExcessCredit: Math.max(0, totalCredit - totalDebit),
+      AccountCreditDebits: accountCreditDebit,
+      Balance: netBalance,
+      OutstandingBalance: Math.max(0, netBalance),
+      ExcessCredit: Math.max(0, -netBalance),
       WalletBalance: walletBalance,
       LastPaymentAt: lastPaymentAt
     };

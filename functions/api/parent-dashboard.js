@@ -420,13 +420,21 @@ function isOptionalSubscriptionEntry(entry) {
 
 function feeAccountSummary(entries) {
   const rows = (entries || []).filter((entry) => !isWalletLedger(entry) && !isOptionalSubscriptionEntry(entry));
-  const debit = rows.reduce((sum, row) => sum + asMoneyNumber(row.Debit), 0);
+  const debit = rows.reduce((sum, row) => {
+    if (lower(row.FeeCategory) === 'account credit') return sum;
+    return sum + asMoneyNumber(row.Debit);
+  }, 0);
+  const creditActionDebits = rows.reduce((sum, row) => {
+    return lower(row.FeeCategory) === 'account credit' ? sum + asMoneyNumber(row.Debit) : sum;
+  }, 0);
   const credit = rows.reduce((sum, row) => sum + asMoneyNumber(row.Credit), 0);
+  const balance = debit + creditActionDebits - credit;
   return {
     TotalDebit: debit,
     TotalCredit: credit,
-    OutstandingBalance: Math.max(0, debit - credit),
-    CreditBalance: Math.max(0, credit - debit)
+    AccountCreditDebits: creditActionDebits,
+    OutstandingBalance: Math.max(0, balance),
+    CreditBalance: Math.max(0, -balance)
   };
 }
 
