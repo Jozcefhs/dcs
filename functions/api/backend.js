@@ -3191,7 +3191,7 @@ async function saveAccountingExpense(env, body) {
   }
   const requestedStatus = clean(body.Status || body.status || 'Draft');
   if (['approved', 'posted', 'rejected'].includes(lower(requestedStatus))) {
-    requireAccountingRole(body, ['Super Admin', 'Management'], 'Only Management or Super Admin can approve, reject, or post an expense.');
+    await requireAccountingApprovalLimit(env, body, 'Expense', amount);
   }
   const payload = {
     ...existing, ExpenseNo: expenseNo, Date: clean(body.Date || body.date) || nowIso().slice(0, 10),
@@ -3289,16 +3289,390 @@ async function saveAccountingPeriod(env, body) {
   if (!payload.StartDate || !payload.EndDate || payload.StartDate > payload.EndDate) {
     const err = new Error('A valid period start and end date are required.'); err.status = 400; throw err;
   }
+  if (lower(payload.Status) === 'closed') {
+    const checklist = (await listCollection(env, 'accountingCloseChecklist')).filter((row) => sameText(row.PeriodId, id));
+    const incomplete = checklist.filter((row) => yesNo(row.Required ?? 'YES') === 'YES' && lower(row.Status) !== 'completed');
+    if (!checklist.length || incomplete.length) {
+      const err = new Error(`Complete the month-end checklist before closing this period (${incomplete.length || 'all'} item(s) remaining).`);
+      err.status = 409; throw err;
+    }
+    const banks = await listCollection(env, 'accountingBanks');
+    const reconciliations = (await listCollection(env, 'accountingReconciliations')).filter((row) => clean(row.StatementDate) >= payload.StartDate && clean(row.StatementDate) <= payload.EndDate);
+    const activeBanks = banks.filter((row) => yesNo(row.Active ?? 'YES') === 'YES');
+    const allBanksReconciled = activeBanks.every((bank) => reconciliations.some((row) => sameText(row.BankId, bank.BankId) && lower(row.Status) === 'completed' && Math.abs(asMoneyNumber(row.Difference)) <= 0.005));
+    if (activeBanks.length && !allBanksReconciled) {
+      const err = new Error('All bank accounts must have completed zero-difference reconciliations before period close.');
+      err.status = 409; throw err;
+    }
+  }
   await upsertDocument(env, 'accountingPeriods', safeDocumentId(id), payload);
+  await seedAccountingCloseChecklist(env, id);
   await writeAccountingAudit(env, 'SAVE', 'Accounting Period', id, body, payload.Status);
   return { ok: true, message: `Accounting period saved as ${payload.Status}.`, period: payload };
 }
 
-function buildAccountingReport(chart, journals, expenses, budgets) {
+const DEFAULT_ACCOUNTING_APPROVAL_LIMITS = [
+  { Role: 'Management', TransactionType: 'Expense', MaxAmount: 5000000 },
+  { Role: 'Management', TransactionType: 'Supplier Bill', MaxAmount: 5000000 },
+  { Role: 'Management', TransactionType: 'Concession', MaxAmount: 1000000 },
+  { Role: 'Super Admin', TransactionType: 'Expense', MaxAmount: 999999999999 },
+  { Role: 'Super Admin', TransactionType: 'Supplier Bill', MaxAmount: 999999999999 },
+  { Role: 'Super Admin', TransactionType: 'Concession', MaxAmount: 999999999999 }
+];
+
+const DEFAULT_CLOSE_CHECKLIST = [
+  'Revenue subledgers synchronized', 'All expense vouchers reviewed', 'Bank accounts reconciled',
+  'Student receivables reviewed', 'Supplier payables reviewed', 'Depreciation posted',
+  'Trial balance reviewed', 'Financial statements approved', 'Accounting backup/export completed'
+];
+
+async function seedAccountingApprovalLimits(env) {
+  const rows = await listCollection(env, 'accountingApprovalLimits');
+  const existing = new Set(rows.map((row) => `${clean(row.Role)}|${clean(row.TransactionType)}`.toLowerCase()));
+  for (const item of DEFAULT_ACCOUNTING_APPROVAL_LIMITS) {
+    const key = `${item.Role}|${item.TransactionType}`.toLowerCase();
+    if (existing.has(key)) continue;
+    await upsertDocument(env, 'accountingApprovalLimits', safeDocumentId(key), { ...item, Active: 'YES', UpdatedAt: nowIso(), UpdatedBy: 'System' });
+  }
+}
+
+async function requireAccountingApprovalLimit(env, body, transactionType, amount) {
+  const role = clean(body.UserRole || body.userRole);
+  if (!['Super Admin', 'Management'].includes(role)) {
+    const err = new Error(`Only Management or Super Admin can approve ${transactionType.toLowerCase()} transactions.`); err.status = 403; throw err;
+  }
+  await seedAccountingApprovalLimits(env);
+  const limit = (await listCollection(env, 'accountingApprovalLimits')).find((row) => sameText(row.Role, role) && sameText(row.TransactionType, transactionType) && yesNo(row.Active ?? 'YES') === 'YES');
+  if (!limit || asMoneyNumber(amount) > asMoneyNumber(limit.MaxAmount)) {
+    const err = new Error(`${role} approval limit is insufficient for this ${transactionType.toLowerCase()} amount.`); err.status = 403; throw err;
+  }
+}
+
+async function saveAccountingApprovalLimit(env, body) {
+  requireAccountingRole(body, ['Super Admin']);
+  const role = clean(body.Role || body.role);
+  const type = clean(body.TransactionType || body.transactionType);
+  if (!role || !type) { const err = new Error('Role and transaction type are required.'); err.status = 400; throw err; }
+  const id = safeDocumentId(`${role}-${type}`);
+  const payload = { Role: role, TransactionType: type, MaxAmount: asMoneyNumber(body.MaxAmount || body.maxAmount), Active: yesNo(body.Active ?? 'YES') || 'YES', UpdatedAt: nowIso(), UpdatedBy: clean(body.RecordedBy) };
+  await upsertDocument(env, 'accountingApprovalLimits', id, payload);
+  await writeAccountingAudit(env, 'SAVE', 'Approval Limit', id, body, `${role}: ${payload.MaxAmount}`);
+  return { ok: true, message: 'Approval limit saved.', limit: payload };
+}
+
+async function seedAccountingCloseChecklist(env, periodId) {
+  if (!periodId) return;
+  const existing = await listCollection(env, 'accountingCloseChecklist');
+  for (let index = 0; index < DEFAULT_CLOSE_CHECKLIST.length; index += 1) {
+    const id = safeDocumentId(`${periodId}-${index + 1}`);
+    if (existing.some((row) => sameText(row.__id, id) || sameText(row.ChecklistId, id))) continue;
+    await upsertDocument(env, 'accountingCloseChecklist', id, { ChecklistId: id, PeriodId: periodId, SortOrder: index + 1,
+      Item: DEFAULT_CLOSE_CHECKLIST[index], Required: 'YES', Status: 'Pending', CompletedAt: '', CompletedBy: '', Notes: '' });
+  }
+}
+
+async function saveAccountingCloseChecklist(env, body) {
+  requireAccountingRole(body, ['Super Admin', 'Accounts Officer', 'Management']);
+  const id = clean(body.ChecklistId || body.checklistId);
+  if (!id) { const err = new Error('Checklist item is required.'); err.status = 400; throw err; }
+  const existing = (await listCollection(env, 'accountingCloseChecklist')).find((row) => sameText(row.ChecklistId, id) || sameText(row.__id, safeDocumentId(id)));
+  if (!existing) { const err = new Error('Checklist item was not found.'); err.status = 404; throw err; }
+  const status = clean(body.Status || body.status || 'Pending');
+  const payload = { ...existing, Status: status, Notes: clean(body.Notes || body.notes),
+    CompletedAt: lower(status) === 'completed' ? nowIso() : '', CompletedBy: lower(status) === 'completed' ? clean(body.RecordedBy) : '' };
+  await upsertDocument(env, 'accountingCloseChecklist', safeDocumentId(id), payload);
+  await writeAccountingAudit(env, 'UPDATE', 'Close Checklist', id, body, status);
+  return { ok: true, message: 'Month-end checklist updated.', item: payload };
+}
+
+async function saveAccountingOpeningBalance(env, body) {
+  requireAccountingRole(body, ['Super Admin', 'Accounts Officer']);
+  const date = clean(body.Date || body.date) || nowIso().slice(0, 10);
+  const reference = clean(body.Reference || body.reference) || `OPEN-${date}`;
+  const journal = await saveAccountingJournal(env, { ...body, Date: date, Reference: reference,
+    Description: clean(body.Description) || `Opening balances at ${date}`, Source: 'Opening Balance', Status: 'Posted' });
+  await writeAccountingAudit(env, 'POST', 'Opening Balance', journal.JournalNo, body, reference);
+  return { ok: true, message: 'Opening balances posted.', journal };
+}
+
+async function saveAccountingVendor(env, body) {
+  requireAccountingRole(body, ['Super Admin', 'Accounts Officer']);
+  const vendorId = clean(body.VendorId || body.vendorId) || ledgerDocumentId('VND');
+  const name = clean(body.Name || body.name || body.Vendor);
+  if (!name) { const err = new Error('Supplier name is required.'); err.status = 400; throw err; }
+  const existing = (await listCollection(env, 'accountingVendors')).find((row) => sameText(row.VendorId, vendorId) || sameText(row.__id, safeDocumentId(vendorId))) || {};
+  const payload = { ...existing, VendorId: vendorId, Name: name, ContactPerson: clean(body.ContactPerson), Phone: clean(body.Phone),
+    Email: clean(body.Email), Address: clean(body.Address), BankName: clean(body.BankName), AccountNumber: clean(body.AccountNumber),
+    TaxId: clean(body.TaxId), PaymentTermsDays: asMoneyNumber(body.PaymentTermsDays || 30), Active: yesNo(body.Active ?? 'YES') || 'YES',
+    CreatedAt: existing.CreatedAt || nowIso(), UpdatedAt: nowIso(), UpdatedBy: clean(body.RecordedBy) };
+  await upsertDocument(env, 'accountingVendors', safeDocumentId(vendorId), payload);
+  await writeAccountingAudit(env, existing.VendorId ? 'UPDATE' : 'CREATE', 'Supplier', vendorId, body, name);
+  return { ok: true, message: 'Supplier saved.', vendor: payload };
+}
+
+async function saveAccountingSupplierBill(env, body) {
+  requireAccountingRole(body, ['Super Admin', 'Accounts Officer', 'Management']);
+  const billNo = clean(body.BillNo || body.billNo) || ledgerDocumentId('BILL');
+  const billRows = await listCollection(env, 'accountingSupplierBills');
+  const existing = billRows.find((row) => sameText(row.BillNo, billNo) || sameText(row.__id, safeDocumentId(billNo))) || {};
+  if (['posted', 'part paid', 'paid'].includes(lower(existing.Status))) { const err = new Error('Posted supplier bills are immutable.'); err.status = 409; throw err; }
+  const amount = asMoneyNumber(body.Amount || body.amount);
+  const status = clean(body.Status || body.status || 'Draft');
+  if (amount <= 0 || !clean(body.Description)) { const err = new Error('Bill description and amount are required.'); err.status = 400; throw err; }
+  const invoiceReference = clean(body.InvoiceReference || body.Reference);
+  if (invoiceReference && billRows.some((row) => !sameText(row.BillNo, billNo) && sameText(row.VendorId, body.VendorId) && sameText(row.InvoiceReference, invoiceReference))) {
+    const err = new Error('This supplier invoice reference has already been recorded for the selected supplier.'); err.status = 409; throw err;
+  }
+  if (['approved', 'posted', 'rejected'].includes(lower(status))) await requireAccountingApprovalLimit(env, body, 'Supplier Bill', amount);
+  const payload = { ...existing, BillNo: billNo, VendorId: clean(body.VendorId), VendorName: clean(body.VendorName || body.Vendor),
+    InvoiceReference: invoiceReference, Date: clean(body.Date) || nowIso().slice(0, 10),
+    DueDate: clean(body.DueDate), Description: clean(body.Description), Amount: amount, PaidAmount: asMoneyNumber(existing.PaidAmount), BalanceAmount: amount - asMoneyNumber(existing.PaidAmount),
+    AccountCode: clean(body.AccountCode) || '6090', Department: clean(body.Department), CostCentre: clean(body.CostCentre),
+    AcademicSession: clean(body.AcademicSession), Term: clean(body.Term), AttachmentUrl: clean(body.AttachmentUrl), Notes: clean(body.Notes), Status: status,
+    CreatedAt: existing.CreatedAt || nowIso(), CreatedBy: existing.CreatedBy || clean(body.RecordedBy), UpdatedAt: nowIso(),
+    ApprovedAt: ['approved', 'posted'].includes(lower(status)) ? nowIso() : '', ApprovedBy: ['approved', 'posted'].includes(lower(status)) ? clean(body.RecordedBy) : '' };
+  if (lower(status) === 'posted') {
+    const journal = await saveAccountingJournal(env, { JournalNo: `SYS-BILL-${safeDocumentId(billNo)}`, Date: payload.Date, Status: 'Posted',
+      Description: payload.Description, Reference: payload.InvoiceReference || billNo, Source: 'Supplier Bill', SourceId: billNo,
+      Department: payload.Department, CostCentre: payload.CostCentre, AcademicSession: payload.AcademicSession, Term: payload.Term,
+      RecordedBy: clean(body.RecordedBy), Lines: [
+        { AccountCode: payload.AccountCode, Debit: amount, Credit: 0, Description: payload.Description, Department: payload.Department },
+        { AccountCode: '2000', Debit: 0, Credit: amount, Description: payload.VendorName || payload.VendorId }
+      ] }, true);
+    payload.JournalNo = journal.JournalNo; payload.PostedAt = nowIso(); payload.PostedBy = clean(body.RecordedBy);
+  }
+  await upsertDocument(env, 'accountingSupplierBills', safeDocumentId(billNo), payload);
+  await writeAccountingAudit(env, existing.BillNo ? 'UPDATE' : 'CREATE', 'Supplier Bill', billNo, body, status);
+  return { ok: true, message: `Supplier bill saved as ${status}.`, bill: payload };
+}
+
+async function payAccountingSupplierBill(env, body) {
+  requireAccountingRole(body, ['Super Admin', 'Accounts Officer']);
+  const billNo = clean(body.BillNo || body.billNo);
+  const bill = (await listCollection(env, 'accountingSupplierBills')).find((row) => sameText(row.BillNo, billNo) || sameText(row.__id, safeDocumentId(billNo)));
+  if (!bill || !['posted', 'part paid'].includes(lower(bill.Status))) { const err = new Error('Select a posted unpaid supplier bill.'); err.status = 400; throw err; }
+  const outstanding = Math.max(0, asMoneyNumber(bill.Amount) - asMoneyNumber(bill.PaidAmount));
+  const amount = asMoneyNumber(body.Amount || body.amount);
+  if (amount <= 0 || amount > outstanding + 0.005) { const err = new Error(`Payment must be between 0 and ${outstanding.toFixed(2)}.`); err.status = 400; throw err; }
+  const paymentNo = clean(body.PaymentNo) || ledgerDocumentId('VPay');
+  const paymentAccount = clean(body.PaymentAccount) || '1020';
+  const date = clean(body.Date) || nowIso().slice(0, 10);
+  const journal = await saveAccountingJournal(env, { JournalNo: `SYS-VPAY-${safeDocumentId(paymentNo)}`, Date: date, Status: 'Posted',
+    Description: `Payment to ${clean(bill.VendorName || bill.VendorId)}`, Reference: clean(body.Reference) || paymentNo,
+    Source: 'Supplier Payment', SourceId: paymentNo, RecordedBy: clean(body.RecordedBy), Lines: [
+      { AccountCode: '2000', Debit: amount, Credit: 0, Description: billNo },
+      { AccountCode: paymentAccount, Debit: 0, Credit: amount, Description: clean(body.Method) || 'Supplier payment' }
+    ] }, true);
+  const paid = asMoneyNumber(bill.PaidAmount) + amount;
+  const updated = { ...bill, PaidAmount: paid, BalanceAmount: Math.max(0, asMoneyNumber(bill.Amount) - paid),
+    Status: paid + 0.005 >= asMoneyNumber(bill.Amount) ? 'Paid' : 'Part Paid', LastPaymentAt: date, UpdatedAt: nowIso() };
+  await upsertDocument(env, 'accountingSupplierBills', safeDocumentId(billNo), updated);
+  const payment = { PaymentNo: paymentNo, BillNo: billNo, VendorId: clean(bill.VendorId), Date: date, Amount: amount,
+    PaymentAccount: paymentAccount, Method: clean(body.Method), Reference: clean(body.Reference), JournalNo: journal.JournalNo, RecordedBy: clean(body.RecordedBy), RecordedAt: nowIso() };
+  await upsertDocument(env, 'accountingSupplierPayments', safeDocumentId(paymentNo), payment);
+  await writeAccountingAudit(env, 'PAY', 'Supplier Bill', billNo, body, `${paymentNo}: ${amount}`);
+  return { ok: true, message: 'Supplier payment posted.', bill: updated, payment };
+}
+
+async function saveAccountingAsset(env, body) {
+  requireAccountingRole(body, ['Super Admin', 'Accounts Officer']);
+  const assetId = clean(body.AssetId || body.assetId) || ledgerDocumentId('AST');
+  const existing = (await listCollection(env, 'accountingAssets')).find((row) => sameText(row.AssetId, assetId) || sameText(row.__id, safeDocumentId(assetId))) || {};
+  const cost = asMoneyNumber(body.Cost || body.cost);
+  const residual = asMoneyNumber(body.ResidualValue || body.residualValue);
+  const life = Math.max(1, Math.round(asMoneyNumber(body.UsefulLifeMonths || body.usefulLifeMonths || 60)));
+  if (!clean(body.Name) || cost <= 0 || residual > cost) { const err = new Error('Asset name, valid cost, and residual value are required.'); err.status = 400; throw err; }
+  const accumulated = asMoneyNumber(existing.AccumulatedDepreciation || body.AccumulatedDepreciation);
+  const payload = { ...existing, AssetId: assetId, Name: clean(body.Name), Category: clean(body.Category), AcquisitionDate: clean(body.AcquisitionDate) || nowIso().slice(0, 10),
+    Cost: cost, ResidualValue: residual, UsefulLifeMonths: life, MonthlyDepreciation: (cost - residual) / life,
+    AccumulatedDepreciation: accumulated, NetBookValue: Math.max(residual, cost - accumulated), Location: clean(body.Location), Custodian: clean(body.Custodian),
+    SerialNumber: clean(body.SerialNumber), AssetAccount: clean(body.AssetAccount) || '1500', AccumulatedDepreciationAccount: clean(body.AccumulatedDepreciationAccount) || '1600',
+    DepreciationExpenseAccount: clean(body.DepreciationExpenseAccount) || '6070', Status: clean(body.Status) || 'Active', Notes: clean(body.Notes),
+    CreatedAt: existing.CreatedAt || nowIso(), UpdatedAt: nowIso(), UpdatedBy: clean(body.RecordedBy) };
+  if (yesNo(body.PostAcquisition) === 'YES' && !existing.AcquisitionJournalNo) {
+    const journal = await saveAccountingJournal(env, { JournalNo: `SYS-AST-${safeDocumentId(assetId)}`, Date: payload.AcquisitionDate, Status: 'Posted',
+      Description: `Asset acquisition: ${payload.Name}`, Reference: clean(body.Reference) || assetId, Source: 'Asset Acquisition', SourceId: assetId,
+      RecordedBy: clean(body.RecordedBy), Lines: [
+        { AccountCode: payload.AssetAccount, Debit: cost, Credit: 0, Description: payload.Name },
+        { AccountCode: clean(body.PaymentAccount) || '1020', Debit: 0, Credit: cost, Description: clean(body.PaymentMethod) || 'Asset acquisition' }
+      ] }, true);
+    payload.AcquisitionJournalNo = journal.JournalNo;
+  }
+  await upsertDocument(env, 'accountingAssets', safeDocumentId(assetId), payload);
+  await writeAccountingAudit(env, existing.AssetId ? 'UPDATE' : 'CREATE', 'Fixed Asset', assetId, body, payload.Name);
+  return { ok: true, message: 'Fixed asset saved.', asset: payload };
+}
+
+async function postAccountingDepreciation(env, body) {
+  requireAccountingRole(body, ['Super Admin', 'Accounts Officer']);
+  const assetId = clean(body.AssetId || body.assetId);
+  const asset = (await listCollection(env, 'accountingAssets')).find((row) => sameText(row.AssetId, assetId) || sameText(row.__id, safeDocumentId(assetId)));
+  if (!asset || lower(asset.Status) !== 'active') { const err = new Error('Select an active fixed asset.'); err.status = 400; throw err; }
+  const date = clean(body.Date) || nowIso().slice(0, 10);
+  const period = date.slice(0, 7).replace('-', '');
+  const remaining = Math.max(0, asMoneyNumber(asset.Cost) - asMoneyNumber(asset.ResidualValue) - asMoneyNumber(asset.AccumulatedDepreciation));
+  const amount = Math.min(remaining, asMoneyNumber(body.Amount) || asMoneyNumber(asset.MonthlyDepreciation));
+  if (amount <= 0) { const err = new Error('This asset is fully depreciated.'); err.status = 409; throw err; }
+  const journalNo = `SYS-DEP-${safeDocumentId(assetId)}-${period}`;
+  if ((await listCollection(env, 'accountingJournals')).some((row) => sameText(row.JournalNo, journalNo))) { const err = new Error('Depreciation was already posted for this asset and month.'); err.status = 409; throw err; }
+  const journal = await saveAccountingJournal(env, { JournalNo: journalNo, Date: date, Status: 'Posted', Description: `Depreciation: ${asset.Name}`,
+    Reference: assetId, Source: 'Depreciation', SourceId: assetId, RecordedBy: clean(body.RecordedBy), Lines: [
+      { AccountCode: clean(asset.DepreciationExpenseAccount) || '6070', Debit: amount, Credit: 0, Description: asset.Name },
+      { AccountCode: clean(asset.AccumulatedDepreciationAccount) || '1600', Debit: 0, Credit: amount, Description: asset.Name }
+    ] }, true);
+  const accumulated = asMoneyNumber(asset.AccumulatedDepreciation) + amount;
+  const updated = { ...asset, AccumulatedDepreciation: accumulated, NetBookValue: Math.max(asMoneyNumber(asset.ResidualValue), asMoneyNumber(asset.Cost) - accumulated),
+    LastDepreciationDate: date, UpdatedAt: nowIso() };
+  await upsertDocument(env, 'accountingAssets', safeDocumentId(assetId), updated);
+  await writeAccountingAudit(env, 'DEPRECIATE', 'Fixed Asset', assetId, body, `${date}: ${amount}`);
+  return { ok: true, message: 'Depreciation posted.', asset: updated, journal };
+}
+
+async function saveAccountingAdjustment(env, body) {
+  requireAccountingRole(body, ['Super Admin', 'Accounts Officer', 'Management']);
+  const adjustmentNo = clean(body.AdjustmentNo) || ledgerDocumentId('ADJ');
+  const existing = (await listCollection(env, 'accountingAdjustments')).find((row) => sameText(row.AdjustmentNo, adjustmentNo) || sameText(row.__id, safeDocumentId(adjustmentNo))) || {};
+  if (lower(existing.Status) === 'posted') { const err = new Error('Posted adjustments are immutable.'); err.status = 409; throw err; }
+  const amount = asMoneyNumber(body.Amount);
+  const type = clean(body.Type || 'Discount');
+  const status = clean(body.Status || 'Draft');
+  if (!clean(body.AccountRef) || amount <= 0 || !clean(body.Reason)) { const err = new Error('Account, amount, and reason are required.'); err.status = 400; throw err; }
+  if (['approved', 'posted', 'rejected'].includes(lower(status))) await requireAccountingApprovalLimit(env, body, 'Concession', amount);
+  const payload = { ...existing, AdjustmentNo: adjustmentNo, Date: clean(body.Date) || nowIso().slice(0, 10), Type: type, AccountRef: clean(body.AccountRef),
+    DisplayName: clean(body.DisplayName), Amount: amount, Reason: clean(body.Reason), Reference: clean(body.Reference), PaymentAccount: clean(body.PaymentAccount) || '1020',
+    Status: status, RequestedBy: existing.RequestedBy || clean(body.RecordedBy), RequestedAt: existing.RequestedAt || nowIso(), UpdatedAt: nowIso() };
+  if (lower(status) === 'posted') {
+    const isRefund = lower(type).includes('refund');
+    const journal = await saveAccountingJournal(env, { JournalNo: `SYS-ADJ-${safeDocumentId(adjustmentNo)}`, Date: payload.Date, Status: 'Posted',
+      Description: `${type}: ${payload.Reason}`, Reference: payload.Reference || adjustmentNo, Source: type, SourceId: adjustmentNo, RecordedBy: clean(body.RecordedBy), Lines: [
+        { AccountCode: '4100', Debit: amount, Credit: 0, Description: payload.Reason },
+        { AccountCode: isRefund ? payload.PaymentAccount : '1100', Debit: 0, Credit: amount, Description: payload.AccountRef }
+      ] }, true);
+    payload.JournalNo = journal.JournalNo; payload.PostedAt = nowIso(); payload.PostedBy = clean(body.RecordedBy);
+  }
+  await upsertDocument(env, 'accountingAdjustments', safeDocumentId(adjustmentNo), payload);
+  await writeAccountingAudit(env, existing.AdjustmentNo ? 'UPDATE' : 'CREATE', 'Concession/Refund', adjustmentNo, body, status);
+  return { ok: true, message: `${type} saved as ${status}.`, adjustment: payload };
+}
+
+function ageBucket(days) {
+  if (days <= 0) return 'Current';
+  if (days <= 30) return '1-30';
+  if (days <= 60) return '31-60';
+  if (days <= 90) return '61-90';
+  return '90+';
+}
+
+function buildAgeing(rows, asOf, kind) {
+  const asOfMs = timestampMs(asOf || nowIso());
+  return rows.map((row) => {
+    const balance = kind === 'receivable' ? asMoneyNumber(row.Balance ?? row.BalanceAmount) : Math.max(0, asMoneyNumber(row.Amount) - asMoneyNumber(row.PaidAmount));
+    const date = clean(row.DueDate || row.Date || row.CreatedAt);
+    const days = date ? Math.max(0, Math.floor((asOfMs - timestampMs(date)) / 86400000)) : 0;
+    return { Reference: clean(row.InvoiceId || row.BillNo || row.__id), Party: clean(row.DisplayName || row.AccountRef || row.VendorName || row.VendorId),
+      Date: date, DueDate: clean(row.DueDate), Amount: asMoneyNumber(row.Debit || row.Amount), PaidAmount: asMoneyNumber(row.Credit || row.PaidAmount), Balance: balance,
+      DaysOutstanding: days, Bucket: ageBucket(days), AcademicSession: clean(row.AcademicSession), Term: clean(row.Term) };
+  }).filter((row) => row.Balance > 0.005);
+}
+
+function buildReceivablesAgeing(invoices, payments, asOf) {
+  const keyFor = (row) => [row.AccountRef, row.FeeCode, row.AcademicSession, row.Term].map((value) => lower(value)).join('|');
+  const available = new Map();
+  payments.map(normalizePayment).forEach((row) => {
+    if (lower(row.Status) && !['paid', 'success', 'successful', 'completed'].includes(lower(row.Status))) return;
+    const key = keyFor(row);
+    available.set(key, (available.get(key) || 0) + asMoneyNumber(row.Amount));
+  });
+  const rows = invoices.map(normalizeInvoice).sort((a, b) => timestampMs(a.Date || a.CreatedAt) - timestampMs(b.Date || b.CreatedAt)).map((row) => {
+    const amount = asMoneyNumber(row.Debit || row.Amount);
+    const storedPaid = asMoneyNumber(row.Credit || row.PaidAmount);
+    const key = keyFor(row);
+    const pool = available.get(key) || 0;
+    const allocated = storedPaid > 0 ? storedPaid : Math.min(amount, pool);
+    if (storedPaid <= 0) available.set(key, Math.max(0, pool - allocated));
+    return { ...row, Amount: amount, PaidAmount: allocated, Balance: Math.max(0, amount - allocated) };
+  });
+  return buildAgeing(rows, asOf, 'receivable');
+}
+
+async function importAccountingBankStatement(env, body) {
+  requireAccountingRole(body, ['Super Admin', 'Accounts Officer']);
+  const bankId = clean(body.BankId || body.bankId);
+  const accountCode = clean(body.AccountCode || body.accountCode) || '1020';
+  const rows = Array.isArray(body.Rows || body.rows) ? (body.Rows || body.rows) : [];
+  if (!bankId || !rows.length) { const err = new Error('Bank account and statement rows are required.'); err.status = 400; throw err; }
+  const journals = await listCollection(env, 'accountingJournals');
+  const cashMovements = [];
+  journals.filter((j) => lower(j.Status) === 'posted').forEach((journal) => accountingLines(journal.Lines).filter((line) => clean(line.AccountCode) === accountCode).forEach((line) => {
+    cashMovements.push({ JournalNo: clean(journal.JournalNo), Date: clean(journal.Date).slice(0, 10), Reference: clean(journal.Reference),
+      Amount: asMoneyNumber(line.Debit) - asMoneyNumber(line.Credit), Description: clean(journal.Description) });
+  }));
+  let imported = 0; let matched = 0;
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index] || {};
+    const date = clean(row.Date || row.date).slice(0, 10);
+    const reference = clean(row.Reference || row.reference || row.TransactionId || row.transactionId);
+    const debit = asMoneyNumber(row.Debit || row.debit || row.Withdrawal || row.withdrawal);
+    const credit = asMoneyNumber(row.Credit || row.credit || row.Deposit || row.deposit);
+    const amount = credit - debit;
+    if (!date || Math.abs(amount) <= 0.005) continue;
+    const id = safeDocumentId(`${bankId}-${date}-${reference || index}-${amount.toFixed(2)}`);
+    const exact = cashMovements.find((move) => Math.abs(move.Amount - amount) <= 0.005 && ((reference && sameText(move.Reference, reference)) || (!reference && move.Date === date)));
+    const payload = { StatementItemId: id, BankId: bankId, AccountCode: accountCode, Date: date, Reference: reference,
+      Description: clean(row.Description || row.description || row.Narration || row.narration), Debit: debit, Credit: credit, Amount: amount,
+      Status: exact ? 'Matched' : 'Unmatched', MatchedJournalNo: exact ? exact.JournalNo : '', ImportedAt: nowIso(), ImportedBy: clean(body.RecordedBy) };
+    await upsertDocument(env, 'accountingBankStatementItems', id, payload);
+    imported += 1; if (exact) matched += 1;
+  }
+  await writeAccountingAudit(env, 'IMPORT', 'Bank Statement', bankId, body, `${imported} rows; ${matched} matched`);
+  return { ok: true, message: `Imported ${imported} statement row(s); ${matched} matched automatically.`, imported, matched };
+}
+
+async function matchAccountingBankStatement(env, body) {
+  requireAccountingRole(body, ['Super Admin', 'Accounts Officer']);
+  const itemId = clean(body.StatementItemId);
+  const journalNo = clean(body.JournalNo);
+  const item = (await listCollection(env, 'accountingBankStatementItems')).find((row) => sameText(row.StatementItemId, itemId) || sameText(row.__id, safeDocumentId(itemId)));
+  const journal = (await listCollection(env, 'accountingJournals')).find((row) => sameText(row.JournalNo, journalNo));
+  if (!item || !journal) { const err = new Error('Statement item or journal was not found.'); err.status = 404; throw err; }
+  const cashMovement = accountingLines(journal.Lines).filter((line) => sameText(line.AccountCode, item.AccountCode))
+    .reduce((sum, line) => sum + asMoneyNumber(line.Debit) - asMoneyNumber(line.Credit), 0);
+  if (Math.abs(cashMovement - asMoneyNumber(item.Amount)) > 0.005) {
+    const err = new Error('The selected journal cash movement does not match the statement amount.'); err.status = 409; throw err;
+  }
+  const updated = { ...item, Status: 'Matched', MatchedJournalNo: journalNo, MatchedAt: nowIso(), MatchedBy: clean(body.RecordedBy) };
+  await upsertDocument(env, 'accountingBankStatementItems', safeDocumentId(itemId), updated);
+  await writeAccountingAudit(env, 'MATCH', 'Bank Statement Item', itemId, body, journalNo);
+  return { ok: true, message: 'Statement item matched.', item: updated };
+}
+
+function accountingFilter(body = {}) {
+  const financialYear = clean(body.FinancialYear || body.financialYear);
+  return {
+    DateFrom: clean(body.DateFrom || body.dateFrom) || (financialYear ? `${financialYear}-01-01` : ''),
+    DateTo: clean(body.DateTo || body.dateTo) || (financialYear ? `${financialYear}-12-31` : ''),
+    FinancialYear: financialYear,
+    AcademicSession: clean(body.AcademicSession || body.academicSession),
+    Term: clean(body.Term || body.term),
+    Department: clean(body.Department || body.department)
+  };
+}
+
+function accountingRowMatches(row, filter, includeBeforeStart = false) {
+  const date = clean(row.Date || row.date || row.CreatedAt).slice(0, 10);
+  if (!includeBeforeStart && filter.DateFrom && date && date < filter.DateFrom) return false;
+  if (filter.DateTo && date && date > filter.DateTo) return false;
+  if (!includeBeforeStart && filter.FinancialYear && date && !date.startsWith(filter.FinancialYear)) return false;
+  if (filter.AcademicSession && !sameText(row.AcademicSession, filter.AcademicSession)) return false;
+  if (filter.Term && !sameText(row.Term, filter.Term)) return false;
+  if (filter.Department && !sameText(row.Department, filter.Department) && !accountingLines(row.Lines).some((line) => sameText(line.Department, filter.Department))) return false;
+  return true;
+}
+
+function aggregateAccountingBalances(chart, journals) {
   const accounts = new Map(chart.map((row) => [clean(row.Code || row.code || row.__id), row]));
   const balances = new Map();
-  const posted = journals.filter((row) => lower(row.Status || row.status) === 'posted');
-  posted.forEach((journal) => accountingLines(journal.Lines || journal.lines).forEach((line) => {
+  journals.filter((row) => lower(row.Status || row.status) === 'posted').forEach((journal) => accountingLines(journal.Lines || journal.lines).forEach((line) => {
     const code = clean(line.AccountCode || line.accountCode);
     const item = balances.get(code) || { AccountCode: code, Debit: 0, Credit: 0, Balance: 0 };
     item.Debit += asMoneyNumber(line.Debit || line.debit);
@@ -3306,10 +3680,17 @@ function buildAccountingReport(chart, journals, expenses, budgets) {
     item.Balance = item.Debit - item.Credit;
     balances.set(code, item);
   }));
-  const trialBalance = Array.from(balances.values()).map((item) => ({
+  return Array.from(balances.values()).map((item) => ({
     ...item, AccountName: clean((accounts.get(item.AccountCode) || {}).Name),
     Type: clean((accounts.get(item.AccountCode) || {}).Type), Group: clean((accounts.get(item.AccountCode) || {}).Group)
   })).sort((a, b) => a.AccountCode.localeCompare(b.AccountCode));
+}
+
+function buildAccountingReport(chart, journals, expenses, budgets, filter = {}) {
+  const periodJournals = journals.filter((row) => accountingRowMatches(row, filter, false));
+  const asOfJournals = journals.filter((row) => accountingRowMatches(row, filter, true));
+  const trialBalance = aggregateAccountingBalances(chart, periodJournals);
+  const asOfTrialBalance = aggregateAccountingBalances(chart, asOfJournals);
   const revenueRows = trialBalance.filter((row) => lower(row.Type) === 'revenue');
   const grossRevenue = revenueRows.filter((row) => clean(row.Group) === 'Operating Revenue').reduce((sum, row) => sum + row.Credit - row.Debit, 0);
   const otherIncome = revenueRows.filter((row) => clean(row.Group) === 'Other Income').reduce((sum, row) => sum + row.Credit - row.Debit, 0);
@@ -3319,33 +3700,47 @@ function buildAccountingReport(chart, journals, expenses, budgets) {
   const expenseRows = trialBalance.filter((row) => lower(row.Type) === 'expense');
   const directCosts = expenseRows.filter((row) => clean(row.Group) === 'Direct Cost').reduce((sum, row) => sum + row.Debit - row.Credit, 0);
   const totalExpenses = expenseRows.reduce((sum, row) => sum + row.Debit - row.Credit, 0);
-  const assets = trialBalance.filter((row) => lower(row.Type) === 'asset').reduce((sum, row) => sum + row.Debit - row.Credit, 0);
-  const liabilities = trialBalance.filter((row) => lower(row.Type) === 'liability').reduce((sum, row) => sum + row.Credit - row.Debit, 0);
-  const equity = trialBalance.filter((row) => lower(row.Type) === 'equity').reduce((sum, row) => sum + row.Credit - row.Debit, 0);
-  const cashPosition = trialBalance.filter((row) => ['1010', '1020', '1030'].includes(row.AccountCode)).reduce((sum, row) => sum + row.Debit - row.Credit, 0);
-  const receivables = trialBalance.filter((row) => row.AccountCode === '1100').reduce((sum, row) => sum + row.Debit - row.Credit, 0);
-  const postedExpense = expenses.filter((row) => lower(row.Status) === 'posted').reduce((sum, row) => sum + asMoneyNumber(row.Amount), 0);
-  const budgetTotal = budgets.reduce((sum, row) => sum + asMoneyNumber(row.Amount), 0);
+  const assets = asOfTrialBalance.filter((row) => lower(row.Type) === 'asset').reduce((sum, row) => sum + row.Debit - row.Credit, 0);
+  const liabilities = asOfTrialBalance.filter((row) => lower(row.Type) === 'liability').reduce((sum, row) => sum + row.Credit - row.Debit, 0);
+  const equity = asOfTrialBalance.filter((row) => lower(row.Type) === 'equity').reduce((sum, row) => sum + row.Credit - row.Debit, 0);
+  const cashPosition = asOfTrialBalance.filter((row) => ['1010', '1020', '1030'].includes(row.AccountCode)).reduce((sum, row) => sum + row.Debit - row.Credit, 0);
+  const receivables = asOfTrialBalance.filter((row) => row.AccountCode === '1100').reduce((sum, row) => sum + row.Debit - row.Credit, 0);
+  const filteredExpenses = expenses.filter((row) => accountingRowMatches(row, filter));
+  const filteredBudgets = budgets.filter((row) => (!filter.FinancialYear || sameText(row.FinancialYear, filter.FinancialYear)) &&
+    (!filter.AcademicSession || sameText(row.AcademicSession, filter.AcademicSession)) && (!filter.Term || sameText(row.Term, filter.Term)) &&
+    (!filter.Department || sameText(row.Department, filter.Department)));
+  const postedExpense = filteredExpenses.filter((row) => ['posted', 'paid'].includes(lower(row.Status))).reduce((sum, row) => sum + asMoneyNumber(row.Amount), 0);
+  const budgetTotal = filteredBudgets.reduce((sum, row) => sum + asMoneyNumber(row.Amount), 0);
   return {
     dashboard: { GrossRevenue: grossRevenue, OtherIncome: otherIncome, Concessions: concessions, NetRevenue: netRevenue, TotalIncome: totalIncome, DirectCosts: directCosts,
       GrossSurplus: netRevenue - directCosts, TotalExpenditure: totalExpenses, NetSurplus: totalIncome - totalExpenses,
       Assets: assets, Liabilities: liabilities, Equity: equity, PostedExpenses: postedExpense, BudgetTotal: budgetTotal,
       CashPosition: cashPosition, Receivables: receivables, BudgetRemaining: budgetTotal - totalExpenses },
-    trialBalance,
+    filter, trialBalance, asOfTrialBalance,
     incomeStatement: { revenue: revenueRows, expenses: expenseRows },
-    balanceSheet: { assets: trialBalance.filter((r) => lower(r.Type) === 'asset'), liabilities: trialBalance.filter((r) => lower(r.Type) === 'liability'), equity: trialBalance.filter((r) => lower(r.Type) === 'equity') }
+    balanceSheet: { assets: asOfTrialBalance.filter((r) => lower(r.Type) === 'asset'), liabilities: asOfTrialBalance.filter((r) => lower(r.Type) === 'liability'), equity: asOfTrialBalance.filter((r) => lower(r.Type) === 'equity') }
   };
 }
 
-async function getAccountingOverview(env) {
+async function getAccountingOverview(env, body = {}) {
   const synchronized = await syncRevenueToAccounting(env);
-  const [chart, journals, expenses, budgets, banks, reconciliations, periods, audit] = await Promise.all([
+  await seedAccountingApprovalLimits(env);
+  const periodsForChecklist = await listCollection(env, 'accountingPeriods');
+  for (const period of periodsForChecklist) await seedAccountingCloseChecklist(env, clean(period.PeriodId || period.__id));
+  const [chart, journals, expenses, budgets, banks, reconciliations, periods, audit, vendors, supplierBills, supplierPayments, assets, adjustments, approvalLimits, closeChecklist, bankStatementItems, invoices, payments] = await Promise.all([
     listCollection(env, 'chartOfAccounts'), listCollection(env, 'accountingJournals'), listCollection(env, 'accountingExpenses'),
     listCollection(env, 'accountingBudgets'), listCollection(env, 'accountingBanks'), listCollection(env, 'accountingReconciliations'),
-    listCollection(env, 'accountingPeriods'), listCollection(env, 'accountingAudit')
+    listCollection(env, 'accountingPeriods'), listCollection(env, 'accountingAudit'), listCollection(env, 'accountingVendors'),
+    listCollection(env, 'accountingSupplierBills'), listCollection(env, 'accountingSupplierPayments'), listCollection(env, 'accountingAssets'),
+    listCollection(env, 'accountingAdjustments'), listCollection(env, 'accountingApprovalLimits'), listCollection(env, 'accountingCloseChecklist'),
+    listCollection(env, 'accountingBankStatementItems'), listCollection(env, 'invoices'), listCollection(env, 'payments')
   ]);
-  return { ok: true, message: 'Finance and accounting records loaded.', synchronized, chart, journals, expenses, budgets, banks, reconciliations, periods, audit,
-    reports: buildAccountingReport(chart, journals, expenses, budgets) };
+  const filter = accountingFilter(body);
+  const reports = buildAccountingReport(chart, journals, expenses, budgets, filter);
+  reports.receivablesAgeing = buildReceivablesAgeing(invoices, payments, filter.DateTo || nowIso().slice(0, 10));
+  reports.payablesAgeing = buildAgeing(supplierBills, filter.DateTo || nowIso().slice(0, 10), 'payable');
+  return { ok: true, message: 'Finance and accounting records loaded.', synchronized, filter, chart, journals, expenses, budgets, banks, reconciliations, periods, audit,
+    vendors, supplierBills, supplierPayments, assets, adjustments, approvalLimits, closeChecklist, bankStatementItems, reports };
 }
 
 async function routeAction(env, action, body = {}) {
@@ -3402,7 +3797,7 @@ async function routeAction(env, action, body = {}) {
     case 'getAccountsOverview':
       return getAccountsOverview(env);
     case 'getAccountingOverview':
-      return getAccountingOverview(env);
+      return getAccountingOverview(env, body);
     case 'syncAccountingRevenue':
       requireAccountingRole(body, ['Super Admin', 'Accounts Officer']);
       return { ok: true, message: 'Revenue subledgers synchronized.', created: await syncRevenueToAccounting(env) };
@@ -3421,6 +3816,28 @@ async function routeAction(env, action, body = {}) {
       return saveAccountingReconciliation(env, body);
     case 'saveAccountingPeriod':
       return saveAccountingPeriod(env, body);
+    case 'saveAccountingOpeningBalance':
+      return saveAccountingOpeningBalance(env, body);
+    case 'saveAccountingVendor':
+      return saveAccountingVendor(env, body);
+    case 'saveAccountingSupplierBill':
+      return saveAccountingSupplierBill(env, body);
+    case 'payAccountingSupplierBill':
+      return payAccountingSupplierBill(env, body);
+    case 'saveAccountingAsset':
+      return saveAccountingAsset(env, body);
+    case 'postAccountingDepreciation':
+      return postAccountingDepreciation(env, body);
+    case 'saveAccountingAdjustment':
+      return saveAccountingAdjustment(env, body);
+    case 'saveAccountingApprovalLimit':
+      return saveAccountingApprovalLimit(env, body);
+    case 'saveAccountingCloseChecklist':
+      return saveAccountingCloseChecklist(env, body);
+    case 'importAccountingBankStatement':
+      return importAccountingBankStatement(env, body);
+    case 'matchAccountingBankStatement':
+      return matchAccountingBankStatement(env, body);
     case 'saveBrevoSettings':
       return saveBrevoSettings(env, body);
     case 'saveSchoolProfile':

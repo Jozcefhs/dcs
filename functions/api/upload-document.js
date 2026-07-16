@@ -1,7 +1,7 @@
 // Cloudflare Pages Function: /api/upload-document
 // Lets parents upload missing admission documents using their verification email/code.
 
-import { listCollection, requireFirestoreEnv } from '../lib/firestore.js';
+import { listCollection, requireFirestoreEnv, upsertDocument } from '../lib/firestore.js';
 
 function clean(value) {
   return String(value || '').trim();
@@ -20,52 +20,92 @@ function pick(row, names, fallback = '') {
   return fallback;
 }
 
-function applicationPayloadForAppsScript(app) {
-  const payload = { ...app };
-  [
-    '__id',
-    '__name',
-    'createdAt',
-    'updatedAt',
-    'parent',
-    'documents',
-    'activities'
-  ].forEach((key) => {
-    delete payload[key];
-  });
-  return payload;
+function safeDocumentId(value) {
+  return clean(value)
+    .replace(/[\/\\?#\[\]]/g, '-')
+    .replace(/\s+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/-+/g, '-')
+    .slice(0, 140);
+}
+
+const DOCUMENT_FIELDS = [
+  { key: 'BirthCertificate', label: 'Birth Certificate' },
+  { key: 'PreviousSchoolReport', label: 'Previous School Report' },
+  { key: 'PassportPhotograph', label: 'Passport Photograph' },
+  { key: 'MedicalReport', label: 'Medical Report' },
+  { key: 'TransferCertificateDoc', label: 'Transfer Certificate' },
+  { key: 'AcceptanceForm', label: 'Acceptance Form' }
+];
+
+function documentDefinition(documentType) {
+  return DOCUMENT_FIELDS.find((item) => item.key === documentType || lower(item.label) === lower(documentType)) || null;
+}
+
+function documentEntry(app, documentType) {
+  const documents = app.documents && typeof app.documents === 'object' ? app.documents : {};
+  return documents[documentType] && typeof documents[documentType] === 'object' ? documents[documentType] : {};
+}
+
+function documentUrl(app, documentType) {
+  const nested = documentEntry(app, documentType);
+  return clean(nested.url || app[`Doc${documentType}Url`] || app[`${documentType}Url`] || app[`${documentType}Link`]);
+}
+
+function documentUploaded(app, documentType) {
+  const nested = documentEntry(app, documentType);
+  const flag = lower(nested.status || app[`Doc${documentType}`] || app[documentType] || app[`${documentType}Submitted`]);
+  return ['yes', 'true', '1', 'uploaded', 'replaced'].includes(flag) || Boolean(documentUrl(app, documentType));
 }
 
 async function findFirestoreApplication(env, email, code) {
-  try {
-    requireFirestoreEnv(env);
-    const rows = await listCollection(env, 'applications');
-    return rows.find((row) => {
-      const rowEmail = lower(pick(row, ['VerificationEmail', 'verificationEmail', 'ParentEmail', 'parentEmail', 'Email', 'email']));
-      const rowCode = clean(pick(row, ['VerificationCode', 'verificationCode'])).toUpperCase();
-      return rowEmail === email && rowCode === code;
-    }) || null;
-  } catch (_err) {
-    return null;
-  }
+  requireFirestoreEnv(env);
+  const rows = await listCollection(env, 'applications');
+  return rows.find((row) => {
+    const parent = row.parent && typeof row.parent === 'object' ? row.parent : {};
+    const rowEmail = lower(pick(row, ['VerificationEmail', 'verificationEmail', 'ParentEmail', 'parentEmail', 'Email', 'email'], parent.email));
+    const rowCode = clean(pick(row, ['VerificationCode', 'verificationCode'])).toUpperCase();
+    return rowEmail === email && rowCode === code;
+  }) || null;
 }
 
-async function syncFirestoreApplicationToAppsScript(env, app, email, code) {
-  if (!app || !env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) return null;
-  const payload = {
-    Secret: env.GOOGLE_APPS_SCRIPT_SECRET,
-    Action: 'submitApplication',
-    VerificationEmail: email,
-    VerificationCode: code,
-    ReceiptNo: pick(app, ['ReceiptNo', 'receiptNo']),
-    Application: applicationPayloadForAppsScript(app)
+async function saveFirestoreDocumentMetadata(env, app, definition, file, url, replaceExisting) {
+  const now = new Date().toISOString();
+  const reference = clean(pick(app, ['ApplicationReference', 'applicationReference', 'ApplicationID', '__id']));
+  if (!reference) throw new Error('The Firestore application has no application reference.');
+  const previousUrl = documentUrl(app, definition.key);
+  const documents = app.documents && typeof app.documents === 'object' ? { ...app.documents } : {};
+  documents[definition.key] = {
+    type: definition.key,
+    label: definition.label,
+    status: replaceExisting && previousUrl ? 'Replaced' : 'Uploaded',
+    fileName: file.fileName,
+    mimeType: file.mimeType,
+    url,
+    previousUrl,
+    uploadedAt: now,
+    uploadedBy: 'Parent',
+    storage: 'Google Drive'
   };
-  const response = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify(payload)
-  });
-  return response.json().catch(() => null);
+  const next = {
+    ...app,
+    documents,
+    [`Doc${definition.key}`]: 'YES',
+    [`Doc${definition.key}Url`]: url,
+    IntelligenceUpdatedBy: 'Parent Upload',
+    IntelligenceUpdatedAt: now,
+    UpdatedAt: now
+  };
+  const completed = DOCUMENT_FIELDS.filter((item) => documentUploaded(next, item.key)).length;
+  next.DocumentsCompletion = `${Math.round((completed / DOCUMENT_FIELDS.length) * 100)}%`;
+  next.MissingDocuments = DOCUMENT_FIELDS.filter((item) => !documentUploaded(next, item.key)).map((item) => item.label).join(', ');
+  const historyLine = [now, definition.label, replaceExisting && previousUrl ? 'Replaced' : 'Uploaded', file.fileName, url,
+    previousUrl ? `Previous: ${previousUrl}` : ''].filter(Boolean).join(' | ');
+  next.DocumentUploadHistory = clean(app.DocumentUploadHistory) ? `${clean(app.DocumentUploadHistory)}\n${historyLine}` : historyLine;
+  delete next.__id;
+  delete next.__name;
+  await upsertDocument(env, 'applications', safeDocumentId(reference), next);
+  return { application: next, previousUrl };
 }
 
 async function uploadViaAppsScript(env, payload) {
@@ -99,40 +139,62 @@ export async function onRequestPost(context) {
     if (!fileName || !fileBase64) {
       return Response.json({ ok: false, message: 'Choose a file to upload.' }, { status: 400 });
     }
-    if (!env.GOOGLE_APPS_SCRIPT_URL) {
+    requireFirestoreEnv(env);
+    const definition = documentDefinition(documentType);
+    if (!definition) {
+      return Response.json({ ok: false, message: `Invalid document type: ${documentType}` }, { status: 400 });
+    }
+    const firestoreApp = await findFirestoreApplication(env, email, code);
+    if (!firestoreApp) {
+      return Response.json({ ok: false, message: 'Application not found in Firestore for that email/code.' }, { status: 404 });
+    }
+    const existingUrl = documentUrl(firestoreApp, definition.key);
+    if ((existingUrl || documentUploaded(firestoreApp, definition.key)) && !replaceExisting) {
       return Response.json({
         ok: false,
-        message: 'Document upload storage is not configured. In Firestore mode, files are not stored inside Firestore; configure Google Apps Script/Google Drive, Firebase Storage, or Cloudflare R2 for document storage.'
+        code: 'DOCUMENT_ALREADY_UPLOADED',
+        message: `${definition.label} has already been uploaded. Choose replace if Admissions Office asked you to send a newer copy.`,
+        existingUrl,
+        documentType: definition.key,
+        documentLabel: definition.label
+      }, { status: 409 });
+    }
+    if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
+      return Response.json({
+        ok: false,
+        message: 'Firestore application lookup succeeded, but Google Drive file storage is not configured.'
       }, { status: 500 });
     }
 
     const payload = {
+      Secret: env.GOOGLE_APPS_SCRIPT_SECRET,
       Action: 'uploadParentDocument',
+      StorageOnly: 'YES',
+      ApplicationReference: pick(firestoreApp, ['ApplicationReference', 'applicationReference', 'ApplicationID', '__id']),
       Email: email,
       VerificationCode: code,
-      DocumentType: documentType,
+      DocumentType: definition.key,
       FileName: fileName,
       MimeType: mimeType,
       FileBase64: fileBase64,
-      ReplaceExisting: replaceExisting ? 'YES' : 'NO'
+      ReplaceExisting: replaceExisting ? 'YES' : 'NO',
+      ExistingUrl: existingUrl
     };
 
-    let data = await uploadViaAppsScript(env, payload);
-    if (!data.ok && String(data.message || '').toLowerCase().includes('application not found')) {
-      const firestoreApp = await findFirestoreApplication(env, email, code);
-      if (firestoreApp) {
-        const syncResult = await syncFirestoreApplicationToAppsScript(env, firestoreApp, email, code);
-        if (syncResult && syncResult.ok) {
-          data = await uploadViaAppsScript(env, payload);
-        } else {
-          data = {
-            ok: false,
-            message: `Application exists in Firestore, but could not be synced to Google Sheet for Drive upload. ${syncResult && syncResult.message ? syncResult.message : 'Check the form sale record in Apps Script/Google Sheet.'}`
-          };
-        }
-      }
+    const data = await uploadViaAppsScript(env, payload);
+    if (!data.ok) {
+      return Response.json(data, { status: 400 });
     }
-    return Response.json(data, { status: data.ok ? 200 : 400 });
+    const saved = await saveFirestoreDocumentMetadata(env, firestoreApp, definition, { fileName, mimeType }, clean(data.documentUrl), replaceExisting);
+    return Response.json({
+      ok: true,
+      code: replaceExisting && saved.previousUrl ? 'DOCUMENT_REPLACED' : 'DOCUMENT_UPLOADED',
+      message: `${definition.label}${replaceExisting && saved.previousUrl ? ' replaced successfully.' : ' uploaded successfully.'}`,
+      documentUrl: clean(data.documentUrl),
+      previousDocumentUrl: saved.previousUrl,
+      applicationReference: pick(firestoreApp, ['ApplicationReference', 'applicationReference', 'ApplicationID', '__id']),
+      backend: 'firestore'
+    });
   } catch (err) {
     return Response.json({ ok: false, message: String(err) }, { status: 500 });
   }
