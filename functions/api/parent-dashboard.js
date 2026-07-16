@@ -264,7 +264,8 @@ function normalizeLedger(row) {
     Status: pick(row, ['Status', 'status']),
     RecordedBy: pick(row, ['RecordedBy', 'recordedBy']),
     Source: pick(row, ['Source', 'source']),
-    Reference: pick(row, ['Reference', 'reference', 'GatewayReference', 'gatewayReference', 'LedgerNo', 'ledgerNo', '__id'])
+    Reference: pick(row, ['Reference', 'reference', 'GatewayReference', 'gatewayReference', 'LedgerNo', 'ledgerNo', '__id']),
+    Metadata: pick(row, ['Metadata', 'metadata'])
   };
 }
 
@@ -376,6 +377,17 @@ function walletBalance(entries) {
   return entries.reduce((balance, row) => balance + asMoneyNumber(row.Credit) - asMoneyNumber(row.Debit), 0);
 }
 
+function parseMetadata(value) {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  try {
+    const parsed = JSON.parse(String(value));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_err) {
+    return {};
+  }
+}
+
 function isWalletLedger(entry) {
   return clean(entry && entry.FeeCode).toUpperCase() === 'WALLET_TOPUP' ||
     lower(entry && entry.FeeCategory) === 'wallet' ||
@@ -384,7 +396,26 @@ function isWalletLedger(entry) {
 
 function isOptionalSubscriptionEntry(entry) {
   const category = lower(entry && entry.FeeCategory);
-  return ['bus service', 'transport', 'club', 'optional', 'others'].includes(category);
+  if (['bus service', 'transport', 'club', 'optional', 'others'].includes(category)) return true;
+  const feeCode = clean(entry && entry.FeeCode).toUpperCase();
+  const feeName = lower(entry && entry.FeeName);
+  const description = lower(entry && entry.Description);
+  const reference = clean(entry && entry.Reference).toUpperCase();
+  const metadata = parseMetadata(entry && entry.Metadata);
+  const nested = metadata.metadata && typeof metadata.metadata === 'object' ? metadata.metadata : {};
+  const metadataCategory = lower(metadata.feeCategory || nested.feeCategory);
+  const metadataCode = clean(metadata.feeCode || nested.feeCode).toUpperCase();
+  if (['bus service', 'transport', 'club', 'optional', 'others'].includes(metadataCategory)) return true;
+  if (/^(BUS|CLUB|TRANSPORT|OPTIONAL)[_-]/.test(feeCode) || /[-_](BUS|CLUB|TRANSPORT|OPTIONAL)[_-]/.test(reference)) return true;
+  if (/^(BUS|CLUB|TRANSPORT|OPTIONAL)[_-]/.test(metadataCode)) return true;
+  return feeName.includes('bus service') ||
+    feeName.includes('bus route') ||
+    feeName.includes('paid club') ||
+    feeName.includes('club subscription') ||
+    description.includes('bus service') ||
+    description.includes('bus route') ||
+    description.includes('paid club') ||
+    description.includes('club subscription');
 }
 
 function feeAccountSummary(entries) {

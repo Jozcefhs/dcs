@@ -580,7 +580,26 @@ function isWalletFee(fee) {
 
 function isOptionalSubscriptionFee(fee) {
   const category = normalizeMatchText(fee && fee.FeeCategory);
-  return ['bus service', 'transport', 'club', 'optional', 'others'].includes(category);
+  if (['bus service', 'transport', 'club', 'optional', 'others'].includes(category)) return true;
+  const feeCode = clean(fee && fee.FeeCode).toUpperCase();
+  const feeName = normalizeMatchText(fee && fee.FeeName);
+  const description = normalizeMatchText(fee && fee.Description);
+  const reference = clean(fee && fee.Reference).toUpperCase();
+  const metadata = parseMetadata(fee && fee.Metadata);
+  const nested = metadata.metadata && typeof metadata.metadata === 'object' ? metadata.metadata : {};
+  const metadataCategory = normalizeMatchText(metadata.feeCategory || nested.feeCategory);
+  const metadataCode = clean(metadata.feeCode || nested.feeCode).toUpperCase();
+  if (['bus service', 'transport', 'club', 'optional', 'others'].includes(metadataCategory)) return true;
+  if (/^(BUS|CLUB|TRANSPORT|OPTIONAL)[_-]/.test(feeCode) || /[-_](BUS|CLUB|TRANSPORT|OPTIONAL)[_-]/.test(reference)) return true;
+  if (/^(BUS|CLUB|TRANSPORT|OPTIONAL)[_-]/.test(metadataCode)) return true;
+  return feeName.includes('bus service') ||
+    feeName.includes('bus route') ||
+    feeName.includes('paid club') ||
+    feeName.includes('club subscription') ||
+    description.includes('bus service') ||
+    description.includes('bus route') ||
+    description.includes('paid club') ||
+    description.includes('club subscription');
 }
 
 function isWalletLedger(row) {
@@ -1092,6 +1111,7 @@ export async function getPayableFees(env, body = {}) {
   const fees = matchedFees.map((fee) => {
     const copy = { ...fee };
     const originalAmount = asMoneyNumber(copy.Amount);
+    const optionalSubscription = isOptionalSubscriptionFee(copy);
     const feeCode = clean(copy.FeeCode);
     const feeName = clean(copy.FeeName || feeCode);
     const codePeriodKey = periodKey(feeCode, copy.AcademicSession, copy.Term);
@@ -1113,22 +1133,22 @@ export async function getPayableFees(env, body = {}) {
       const categoryAmountMatches = feeCategory && feeCategory === rowCategory && Math.abs(asMoneyNumber(row.Credit) - originalAmount) < 0.01;
       return (codeMatches || nameMatches || categoryAmountMatches) ? sum + asMoneyNumber(row.Credit) : sum;
     }, 0);
-    let paid = Math.max(exactCodePaid, feeNamePaid, ledgerMatchedPaid);
-    const acceptanceCreditApplied = (!isWalletFee(fee) && normalizeMatchText(fee.FeeCategory || 'School Fee') === 'school fee' && acceptanceCreditRemaining > 0)
+    let paid = optionalSubscription ? 0 : Math.max(exactCodePaid, feeNamePaid, ledgerMatchedPaid);
+    const acceptanceCreditApplied = (!optionalSubscription && !isWalletFee(fee) && normalizeMatchText(fee.FeeCategory || 'School Fee') === 'school fee' && acceptanceCreditRemaining > 0)
       ? Math.min(originalAmount - Math.min(originalAmount, paid), acceptanceCreditRemaining)
       : 0;
     if (acceptanceCreditApplied > 0) {
       paid += acceptanceCreditApplied;
       acceptanceCreditRemaining -= acceptanceCreditApplied;
     }
-    const schoolFeesTotalCreditApplied = (!isWalletFee(fee) && normalizeMatchText(fee.FeeCategory || 'School Fee') === 'school fee' && schoolFeesTotalCreditRemaining > 0)
+    const schoolFeesTotalCreditApplied = (!optionalSubscription && !isWalletFee(fee) && normalizeMatchText(fee.FeeCategory || 'School Fee') === 'school fee' && schoolFeesTotalCreditRemaining > 0)
       ? Math.min(originalAmount - Math.min(originalAmount, paid), schoolFeesTotalCreditRemaining)
       : 0;
     if (schoolFeesTotalCreditApplied > 0) {
       paid += schoolFeesTotalCreditApplied;
       schoolFeesTotalCreditRemaining -= schoolFeesTotalCreditApplied;
     }
-    const generalFeeCreditApplied = (!isWalletFee(fee) && normalizeMatchText(fee.FeeCategory || 'School Fee') === 'school fee' && generalFeeCreditRemaining > 0)
+    const generalFeeCreditApplied = (!optionalSubscription && !isWalletFee(fee) && normalizeMatchText(fee.FeeCategory || 'School Fee') === 'school fee' && generalFeeCreditRemaining > 0)
       ? Math.min(originalAmount - Math.min(originalAmount, paid), generalFeeCreditRemaining)
       : 0;
     if (generalFeeCreditApplied > 0) {
@@ -1137,7 +1157,7 @@ export async function getPayableFees(env, body = {}) {
     }
     const walletLimit = isWalletFee(fee) ? asMoneyNumber(copy.MaxAmount) : 0;
     const walletTopupRemaining = walletLimit > 0 ? Math.max(0, walletLimit - currentWalletBalance) : originalAmount;
-    const balance = isWalletFee(fee) ? walletTopupRemaining : Math.max(0, originalAmount - paid);
+    const balance = optionalSubscription ? originalAmount : (isWalletFee(fee) ? walletTopupRemaining : Math.max(0, originalAmount - paid));
     copy.OriginalAmount = originalAmount;
     copy.PaidAmount = paid;
     copy.AcceptanceCreditApplied = acceptanceCreditApplied;
