@@ -171,7 +171,7 @@ function isClubFee(fee) {
 }
 
 function isOtherOptionalFee(fee) {
-  return feeCategory(fee) === 'others';
+  return ['optional', 'others'].includes(feeCategory(fee));
 }
 
 function busModeFor(fee) {
@@ -521,12 +521,20 @@ function renderPayableItems(child) {
   const payableError = dashboard.payableErrors?.[child.AccountRef] || '';
   const loading = !loadedPayables.has(child.AccountRef);
   payableItems.innerHTML = records.length ? '' : `<p class="${payableError ? 'status bad' : 'muted'}">${payableError || (loading ? 'Loading payable items...' : 'There are no online payment items due at the moment.')}</p>`;
-  const busSelector = renderSubscriptionSelector(child, 'Bus Service Subscription', busFees, { kind: 'bus' });
-  if (busSelector) payableItems.appendChild(busSelector);
-  const clubSelector = renderSubscriptionSelector(child, 'Paid Club Subscription', clubFees, { kind: 'club' });
-  if (clubSelector) payableItems.appendChild(clubSelector);
-  const otherSelector = renderSubscriptionSelector(child, 'Other Optional Payments', otherFees, { kind: 'others' });
-  if (otherSelector) payableItems.appendChild(otherSelector);
+  if (busFees.length || clubFees.length || otherFees.length) {
+    const optionalBox = document.createElement('div');
+    optionalBox.className = 'activity-item optional-payments';
+    const optionalHeading = document.createElement('strong');
+    optionalHeading.textContent = 'Other Optional Payments';
+    optionalBox.appendChild(optionalHeading);
+    const busSelector = renderSubscriptionSelector(child, 'Bus Service Subscription', busFees, { kind: 'bus' });
+    if (busSelector) optionalBox.appendChild(busSelector);
+    const clubSelector = renderSubscriptionSelector(child, 'Paid Club Subscription', clubFees, { kind: 'club' });
+    if (clubSelector) optionalBox.appendChild(clubSelector);
+    const otherSelector = renderSubscriptionSelector(child, 'Other Optional Item', otherFees, { kind: 'others' });
+    if (otherSelector) optionalBox.appendChild(otherSelector);
+    payableItems.appendChild(optionalBox);
+  }
   directRecords.forEach((fee) => {
     const item = document.createElement('div');
     item.className = 'activity-item payment-action';

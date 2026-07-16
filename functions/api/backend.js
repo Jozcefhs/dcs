@@ -580,7 +580,7 @@ function isWalletFee(fee) {
 
 function isOptionalSubscriptionFee(fee) {
   const category = normalizeMatchText(fee && fee.FeeCategory);
-  return category === 'bus service' || category === 'club' || category === 'others';
+  return ['bus service', 'transport', 'club', 'optional', 'others'].includes(category);
 }
 
 function isWalletLedger(row) {
