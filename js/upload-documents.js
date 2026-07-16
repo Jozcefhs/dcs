@@ -51,6 +51,27 @@ function fileToBase64(file) {
   });
 }
 
+async function passportThumbnail(file, documentType) {
+  if (documentType !== 'PassportPhotograph' || !String(file.type || '').toLowerCase().startsWith('image/')) return null;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const maxWidth = 240;
+    const maxHeight = 280;
+    const scale = Math.min(1, maxWidth / bitmap.width, maxHeight / bitmap.height);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    return {
+      mimeType: 'image/jpeg',
+      base64: canvas.toDataURL('image/jpeg', 0.82).split(',')[1] || ''
+    };
+  } catch (_error) {
+    return null;
+  }
+}
+
 function selectedUploads() {
   const uploads = [];
   document.querySelectorAll('input[type="file"][data-document-type]').forEach((input) => {
@@ -104,6 +125,7 @@ form.addEventListener('submit', async (event) => {
     const pendingRow = addResult(`${upload.label}: uploading...`, 'pending');
     try {
       setProgress(processedCount, uploads.length, `Uploading ${upload.label}...`);
+      const thumbnail = await passportThumbnail(upload.file, upload.documentType);
       const response = await fetch('/api/upload-document', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -114,6 +136,8 @@ form.addEventListener('submit', async (event) => {
           fileName: upload.file.name,
           mimeType: upload.file.type || 'application/octet-stream',
           fileBase64: await fileToBase64(upload.file),
+          thumbnailBase64: thumbnail?.base64 || '',
+          thumbnailMimeType: thumbnail?.mimeType || '',
           replaceExisting
         })
       });

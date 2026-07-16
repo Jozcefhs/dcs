@@ -241,3 +241,16 @@ export async function listCollection(env, collectionPath, query = '') {
   const data = await firestoreRequest(env, `${collectionPath}${suffix}`);
   return (data.documents || []).map(firestoreDocumentToObject);
 }
+
+export async function getDocument(env, collectionPath, documentId) {
+  const cleanCollection = String(collectionPath || '').replace(/^\/+|\/+$/g, '');
+  const encodedId = encodeURIComponent(String(documentId || '').trim());
+  if (!cleanCollection) throw new Error('Collection path is required.');
+  if (!encodedId) throw new Error('Document ID is required.');
+  try {
+    return firestoreDocumentToObject(await firestoreRequest(env, `${cleanCollection}/${encodedId}`));
+  } catch (error) {
+    if (error && error.status === 404) return null;
+    throw error;
+  }
+}

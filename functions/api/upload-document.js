@@ -128,6 +128,8 @@ export async function onRequestPost(context) {
     const fileName = String(body.fileName || '').trim();
     const mimeType = String(body.mimeType || 'application/octet-stream').trim();
     const fileBase64 = String(body.fileBase64 || '').trim();
+    const thumbnailBase64 = String(body.thumbnailBase64 || '').trim();
+    const thumbnailMimeType = String(body.thumbnailMimeType || 'image/jpeg').trim();
     const replaceExisting = Boolean(body.replaceExisting);
 
     if (!email || !code) {
@@ -186,6 +188,15 @@ export async function onRequestPost(context) {
       return Response.json(data, { status: 400 });
     }
     const saved = await saveFirestoreDocumentMetadata(env, firestoreApp, definition, { fileName, mimeType }, clean(data.documentUrl), replaceExisting);
+    if (definition.key === 'PassportPhotograph' && thumbnailBase64 && thumbnailBase64.length <= 400000) {
+      const reference = pick(firestoreApp, ['ApplicationReference', 'applicationReference', 'ApplicationID', '__id']);
+      await upsertDocument(env, 'applicationPassportThumbnails', safeDocumentId(reference), {
+        ApplicationReference: reference,
+        MimeType: thumbnailMimeType.toLowerCase().startsWith('image/') ? thumbnailMimeType : 'image/jpeg',
+        FileBase64: thumbnailBase64,
+        UpdatedAt: new Date().toISOString()
+      });
+    }
     return Response.json({
       ok: true,
       code: replaceExisting && saved.previousUrl ? 'DOCUMENT_REPLACED' : 'DOCUMENT_UPLOADED',

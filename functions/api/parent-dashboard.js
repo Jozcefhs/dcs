@@ -228,6 +228,12 @@ function formatPersonName(row, profile = {}, fallback = '') {
   return name || clean(fallback);
 }
 
+function passportPhotoUrl(row) {
+  const documents = row && row.documents && typeof row.documents === 'object' ? row.documents : {};
+  const passport = documents.PassportPhotograph && typeof documents.PassportPhotograph === 'object' ? documents.PassportPhotograph : {};
+  return clean(passport.url || row.DocPassportPhotographUrl || row.PassportPhotographUrl || row.PassportPhotographLink);
+}
+
 function normalizeStudent(row, profile = {}) {
   const displayName = formatPersonName(row, profile, pick(row, ['DisplayName', 'displayName', 'ApplicantName', 'applicantName']));
   return {
@@ -247,7 +253,9 @@ function normalizeStudent(row, profile = {}) {
     WalletTxnLimit: asMoneyNumber(pick(row, ['WalletTxnLimit', 'walletTxnLimit'])),
     WalletPinThreshold: asMoneyNumber(pick(row, ['WalletPinThreshold', 'walletPinThreshold'])),
     Status: pick(row, ['Status', 'status'], 'Active'),
-    StatusReason: pick(row, ['StatusReason', 'statusReason', 'WithdrawalReason', 'LeaveReason'])
+    StatusReason: pick(row, ['StatusReason', 'statusReason', 'WithdrawalReason', 'LeaveReason']),
+    PassportPhotoAvailable: Boolean(passportPhotoUrl(row)),
+    PassportPhotoApplicationReference: pick(row, ['ApplicationReference', 'applicationReference'])
   };
 }
 
@@ -274,6 +282,8 @@ function normalizeApplicationChild(row, profile = {}) {
     WalletPinThreshold: 0,
     Status: pick(row, ['ResultStatus', 'resultStatus', 'Status', 'status'], 'Application'),
     StatusReason: '',
+    PassportPhotoAvailable: Boolean(passportPhotoUrl(row)),
+    PassportPhotoApplicationReference: applicationRef,
     EnglishScore: pick(row, ['EnglishScore', 'englishScore', 'English', 'english']),
     MathematicsScore: pick(row, ['MathematicsScore', 'mathematicsScore', 'MathScore', 'mathScore', 'Mathematics', 'mathematics']),
     InterviewScore: pick(row, ['InterviewScore', 'interviewScore', 'GeneralPaperScore', 'generalPaperScore']),
@@ -799,6 +809,17 @@ async function getDashboard(env, body) {
       children.push(child);
       accountKeys(child).forEach((key) => childRefs.add(lower(key)));
     });
+  children.forEach((child) => {
+    const linkedApplication = parentApplications.find((app) => {
+      const ref = pick(app, ['ApplicationReference', 'applicationReference', 'ApplicationID', 'applicationId', '__id']);
+      return referencesMatch(ref, child.ApplicationReference) || sameText(ref, child.ApplicationReference) ||
+        referencesMatch(ref, child.AccountRef) || sameText(ref, child.AccountRef);
+    });
+    if (linkedApplication && passportPhotoUrl(linkedApplication)) {
+      child.PassportPhotoAvailable = true;
+      child.PassportPhotoApplicationReference = pick(linkedApplication, ['ApplicationReference', 'applicationReference', 'ApplicationID', 'applicationId', '__id']);
+    }
+  });
   const ledger = (sources.ledger || []).map(normalizeLedger);
   const invoices = (sources.invoices || []).map(normalizeInvoice);
   const payments = (sources.payments || []).map(normalizePayment);

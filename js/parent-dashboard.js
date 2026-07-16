@@ -21,6 +21,54 @@ const refreshDashboardBtn = document.getElementById('refreshDashboardBtn');
 let dashboard = null;
 let selectedAccountRef = '';
 const loadedPayables = new Set();
+const passportPhotoCache = new Map();
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function childInitials(child) {
+  return String(child.DisplayName || 'Student').split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0].toUpperCase()).join('') || 'ST';
+}
+
+async function loadPassportPhoto(child, image) {
+  const reference = child.PassportPhotoApplicationReference || child.ApplicationReference || child.AccountRef;
+  if (!child.PassportPhotoAvailable || !reference || !image) return;
+  if (passportPhotoCache.has(reference)) {
+    image.src = passportPhotoCache.get(reference);
+    image.hidden = false;
+    return;
+  }
+  try {
+    const response = await fetch('/api/passport-photo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: freshBody({ ...authPayload(), applicationReference: reference })
+    });
+    if (!response.ok) return;
+    const objectUrl = URL.createObjectURL(await response.blob());
+    passportPhotoCache.set(reference, objectUrl);
+    image.src = objectUrl;
+    image.hidden = false;
+  } catch (_error) {
+    // The initials placeholder remains visible when an image cannot be previewed.
+  }
+}
+
+function schedulePassportPhoto(child, image) {
+  if (!child.PassportPhotoAvailable || !image) return;
+  const start = () => loadPassportPhoto(child, image);
+  if ('requestIdleCallback' in window) {
+    window.requestIdleCallback(start, { timeout: 1500 });
+  } else {
+    window.setTimeout(start, 100);
+  }
+}
 
 function freshBody(payload) {
   return JSON.stringify({
@@ -61,10 +109,18 @@ function renderChildren() {
     button.type = 'button';
     button.className = 'child-card' + (child.AccountRef === selectedAccountRef ? ' selected' : '');
     button.innerHTML = `
-      <strong>${child.DisplayName || 'Student'}</strong>
-      <span>${child.AccountRef || ''}</span>
-      <span>${[child.ClassName, child.ClassArm, child.StudentType].filter(Boolean).join(' | ')}</span>
-      <span>Status: ${child.Status || 'Active'}</span>
+      <span class="child-card-layout">
+        <span class="child-passport" aria-hidden="true">
+          <span class="child-passport-initials">${escapeHtml(childInitials(child))}</span>
+          <img alt="" loading="lazy" decoding="async" hidden>
+        </span>
+        <span class="child-card-copy">
+          <strong>${escapeHtml(child.DisplayName || 'Student')}</strong>
+          <span>${escapeHtml(child.AccountRef || '')}</span>
+          <span>${escapeHtml([child.ClassName, child.ClassArm, child.StudentType].filter(Boolean).join(' | '))}</span>
+          <span>Status: ${escapeHtml(child.Status || 'Active')}</span>
+        </span>
+      </span>
     `;
     button.addEventListener('click', () => {
       selectedAccountRef = child.AccountRef;
@@ -72,6 +128,7 @@ function renderChildren() {
       loadPayablesForSelected(true);
     });
     childrenList.appendChild(button);
+    schedulePassportPhoto(child, button.querySelector('.child-passport img'));
   });
 }
 
