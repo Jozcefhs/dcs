@@ -2951,6 +2951,40 @@ function requireAccountingRole(body, allowed, message = 'Your role is not allowe
   throw err;
 }
 
+const DEPARTMENT_ACCOUNTING_ROLES = ['Department User', 'Tuck Shop User', 'Clinic User', 'Kitchen User'];
+
+function accountingDepartment(body) {
+  const explicit = clean(body.UserDepartment || body.userDepartment);
+  if (explicit) return explicit;
+  return {
+    'Tuck Shop User': 'Tuck Shop',
+    'Clinic User': 'Clinic',
+    'Kitchen User': 'Kitchen'
+  }[clean(body.UserRole || body.userRole)] || '';
+}
+
+function isDepartmentAccountingUser(body) {
+  return DEPARTMENT_ACCOUNTING_ROLES.includes(clean(body.UserRole || body.userRole));
+}
+
+function enforceDepartmentSubmission(body, existing, requestedStatus) {
+  if (!isDepartmentAccountingUser(body)) return '';
+  const department = accountingDepartment(body);
+  if (!department) {
+    const err = new Error('A department must be assigned to this user before submitting finance records.'); err.status = 403; throw err;
+  }
+  if (!['draft', 'submitted'].includes(lower(requestedStatus))) {
+    const err = new Error('Department users can save drafts and submit records; Accounts or Management must approve and post them.'); err.status = 403; throw err;
+  }
+  if (existing && existing.Department && !sameText(existing.Department, department)) {
+    const err = new Error('You cannot change another department\'s finance record.'); err.status = 403; throw err;
+  }
+  if (existing && !['', 'draft'].includes(lower(existing.Status))) {
+    const err = new Error('A submitted department record can only be changed by Accounts or Management.'); err.status = 409; throw err;
+  }
+  return department;
+}
+
 function accountingLines(value) {
   if (Array.isArray(value)) return value;
   if (typeof value === 'string' && value.trim()) {
@@ -3179,7 +3213,7 @@ async function saveChartAccount(env, body) {
 }
 
 async function saveAccountingExpense(env, body) {
-  requireAccountingRole(body, ['Super Admin', 'Accounts Officer', 'Management']);
+  requireAccountingRole(body, ['Super Admin', 'Accounts Officer', 'Management', ...DEPARTMENT_ACCOUNTING_ROLES]);
   const expenseNo = clean(body.ExpenseNo || body.expenseNo) || ledgerDocumentId('EXP');
   const existing = (await listCollection(env, 'accountingExpenses')).find((row) => sameText(row.ExpenseNo, expenseNo) || sameText(row.__id, safeDocumentId(expenseNo))) || {};
   if (lower(existing.Status) === 'posted') {
@@ -3190,6 +3224,7 @@ async function saveAccountingExpense(env, body) {
     const err = new Error('Expense description and amount are required.'); err.status = 400; throw err;
   }
   const requestedStatus = clean(body.Status || body.status || 'Draft');
+  const forcedDepartment = enforceDepartmentSubmission(body, existing, requestedStatus);
   if (['approved', 'posted', 'rejected'].includes(lower(requestedStatus))) {
     await requireAccountingApprovalLimit(env, body, 'Expense', amount);
   }
@@ -3198,7 +3233,7 @@ async function saveAccountingExpense(env, body) {
     Vendor: clean(body.Vendor || body.vendor), Description: clean(body.Description || body.description), Amount: amount,
     ExpenseAccount: clean(body.ExpenseAccount || body.expenseAccount) || '6090',
     PaymentAccount: clean(body.PaymentAccount || body.paymentAccount) || '1020',
-    Department: clean(body.Department || body.department), CostCentre: clean(body.CostCentre || body.costCentre),
+    Department: forcedDepartment || clean(body.Department || body.department), CostCentre: clean(body.CostCentre || body.costCentre),
     BudgetCode: clean(body.BudgetCode || body.budgetCode), PaymentMethod: clean(body.PaymentMethod || body.paymentMethod),
     Reference: clean(body.Reference || body.reference), AttachmentUrl: clean(body.AttachmentUrl || body.attachmentUrl),
     Notes: clean(body.Notes || body.notes), Status: requestedStatus,
@@ -3411,13 +3446,14 @@ async function saveAccountingVendor(env, body) {
 }
 
 async function saveAccountingSupplierBill(env, body) {
-  requireAccountingRole(body, ['Super Admin', 'Accounts Officer', 'Management']);
+  requireAccountingRole(body, ['Super Admin', 'Accounts Officer', 'Management', ...DEPARTMENT_ACCOUNTING_ROLES]);
   const billNo = clean(body.BillNo || body.billNo) || ledgerDocumentId('BILL');
   const billRows = await listCollection(env, 'accountingSupplierBills');
   const existing = billRows.find((row) => sameText(row.BillNo, billNo) || sameText(row.__id, safeDocumentId(billNo))) || {};
   if (['posted', 'part paid', 'paid'].includes(lower(existing.Status))) { const err = new Error('Posted supplier bills are immutable.'); err.status = 409; throw err; }
   const amount = asMoneyNumber(body.Amount || body.amount);
   const status = clean(body.Status || body.status || 'Draft');
+  const forcedDepartment = enforceDepartmentSubmission(body, existing, status);
   if (amount <= 0 || !clean(body.Description)) { const err = new Error('Bill description and amount are required.'); err.status = 400; throw err; }
   const invoiceReference = clean(body.InvoiceReference || body.Reference);
   if (invoiceReference && billRows.some((row) => !sameText(row.BillNo, billNo) && sameText(row.VendorId, body.VendorId) && sameText(row.InvoiceReference, invoiceReference))) {
@@ -3427,7 +3463,7 @@ async function saveAccountingSupplierBill(env, body) {
   const payload = { ...existing, BillNo: billNo, VendorId: clean(body.VendorId), VendorName: clean(body.VendorName || body.Vendor),
     InvoiceReference: invoiceReference, Date: clean(body.Date) || nowIso().slice(0, 10),
     DueDate: clean(body.DueDate), Description: clean(body.Description), Amount: amount, PaidAmount: asMoneyNumber(existing.PaidAmount), BalanceAmount: amount - asMoneyNumber(existing.PaidAmount),
-    AccountCode: clean(body.AccountCode) || '6090', Department: clean(body.Department), CostCentre: clean(body.CostCentre),
+    AccountCode: clean(body.AccountCode) || '6090', Department: forcedDepartment || clean(body.Department), CostCentre: clean(body.CostCentre),
     AcademicSession: clean(body.AcademicSession), Term: clean(body.Term), AttachmentUrl: clean(body.AttachmentUrl), Notes: clean(body.Notes), Status: status,
     CreatedAt: existing.CreatedAt || nowIso(), CreatedBy: existing.CreatedBy || clean(body.RecordedBy), UpdatedAt: nowIso(),
     ApprovedAt: ['approved', 'posted'].includes(lower(status)) ? nowIso() : '', ApprovedBy: ['approved', 'posted'].includes(lower(status)) ? clean(body.RecordedBy) : '' };
@@ -3723,6 +3759,23 @@ function buildAccountingReport(chart, journals, expenses, budgets, filter = {}) 
 }
 
 async function getAccountingOverview(env, body = {}) {
+  if (isDepartmentAccountingUser(body)) {
+    const department = accountingDepartment(body);
+    if (!department) { const err = new Error('A department must be assigned to this user.'); err.status = 403; throw err; }
+    await seedAccountingChart(env);
+    const [chart, expenses, budgets, vendors, supplierBills] = await Promise.all([
+      listCollection(env, 'chartOfAccounts'), listCollection(env, 'accountingExpenses'), listCollection(env, 'accountingBudgets'),
+      listCollection(env, 'accountingVendors'), listCollection(env, 'accountingSupplierBills')
+    ]);
+    return {
+      ok: true, message: `${department} requisitions and bills loaded.`, synchronized: 0,
+      chart, expenses: expenses.filter((row) => sameText(row.Department, department)),
+      budgets: budgets.filter((row) => sameText(row.Department, department)), vendors,
+      supplierBills: supplierBills.filter((row) => sameText(row.Department, department)),
+      journals: [], banks: [], reconciliations: [], periods: [], audit: [], supplierPayments: [], assets: [], adjustments: [],
+      approvalLimits: [], closeChecklist: [], bankStatementItems: [], reports: {}
+    };
+  }
   const synchronized = await syncRevenueToAccounting(env);
   await seedAccountingApprovalLimits(env);
   const periodsForChecklist = await listCollection(env, 'accountingPeriods');
