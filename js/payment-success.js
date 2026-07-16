@@ -25,7 +25,7 @@ async function verifyPayment() {
   const reference = params.get('reference') || params.get('trxref');
   const paymentType = params.get('type') || '';
   if (!reference) {
-    setStatus('Payment reference is missing. Please contact the Admissions Office.', 'bad');
+    setStatus('Payment reference is missing. Please contact the Accounts Office.', 'bad');
     return;
   }
 
@@ -74,7 +74,7 @@ async function verifyPayment() {
     note.className = 'muted';
     note.textContent = isFormPurchase
       ? 'Use this email address and verification code to register. A copy has also been sent to your email.'
-      : 'Your payment has been recorded with the Admissions Office.';
+      : 'Your payment has been recorded with the Accounts Office.';
     details.appendChild(note);
     if (isFormPurchase) {
       const link = document.createElement('p');

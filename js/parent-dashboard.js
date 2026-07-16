@@ -724,7 +724,7 @@ async function loadDashboard() {
   selectedAccountRef = data.children?.[0]?.AccountRef || '';
   dashboardContent.hidden = false;
   renderDashboard();
-  loadPayablesForSelected();
+  await loadPayablesForSelected(true);
   setStatus('Dashboard loaded.', 'ok');
 }
 

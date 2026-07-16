@@ -35,11 +35,37 @@ function pick(row, keys, fallback = '') {
   return fallback;
 }
 
+function parseFlexibleDate(value) {
+  const text = clean(value);
+  if (!text) return null;
+  const iso = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (iso) {
+    const year = Number(iso[1]);
+    let month = Number(iso[2]);
+    let day = Number(iso[3]);
+    if (month > 12 && day <= 12) {
+      [month, day] = [day, month];
+    }
+    const date = new Date(Date.UTC(year, month - 1, day));
+    if (date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day) return date;
+  }
+  const slash = text.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/);
+  if (slash) {
+    const day = Number(slash[1]);
+    const month = Number(slash[2]);
+    const year = Number(slash[3]);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    if (date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day) return date;
+  }
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function toDisplayDate(value) {
   const text = clean(value);
   if (!text) return '';
-  const date = new Date(text);
-  return Number.isNaN(date.getTime()) ? text : date.toISOString().slice(0, 10);
+  const date = parseFlexibleDate(text);
+  return date ? date.toISOString().slice(0, 10) : text;
 }
 
 function timestampMs(value) {
@@ -689,8 +715,10 @@ async function getAppsScriptAccountsOverview(env) {
 function dueStatus(dueDate) {
   const text = clean(dueDate);
   if (!text) return '';
-  const due = new Date(`${text}T23:59:59`);
-  if (Number.isNaN(due.getTime())) return '';
+  const parsed = parseFlexibleDate(text);
+  if (!parsed) return 'Due date set';
+  const due = new Date(parsed);
+  due.setUTCHours(23, 59, 59, 999);
   const today = new Date();
   const ms = due.getTime() - today.getTime();
   const days = Math.ceil(ms / 86400000);
