@@ -5,6 +5,7 @@ async function loadSiteProfile() {
     PortalHeadline: 'Admissions and parent services in one place',
     PortalSubheading: 'Buy forms, complete applications, upload documents, pay fees, and monitor student activity from a secure school portal.',
     PortalNotice: '',
+    NameFormat: 'Surname, first name, middle name',
     ResultDisplayMode: 'subjects',
     ShowResultsOnline: 'NO'
   };

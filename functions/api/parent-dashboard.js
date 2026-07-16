@@ -208,8 +208,28 @@ async function loadParentSources(env, scope = 'full') {
   };
 }
 
-function normalizeStudent(row) {
-  const displayName = pick(row, ['DisplayName', 'displayName', 'ApplicantName', 'applicantName']);
+function nameFormatOrder(value) {
+  const parts = clean(value).toLowerCase().split(',').map((part) => part.trim()).filter(Boolean);
+  return parts.length ? parts : ['surname', 'first name', 'middle name'];
+}
+
+function formatPersonName(row, profile = {}, fallback = '') {
+  const values = {
+    'first name': pick(row, ['FirstName', 'firstName', 'GivenName', 'givenName']),
+    'middle name': pick(row, ['MiddleName', 'middleName']),
+    surname: pick(row, ['Surname', 'surname', 'LastName', 'lastName', 'FamilyName', 'familyName'])
+  };
+  const name = nameFormatOrder(profile.NameFormat || profile.nameFormat)
+    .map((part) => clean(values[part]))
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return name || clean(fallback);
+}
+
+function normalizeStudent(row, profile = {}) {
+  const displayName = formatPersonName(row, profile, pick(row, ['DisplayName', 'displayName', 'ApplicantName', 'applicantName']));
   return {
     ...row,
     AccountRef: pick(row, ['AccountRef', 'AdmissionNo', 'admissionNo', '__id']),
@@ -231,12 +251,12 @@ function normalizeStudent(row) {
   };
 }
 
-function normalizeApplicationChild(row) {
-  const displayName = pick(row, ['ApplicantName', 'applicantName', 'DisplayName', 'displayName', 'Name', 'name']) ||
-    [pick(row, ['Surname', 'surname']), pick(row, ['FirstName', 'firstName']), pick(row, ['MiddleName', 'middleName'])]
-      .map(clean)
-      .filter(Boolean)
-      .join(' ');
+function normalizeApplicationChild(row, profile = {}) {
+  const displayName = formatPersonName(
+    row,
+    profile,
+    pick(row, ['ApplicantName', 'applicantName', 'DisplayName', 'displayName', 'Name', 'name'])
+  );
   const applicationRef = pick(row, ['ApplicationReference', 'applicationReference', 'ApplicationID', 'applicationId', '__id']);
   return {
     ...row,
@@ -760,7 +780,7 @@ async function getDashboard(env, body) {
   const sources = await loadParentSources(env, 'full');
   const schoolProfile = await getSchoolProfile(env);
   const { applications, matchingApplications } = await assertParentAccess(sources, email, code);
-  const allStudents = (sources.students || []).map(normalizeStudent);
+  const allStudents = (sources.students || []).map((row) => normalizeStudent(row, schoolProfile));
   const children = allStudents.filter((student) => parentOwnsStudent(student, email, applications, matchingApplications));
   const childRefs = new Set(children.flatMap((child) => accountKeys(child).map((key) => lower(key))));
   const parentApplications = applications.filter((app) => {
@@ -773,7 +793,7 @@ async function getDashboard(env, body) {
     return emailMatch || codeMatch;
   });
   parentApplications
-    .map(normalizeApplicationChild)
+    .map((row) => normalizeApplicationChild(row, schoolProfile))
     .filter((child) => child.AccountRef && !childRefs.has(lower(child.AccountRef)))
     .forEach((child) => {
       children.push(child);
@@ -844,7 +864,7 @@ async function getChildActivity(env, body) {
   const sources = await loadParentSources(env, 'full');
   const schoolProfile = await getSchoolProfile(env);
   const { applications, matchingApplications } = await assertParentAccess(sources, email, code);
-  const allStudents = (sources.students || []).map(normalizeStudent);
+  const allStudents = (sources.students || []).map((row) => normalizeStudent(row, schoolProfile));
   const children = allStudents.filter((student) => parentOwnsStudent(student, email, applications, matchingApplications));
   const childRefs = new Set(children.flatMap((child) => accountKeys(child).map((key) => lower(key))));
   applications
@@ -857,7 +877,7 @@ async function getChildActivity(env, body) {
       const codeMatch = clean(pick(app, ['VerificationCode', 'verificationCode'])).toUpperCase() === code;
       return emailMatch || codeMatch;
     })
-    .map(normalizeApplicationChild)
+    .map((row) => normalizeApplicationChild(row, schoolProfile))
     .filter((child) => child.AccountRef && !childRefs.has(lower(child.AccountRef)))
     .forEach((child) => {
       children.push(child);

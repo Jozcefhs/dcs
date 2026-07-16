@@ -1,6 +1,82 @@
 // Cloudflare Pages Function: /api/upload-document
 // Lets parents upload missing admission documents using their verification email/code.
 
+import { listCollection, requireFirestoreEnv } from '../lib/firestore.js';
+
+function clean(value) {
+  return String(value || '').trim();
+}
+
+function lower(value) {
+  return clean(value).toLowerCase();
+}
+
+function pick(row, names, fallback = '') {
+  for (const name of names) {
+    if (row && row[name] !== undefined && row[name] !== null && String(row[name]).trim() !== '') {
+      return row[name];
+    }
+  }
+  return fallback;
+}
+
+function applicationPayloadForAppsScript(app) {
+  const payload = { ...app };
+  [
+    '__id',
+    '__name',
+    'createdAt',
+    'updatedAt',
+    'parent',
+    'documents',
+    'activities'
+  ].forEach((key) => {
+    delete payload[key];
+  });
+  return payload;
+}
+
+async function findFirestoreApplication(env, email, code) {
+  try {
+    requireFirestoreEnv(env);
+    const rows = await listCollection(env, 'applications');
+    return rows.find((row) => {
+      const rowEmail = lower(pick(row, ['VerificationEmail', 'verificationEmail', 'ParentEmail', 'parentEmail', 'Email', 'email']));
+      const rowCode = clean(pick(row, ['VerificationCode', 'verificationCode'])).toUpperCase();
+      return rowEmail === email && rowCode === code;
+    }) || null;
+  } catch (_err) {
+    return null;
+  }
+}
+
+async function syncFirestoreApplicationToAppsScript(env, app, email, code) {
+  if (!app || !env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) return null;
+  const payload = {
+    Secret: env.GOOGLE_APPS_SCRIPT_SECRET,
+    Action: 'submitApplication',
+    VerificationEmail: email,
+    VerificationCode: code,
+    ReceiptNo: pick(app, ['ReceiptNo', 'receiptNo']),
+    Application: applicationPayloadForAppsScript(app)
+  };
+  const response = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(payload)
+  });
+  return response.json().catch(() => null);
+}
+
+async function uploadViaAppsScript(env, payload) {
+  const res = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(payload)
+  });
+  return res.json();
+}
+
 export async function onRequestPost(context) {
   try {
     const { request, env } = context;
@@ -41,13 +117,21 @@ export async function onRequestPost(context) {
       ReplaceExisting: replaceExisting ? 'YES' : 'NO'
     };
 
-    const res = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(payload)
-    });
-
-    const data = await res.json();
+    let data = await uploadViaAppsScript(env, payload);
+    if (!data.ok && String(data.message || '').toLowerCase().includes('application not found')) {
+      const firestoreApp = await findFirestoreApplication(env, email, code);
+      if (firestoreApp) {
+        const syncResult = await syncFirestoreApplicationToAppsScript(env, firestoreApp, email, code);
+        if (syncResult && syncResult.ok) {
+          data = await uploadViaAppsScript(env, payload);
+        } else {
+          data = {
+            ok: false,
+            message: `Application exists in Firestore, but could not be synced to Google Sheet for Drive upload. ${syncResult && syncResult.message ? syncResult.message : 'Check the form sale record in Apps Script/Google Sheet.'}`
+          };
+        }
+      }
+    }
     return Response.json(data, { status: data.ok ? 200 : 400 });
   } catch (err) {
     return Response.json({ ok: false, message: String(err) }, { status: 500 });

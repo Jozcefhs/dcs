@@ -27,6 +27,36 @@ function applicantName(application) {
     .trim();
 }
 
+function nameFormatOrder(value) {
+  const parts = clean(value).toLowerCase().split(',').map((part) => part.trim()).filter(Boolean);
+  return parts.length ? parts : ['surname', 'first name', 'middle name'];
+}
+
+function formattedApplicantName(application, profile = {}) {
+  const values = {
+    'first name': clean(application.FirstName || application.firstName),
+    'middle name': clean(application.MiddleName || application.middleName),
+    surname: clean(application.Surname || application.surname || application.LastName || application.lastName)
+  };
+  const name = nameFormatOrder(profile.NameFormat || profile.nameFormat)
+    .map((key) => values[key])
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return name || applicantName(application);
+}
+
+async function getSchoolProfile(env) {
+  try {
+    requireFirestoreEnv(env);
+    const rows = await listCollection(env, 'settings');
+    return rows.find((row) => row.__id === 'schoolProfile') || {};
+  } catch (_err) {
+    return {};
+  }
+}
+
 function duplicateKey(application) {
   const first = lower(application.FirstName || application.firstName);
   const surname = lower(application.Surname || application.surname || application.LastName || application.lastName);
@@ -56,6 +86,7 @@ async function submitToFirestore(env, email, code, receiptNo, application) {
   }
 
   const applications = await listCollection(env, 'applications');
+  const profile = await getSchoolProfile(env);
   const reference = nextApplicationReference(applications, await getSchoolCode(env));
   const now = new Date().toISOString();
   const parentEmail = lower(application.ParentEmail || application.parentEmail || email);
@@ -69,12 +100,13 @@ async function submitToFirestore(env, email, code, receiptNo, application) {
       .map((row) => clean(row.ApplicationReference || row.ApplicationID || row.__id))
       .filter(Boolean)
     : [];
+  const displayName = formattedApplicantName(application, profile) || clean(sale.ApplicantName);
   const app = {
     ...application,
     ApplicationReference: reference,
     ApplicationID: reference,
-    ApplicantName: applicantName(application) || clean(sale.ApplicantName),
-    Name: applicantName(application) || clean(sale.ApplicantName),
+    ApplicantName: displayName,
+    Name: displayName,
     VerificationEmail: email,
     VerificationCode: code,
     Email: email,

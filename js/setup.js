@@ -36,6 +36,7 @@ function profileFromForm() {
     AdmissionSignatoryName: data.get('AdmissionSignatoryName'),
     AdmissionSignatoryTitle: data.get('AdmissionSignatoryTitle'),
     EmailGreetingTemplate: data.get('EmailGreetingTemplate'),
+    NameFormat: data.get('NameFormat'),
     PortalHeadline: data.get('PortalHeadline'),
     PortalSubheading: data.get('PortalSubheading'),
     PortalNotice: data.get('PortalNotice'),
@@ -71,6 +72,7 @@ async function loadProfile(password = '') {
     setField('admissionSignatoryName', profile.AdmissionSignatoryName);
     setField('admissionSignatoryTitle', profile.AdmissionSignatoryTitle);
     setField('emailGreetingTemplate', profile.EmailGreetingTemplate || 'Dear Parent/Guardian,');
+    setField('nameFormat', profile.NameFormat || 'Surname, first name, middle name');
     setField('portalHeadline', profile.PortalHeadline);
     setField('portalSubheading', profile.PortalSubheading);
     setField('portalNotice', profile.PortalNotice);

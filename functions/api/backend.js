@@ -70,6 +70,27 @@ function pick(row, keys, fallback = '') {
   return fallback;
 }
 
+function nameFormatOrder(value) {
+  const text = clean(value).toLowerCase();
+  const parts = text.split(',').map((part) => part.trim()).filter(Boolean);
+  return parts.length ? parts : ['surname', 'first name', 'middle name'];
+}
+
+function formatPersonName(row, profile = {}, fallback = '') {
+  const values = {
+    'first name': pick(row, ['FirstName', 'firstName', 'GivenName']),
+    'middle name': pick(row, ['MiddleName', 'middleName']),
+    surname: pick(row, ['Surname', 'surname', 'LastName', 'lastName', 'FamilyName'])
+  };
+  const name = nameFormatOrder(profile.NameFormat || profile.nameFormat)
+    .map((key) => clean(values[key]))
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return name || clean(fallback);
+}
+
 function safeDocumentId(value) {
   return clean(value)
     .replace(/[\/\\?#\[\]]/g, '-')
@@ -173,9 +194,9 @@ async function saveStudent(env, student) {
   return normalizeStudent(student);
 }
 
-function normalizeApplication(row) {
+function normalizeApplication(row, profile = {}) {
   const parent = row.parent && typeof row.parent === 'object' ? row.parent : {};
-  const applicantName = pick(row, ['applicantName', 'ApplicantName', 'displayName', 'DisplayName']);
+  const applicantName = formatPersonName(row, profile, pick(row, ['applicantName', 'ApplicantName', 'displayName', 'DisplayName']));
   return {
     ...row,
     ApplicationReference: pick(row, ['applicationReference', 'ApplicationReference', '__id']),
@@ -214,8 +235,8 @@ function normalizeApplication(row) {
   };
 }
 
-function normalizeStudent(row) {
-  const displayName = pick(row, ['displayName', 'DisplayName', 'applicantName', 'ApplicantName']);
+function normalizeStudent(row, profile = {}) {
+  const displayName = formatPersonName(row, profile, pick(row, ['displayName', 'DisplayName', 'applicantName', 'ApplicantName']));
   return {
     ...row,
     AdmissionNo: pick(row, ['admissionNo', 'AdmissionNo', '__id']),
@@ -1228,15 +1249,17 @@ export async function getPayableFees(env, body = {}) {
 }
 
 export async function getAccountsOverview(env) {
-  const [accounts, payments, invoices, feeItems, storedLedger, applications, students] = await Promise.all([
+  const [accounts, payments, invoices, feeItems, storedLedger, applications, students, settings] = await Promise.all([
     listCollection(env, 'accounts'),
     listCollection(env, 'payments'),
     listCollection(env, 'invoices'),
     listCollection(env, 'feeItems'),
     listCollection(env, 'ledger'),
     listCollection(env, 'applications'),
-    listCollection(env, 'students')
+    listCollection(env, 'students'),
+    listCollection(env, 'settings')
   ]);
+  const schoolProfile = settings.find((row) => row.__id === 'schoolProfile') || settings.find((row) => clean(row.SchoolName)) || {};
   const normalizedPayments = payments.map(normalizePayment);
   const normalizedInvoices = invoices.map(normalizeInvoice);
   const normalizedStoredLedger = storedLedger.map(normalizeLedger);
@@ -1283,7 +1306,7 @@ export async function getAccountsOverview(env) {
     registerAccountAliases(key, accountRefsFrom(accountMap.get(key)));
   };
   const applicationCreatedMap = new Map();
-  applications.map(normalizeApplication).forEach((app) => {
+  applications.map((row) => normalizeApplication(row, schoolProfile)).forEach((app) => {
     const refs = accountRefsFrom(app);
     const createdAt = timestampMs(app.SubmittedAt || app.CreatedAt || app.UpdatedAt);
     refs.forEach((ref) => {
@@ -1292,7 +1315,7 @@ export async function getAccountsOverview(env) {
     });
   });
   accounts.map(normalizeAccount).forEach(putAccount);
-  students.map(normalizeStudent).forEach((student) => putAccount({
+  students.map((row) => normalizeStudent(row, schoolProfile)).forEach((student) => putAccount({
     AccountRef: student.AdmissionNo || student.ApplicationReference,
     ApplicationReference: student.ApplicationReference,
     AdmissionNo: student.AdmissionNo,
@@ -1305,7 +1328,7 @@ export async function getAccountsOverview(env) {
     Status: student.Status || 'Active',
     Enrolled: 'YES'
   }));
-  applications.map(normalizeApplication).forEach((app) => putAccount({
+  applications.map((row) => normalizeApplication(row, schoolProfile)).forEach((app) => putAccount({
     AccountRef: app.AdmissionNo || app.AdmissionNumber || app.ApplicationReference || app.ApplicationID,
     ApplicationReference: app.ApplicationReference || app.ApplicationID,
     AdmissionNo: app.AdmissionNo || app.AdmissionNumber,
@@ -1491,6 +1514,7 @@ async function saveSchoolProfile(env, body) {
     AdmissionSignatoryName: clean(body.AdmissionSignatoryName || body.admissionSignatoryName),
     AdmissionSignatoryTitle: clean(body.AdmissionSignatoryTitle || body.admissionSignatoryTitle),
     EmailGreetingTemplate: clean(body.EmailGreetingTemplate || body.emailGreetingTemplate) || 'Dear Parent/Guardian,',
+    NameFormat: clean(body.NameFormat || body.nameFormat) || 'Surname, first name, middle name',
     PortalHeadline: clean(body.PortalHeadline || body.portalHeadline) || 'Admissions and parent services in one place',
     PortalSubheading: clean(body.PortalSubheading || body.portalSubheading) || 'Buy forms, complete applications, upload documents, pay fees, and monitor student activity from a secure school portal.',
     PortalNotice: clean(body.PortalNotice || body.portalNotice),
@@ -1523,6 +1547,7 @@ async function getSchoolProfile(env) {
       AdmissionSignatoryName: '',
       AdmissionSignatoryTitle: '',
       EmailGreetingTemplate: 'Dear Parent/Guardian,',
+      NameFormat: 'Surname, first name, middle name',
       PortalHeadline: 'Admissions and parent services in one place',
       PortalSubheading: 'Buy forms, complete applications, upload documents, pay fees, and monitor student activity from a secure school portal.',
       PortalNotice: '',

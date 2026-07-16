@@ -56,6 +56,18 @@
               <input id="schoolSignatoryTitle" name="SchoolSignatoryTitle" placeholder="Example: Principal">
             </div>
             <div class="full">
+              <label for="nameFormat">Name Format</label>
+              <select id="nameFormat" name="NameFormat">
+                <option value="First name, middle name, surname">First name, middle name, surname</option>
+                <option value="First name, surname, middle name">First name, surname, middle name</option>
+                <option value="Surname, first name, middle name">Surname, first name, middle name</option>
+                <option value="Surname, middle name, first name">Surname, middle name, first name</option>
+                <option value="Middle name, first name, surname">Middle name, first name, surname</option>
+                <option value="Middle name, surname, first name">Middle name, surname, first name</option>
+              </select>
+              <p class="muted">This controls how applicant and student names display when first name, middle name, and surname are available.</p>
+            </div>
+            <div class="full">
               <p class="muted">Document-specific signatories are optional. Blank fields use the default signatory above.</p>
             </div>
             <div>
