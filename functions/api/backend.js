@@ -2901,6 +2901,453 @@ async function updateStudentStatus(env, body) {
   return { ok: true, message: 'Student status updated.', student: saved };
 }
 
+const DEFAULT_CHART_OF_ACCOUNTS = [
+  ['1010', 'Cash on Hand', 'Asset', 'Cash and Bank', 'Debit'],
+  ['1020', 'Main Bank Account', 'Asset', 'Cash and Bank', 'Debit'],
+  ['1030', 'Online Payment Clearing', 'Asset', 'Cash and Bank', 'Debit'],
+  ['1100', 'Student Accounts Receivable', 'Asset', 'Receivables', 'Debit'],
+  ['1200', 'Inventory', 'Asset', 'Current Assets', 'Debit'],
+  ['1500', 'Property and Equipment', 'Asset', 'Fixed Assets', 'Debit'],
+  ['1600', 'Accumulated Depreciation', 'Asset', 'Fixed Assets', 'Credit'],
+  ['2000', 'Accounts Payable', 'Liability', 'Payables', 'Credit'],
+  ['2100', 'Taxes and Statutory Deductions', 'Liability', 'Statutory', 'Credit'],
+  ['2200', 'Student Wallet Liability', 'Liability', 'Student Wallets', 'Credit'],
+  ['3000', 'Accumulated School Fund', 'Equity', 'School Fund', 'Credit'],
+  ['4000', 'Tuition and School Fee Revenue', 'Revenue', 'Operating Revenue', 'Credit'],
+  ['4010', 'Admission Form Revenue', 'Revenue', 'Operating Revenue', 'Credit'],
+  ['4020', 'Boarding Revenue', 'Revenue', 'Operating Revenue', 'Credit'],
+  ['4030', 'Transport Revenue', 'Revenue', 'Operating Revenue', 'Credit'],
+  ['4040', 'Books and Uniform Revenue', 'Revenue', 'Operating Revenue', 'Credit'],
+  ['4050', 'Clinic Revenue', 'Revenue', 'Operating Revenue', 'Credit'],
+  ['4060', 'Kitchen and Feeding Revenue', 'Revenue', 'Operating Revenue', 'Credit'],
+  ['4070', 'Club and Activity Revenue', 'Revenue', 'Operating Revenue', 'Credit'],
+  ['4080', 'Grants and Donations', 'Revenue', 'Other Income', 'Credit'],
+  ['4090', 'Other Income', 'Revenue', 'Other Income', 'Credit'],
+  ['4100', 'Discounts, Scholarships and Refunds', 'Revenue', 'Contra Revenue', 'Debit'],
+  ['5000', 'Academic Direct Costs', 'Expense', 'Direct Cost', 'Debit'],
+  ['5010', 'Boarding Direct Costs', 'Expense', 'Direct Cost', 'Debit'],
+  ['5020', 'Transport Direct Costs', 'Expense', 'Direct Cost', 'Debit'],
+  ['5030', 'Kitchen and Feeding Direct Costs', 'Expense', 'Direct Cost', 'Debit'],
+  ['6000', 'Salaries and Staff Costs', 'Expense', 'Operating Expense', 'Debit'],
+  ['6010', 'Utilities', 'Expense', 'Operating Expense', 'Debit'],
+  ['6020', 'Repairs and Maintenance', 'Expense', 'Operating Expense', 'Debit'],
+  ['6030', 'Administrative Expenses', 'Expense', 'Operating Expense', 'Debit'],
+  ['6040', 'Marketing and Admissions', 'Expense', 'Operating Expense', 'Debit'],
+  ['6050', 'Professional Fees', 'Expense', 'Operating Expense', 'Debit'],
+  ['6060', 'Bank and Payment Charges', 'Expense', 'Finance Cost', 'Debit'],
+  ['6070', 'Depreciation Expense', 'Expense', 'Non-cash Expense', 'Debit'],
+  ['6090', 'Other Expenses', 'Expense', 'Operating Expense', 'Debit']
+];
+
+function accountingRoleAllowed(body, allowed) {
+  const role = clean(body.UserRole || body.userRole || '');
+  return allowed.includes(role);
+}
+
+function requireAccountingRole(body, allowed, message = 'Your role is not allowed to perform this accounting action.') {
+  if (accountingRoleAllowed(body, allowed)) return;
+  const err = new Error(message);
+  err.status = 403;
+  throw err;
+}
+
+function accountingLines(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_err) {
+      return [];
+    }
+  }
+  return [];
+}
+
+function accountingAccountCodeForRevenue(category, feeCode = '') {
+  const text = `${clean(category)} ${clean(feeCode)}`.toLowerCase();
+  if (text.includes('form') || text.includes('admission')) return '4010';
+  if (text.includes('board')) return '4020';
+  if (text.includes('transport') || text.includes('bus')) return '4030';
+  if (text.includes('book') || text.includes('uniform')) return '4040';
+  if (text.includes('clinic') || text.includes('medical')) return '4050';
+  if (text.includes('kitchen') || text.includes('feeding')) return '4060';
+  if (text.includes('club') || text.includes('activity')) return '4070';
+  if (text.includes('grant') || text.includes('donation')) return '4080';
+  if (text.includes('school') || text.includes('tuition')) return '4000';
+  return '4090';
+}
+
+function accountingCashAccountFor(method, gateway = '') {
+  const text = `${clean(method)} ${clean(gateway)}`.toLowerCase();
+  if (text.includes('cash')) return '1010';
+  if (text.includes('paystack') || text.includes('online') || text.includes('gateway')) return '1030';
+  return '1020';
+}
+
+async function seedAccountingChart(env) {
+  const existing = await listCollection(env, 'chartOfAccounts');
+  const codes = new Set(existing.map((row) => clean(row.Code || row.code || row.__id)));
+  let added = 0;
+  for (const [Code, Name, Type, Group, NormalBalance] of DEFAULT_CHART_OF_ACCOUNTS) {
+    if (codes.has(Code)) continue;
+    await upsertDocument(env, 'chartOfAccounts', Code, {
+      Code, Name, Type, Group, NormalBalance, Active: 'YES', System: 'YES',
+      CreatedAt: nowIso(), UpdatedAt: nowIso()
+    });
+    added += 1;
+  }
+  return added;
+}
+
+async function accountingPeriodIsClosed(env, dateText) {
+  const date = clean(dateText).slice(0, 10);
+  if (!date) return false;
+  const periods = await listCollection(env, 'accountingPeriods');
+  return periods.some((row) => {
+    const status = lower(row.Status || row.status);
+    return status === 'closed' && date >= clean(row.StartDate || row.startDate) && date <= clean(row.EndDate || row.endDate);
+  });
+}
+
+function normalizedJournal(payload) {
+  const lines = accountingLines(payload.Lines || payload.lines).map((line, index) => ({
+    LineNo: index + 1,
+    AccountCode: clean(line.AccountCode || line.accountCode),
+    AccountName: clean(line.AccountName || line.accountName),
+    Description: clean(line.Description || line.description || payload.Description),
+    Department: clean(line.Department || line.department || payload.Department),
+    CostCentre: clean(line.CostCentre || line.costCentre || payload.CostCentre),
+    Debit: asMoneyNumber(line.Debit || line.debit),
+    Credit: asMoneyNumber(line.Credit || line.credit)
+  }));
+  return { ...payload, Lines: lines };
+}
+
+async function writeAccountingAudit(env, action, entityType, entityId, body, details = '') {
+  const auditId = ledgerDocumentId('AUD');
+  await upsertDocument(env, 'accountingAudit', safeDocumentId(auditId), {
+    AuditId: auditId,
+    Timestamp: nowIso(),
+    Action: clean(action),
+    EntityType: clean(entityType),
+    EntityId: clean(entityId),
+    UserRole: clean(body.UserRole || body.userRole),
+    UserName: clean(body.RecordedBy || body.UpdatedBy || body.UserName || body.userName),
+    Details: clean(details)
+  });
+}
+
+async function saveAccountingJournal(env, body, system = false) {
+  const existingId = clean(body.JournalNo || body.journalNo);
+  const journalNo = existingId || ledgerDocumentId(system ? 'SYS' : 'JRN');
+  const existingRows = await listCollection(env, 'accountingJournals');
+  const existing = existingRows.find((row) => sameText(row.JournalNo, journalNo) || sameText(row.__id, safeDocumentId(journalNo))) || {};
+  if (lower(existing.Status) === 'posted' && !system) {
+    const err = new Error('Posted journals are immutable. Create a reversal journal instead.');
+    err.status = 409;
+    throw err;
+  }
+  const status = clean(body.Status || body.status || 'Draft');
+  const date = clean(body.Date || body.date) || nowIso().slice(0, 10);
+  if (lower(status) === 'posted' && await accountingPeriodIsClosed(env, date)) {
+    const err = new Error('This accounting period is closed.');
+    err.status = 409;
+    throw err;
+  }
+  const payload = normalizedJournal({
+    ...existing,
+    JournalNo: journalNo,
+    Date: date,
+    Description: clean(body.Description || body.description),
+    Reference: clean(body.Reference || body.reference),
+    Source: clean(body.Source || body.source) || (system ? 'System' : 'Manual Journal'),
+    SourceId: clean(body.SourceId || body.sourceId),
+    Department: clean(body.Department || body.department),
+    CostCentre: clean(body.CostCentre || body.costCentre),
+    AcademicSession: clean(body.AcademicSession || body.academicSession),
+    Term: clean(body.Term || body.term),
+    Status: status,
+    Lines: body.Lines || body.lines || existing.Lines || [],
+    CreatedAt: existing.CreatedAt || nowIso(),
+    CreatedBy: existing.CreatedBy || clean(body.RecordedBy || body.recordedBy),
+    UpdatedAt: nowIso(),
+    UpdatedBy: clean(body.RecordedBy || body.recordedBy),
+    PostedAt: lower(status) === 'posted' ? (existing.PostedAt || nowIso()) : '',
+    PostedBy: lower(status) === 'posted' ? clean(body.RecordedBy || body.recordedBy) : '',
+    System: system ? 'YES' : clean(existing.System || 'NO')
+  });
+  const debit = payload.Lines.reduce((sum, line) => sum + line.Debit, 0);
+  const credit = payload.Lines.reduce((sum, line) => sum + line.Credit, 0);
+  if (!payload.Lines.length || payload.Lines.some((line) => !line.AccountCode || (line.Debit <= 0 && line.Credit <= 0))) {
+    const err = new Error('Every journal requires valid debit and credit lines.');
+    err.status = 400;
+    throw err;
+  }
+  if (Math.abs(debit - credit) > 0.005) {
+    const err = new Error(`Journal is not balanced. Debit ${debit.toFixed(2)}; credit ${credit.toFixed(2)}.`);
+    err.status = 400;
+    throw err;
+  }
+  payload.TotalDebit = debit;
+  payload.TotalCredit = credit;
+  await upsertDocument(env, 'accountingJournals', safeDocumentId(journalNo), payload);
+  if (!system) await writeAccountingAudit(env, existingId ? 'UPDATE' : 'CREATE', 'Journal', journalNo, body, status);
+  return payload;
+}
+
+async function syncRevenueToAccounting(env) {
+  await seedAccountingChart(env);
+  const [invoices, payments, sales, journals] = await Promise.all([
+    listCollection(env, 'invoices'),
+    listCollection(env, 'payments'),
+    listCollection(env, 'formSales').catch(() => []),
+    listCollection(env, 'accountingJournals')
+  ]);
+  const existing = new Set(journals.map((row) => clean(row.JournalNo || row.__id)));
+  let created = 0;
+  for (const row of invoices) {
+    const sourceId = clean(row.InvoiceId || row.InvoiceNo || row.invoiceId || row.__id);
+    const journalNo = `SYS-INV-${safeDocumentId(sourceId)}`;
+    const amount = asMoneyNumber(row.Amount || row.amount);
+    if (!sourceId || amount <= 0 || existing.has(journalNo)) continue;
+    const revenue = accountingAccountCodeForRevenue(row.FeeCategory || row.feeCategory, row.FeeCode || row.feeCode);
+    await saveAccountingJournal(env, {
+      JournalNo: journalNo, Date: row.CreatedAt || row.Date || nowIso(), Status: 'Posted',
+      Description: `Invoice: ${clean(row.FeeName || row.Description || sourceId)}`,
+      Reference: sourceId, Source: 'Student Invoice', SourceId: sourceId,
+      AcademicSession: row.AcademicSession || '', Term: row.Term || '', RecordedBy: 'System',
+      Lines: [
+        { AccountCode: '1100', Debit: amount, Credit: 0, Description: clean(row.AccountRef || row.DisplayName) },
+        { AccountCode: revenue, Debit: 0, Credit: amount, Description: clean(row.FeeName || row.FeeCategory) }
+      ]
+    }, true);
+    existing.add(journalNo); created += 1;
+  }
+  for (const row of payments) {
+    const sourceId = clean(row.PaymentId || row.PaymentNo || row.Reference || row.paymentId || row.__id);
+    const journalNo = `SYS-PAY-${safeDocumentId(sourceId)}`;
+    const amount = asMoneyNumber(row.Amount || row.amount || row.AmountPaid);
+    if (!sourceId || amount <= 0 || existing.has(journalNo)) continue;
+    const cash = accountingCashAccountFor(row.Method || row.PaymentMethod, row.Gateway);
+    await saveAccountingJournal(env, {
+      JournalNo: journalNo, Date: row.PaidAt || row.PaymentDate || row.Date || nowIso(), Status: 'Posted',
+      Description: `Receipt: ${clean(row.Reference || sourceId)}`, Reference: clean(row.Reference || sourceId),
+      Source: 'Fee Payment', SourceId: sourceId, RecordedBy: 'System',
+      Lines: [
+        { AccountCode: cash, Debit: amount, Credit: 0, Description: clean(row.Method || row.Gateway || 'Payment received') },
+        { AccountCode: '1100', Debit: 0, Credit: amount, Description: clean(row.AccountRef || row.DisplayName) }
+      ]
+    }, true);
+    existing.add(journalNo); created += 1;
+  }
+  for (const row of sales) {
+    const sourceId = clean(row.ReceiptNo || row.receiptNo || row.__id);
+    const journalNo = `SYS-FORM-${safeDocumentId(sourceId)}`;
+    const amount = asMoneyNumber(row.AmountPaid || row.Amount || row.amount);
+    if (!sourceId || amount <= 0 || existing.has(journalNo)) continue;
+    await saveAccountingJournal(env, {
+      JournalNo: journalNo, Date: row.PaymentDate || row.Timestamp || nowIso(), Status: 'Posted',
+      Description: `Admission form sale: ${clean(row.ApplicantName || sourceId)}`, Reference: sourceId,
+      Source: 'Admission Form Sale', SourceId: sourceId, RecordedBy: 'System',
+      Lines: [
+        { AccountCode: accountingCashAccountFor(row.PaymentMethod, row.Gateway), Debit: amount, Credit: 0, Description: 'Form sale receipt' },
+        { AccountCode: '4010', Debit: 0, Credit: amount, Description: 'Admission form revenue' }
+      ]
+    }, true);
+    existing.add(journalNo); created += 1;
+  }
+  return created;
+}
+
+async function saveChartAccount(env, body) {
+  requireAccountingRole(body, ['Super Admin', 'Accounts Officer']);
+  const code = clean(body.Code || body.code);
+  if (!code || !clean(body.Name || body.name) || !clean(body.Type || body.type)) {
+    const err = new Error('Account code, name and type are required.'); err.status = 400; throw err;
+  }
+  const existing = (await listCollection(env, 'chartOfAccounts')).find((row) => sameText(row.Code, code) || sameText(row.__id, code)) || {};
+  const payload = {
+    ...existing, Code: code, Name: clean(body.Name || body.name), Type: clean(body.Type || body.type),
+    Group: clean(body.Group || body.group), NormalBalance: clean(body.NormalBalance || body.normalBalance) || 'Debit',
+    Active: yesNo(body.Active ?? body.active ?? 'YES') || 'YES', System: clean(existing.System || 'NO'),
+    CreatedAt: existing.CreatedAt || nowIso(), UpdatedAt: nowIso()
+  };
+  await upsertDocument(env, 'chartOfAccounts', safeDocumentId(code), payload);
+  await writeAccountingAudit(env, existing.Code ? 'UPDATE' : 'CREATE', 'Chart Account', code, body, payload.Name);
+  return { ok: true, message: 'Chart of account saved.', account: payload };
+}
+
+async function saveAccountingExpense(env, body) {
+  requireAccountingRole(body, ['Super Admin', 'Accounts Officer', 'Management']);
+  const expenseNo = clean(body.ExpenseNo || body.expenseNo) || ledgerDocumentId('EXP');
+  const existing = (await listCollection(env, 'accountingExpenses')).find((row) => sameText(row.ExpenseNo, expenseNo) || sameText(row.__id, safeDocumentId(expenseNo))) || {};
+  if (lower(existing.Status) === 'posted') {
+    const err = new Error('Posted expenses cannot be edited. Use a reversal.'); err.status = 409; throw err;
+  }
+  const amount = asMoneyNumber(body.Amount || body.amount);
+  if (amount <= 0 || !clean(body.Description || body.description)) {
+    const err = new Error('Expense description and amount are required.'); err.status = 400; throw err;
+  }
+  const requestedStatus = clean(body.Status || body.status || 'Draft');
+  if (['approved', 'posted', 'rejected'].includes(lower(requestedStatus))) {
+    requireAccountingRole(body, ['Super Admin', 'Management'], 'Only Management or Super Admin can approve, reject, or post an expense.');
+  }
+  const payload = {
+    ...existing, ExpenseNo: expenseNo, Date: clean(body.Date || body.date) || nowIso().slice(0, 10),
+    Vendor: clean(body.Vendor || body.vendor), Description: clean(body.Description || body.description), Amount: amount,
+    ExpenseAccount: clean(body.ExpenseAccount || body.expenseAccount) || '6090',
+    PaymentAccount: clean(body.PaymentAccount || body.paymentAccount) || '1020',
+    Department: clean(body.Department || body.department), CostCentre: clean(body.CostCentre || body.costCentre),
+    BudgetCode: clean(body.BudgetCode || body.budgetCode), PaymentMethod: clean(body.PaymentMethod || body.paymentMethod),
+    Reference: clean(body.Reference || body.reference), AttachmentUrl: clean(body.AttachmentUrl || body.attachmentUrl),
+    Notes: clean(body.Notes || body.notes), Status: requestedStatus,
+    RequestedBy: existing.RequestedBy || clean(body.RecordedBy || body.recordedBy), RequestedAt: existing.RequestedAt || nowIso(),
+    ApprovedBy: ['approved', 'posted'].includes(lower(requestedStatus)) ? clean(body.RecordedBy || body.recordedBy) : '',
+    ApprovedAt: ['approved', 'posted'].includes(lower(requestedStatus)) ? nowIso() : '', UpdatedAt: nowIso()
+  };
+  if (lower(requestedStatus) === 'posted') {
+    const journal = await saveAccountingJournal(env, {
+      JournalNo: `SYS-EXP-${safeDocumentId(expenseNo)}`, Date: payload.Date, Status: 'Posted',
+      Description: payload.Description, Reference: payload.Reference || expenseNo, Source: 'Expense', SourceId: expenseNo,
+      Department: payload.Department, CostCentre: payload.CostCentre, RecordedBy: clean(body.RecordedBy || body.recordedBy),
+      Lines: [
+        { AccountCode: payload.ExpenseAccount, Debit: amount, Credit: 0, Description: payload.Description, Department: payload.Department },
+        { AccountCode: payload.PaymentAccount, Debit: 0, Credit: amount, Description: payload.Vendor || payload.PaymentMethod }
+      ]
+    }, true);
+    payload.JournalNo = journal.JournalNo;
+    payload.PostedAt = nowIso(); payload.PostedBy = clean(body.RecordedBy || body.recordedBy);
+  }
+  await upsertDocument(env, 'accountingExpenses', safeDocumentId(expenseNo), payload);
+  await writeAccountingAudit(env, existing.ExpenseNo ? 'UPDATE' : 'CREATE', 'Expense', expenseNo, body, requestedStatus);
+  return { ok: true, message: `Expense saved as ${requestedStatus}.`, expense: payload };
+}
+
+async function saveAccountingBudget(env, body) {
+  requireAccountingRole(body, ['Super Admin', 'Accounts Officer', 'Management']);
+  const id = clean(body.BudgetId || body.budgetId) || [body.FinancialYear, body.Department, body.AccountCode].map(safeDocumentId).join('-');
+  const payload = {
+    BudgetId: id, FinancialYear: clean(body.FinancialYear || body.financialYear),
+    AcademicSession: clean(body.AcademicSession || body.academicSession), Term: clean(body.Term || body.term),
+    Department: clean(body.Department || body.department), AccountCode: clean(body.AccountCode || body.accountCode),
+    Amount: asMoneyNumber(body.Amount || body.amount), Notes: clean(body.Notes || body.notes),
+    Status: clean(body.Status || body.status || 'Approved'), UpdatedAt: nowIso(), UpdatedBy: clean(body.RecordedBy || body.recordedBy)
+  };
+  if (!payload.FinancialYear || !payload.AccountCode || payload.Amount < 0) {
+    const err = new Error('Financial year, account code and a valid amount are required.'); err.status = 400; throw err;
+  }
+  await upsertDocument(env, 'accountingBudgets', safeDocumentId(id), payload);
+  await writeAccountingAudit(env, 'SAVE', 'Budget', id, body, `${payload.AccountCode}: ${payload.Amount}`);
+  return { ok: true, message: 'Budget saved.', budget: payload };
+}
+
+async function saveAccountingBank(env, body) {
+  requireAccountingRole(body, ['Super Admin', 'Accounts Officer']);
+  const id = clean(body.BankId || body.bankId || body.AccountCode || body.accountCode) || ledgerDocumentId('BNK');
+  const payload = {
+    BankId: id, Name: clean(body.Name || body.name), BankName: clean(body.BankName || body.bankName),
+    AccountNumber: clean(body.AccountNumber || body.accountNumber), AccountCode: clean(body.AccountCode || body.accountCode) || '1020',
+    OpeningBalance: asMoneyNumber(body.OpeningBalance || body.openingBalance), Active: yesNo(body.Active ?? 'YES') || 'YES',
+    UpdatedAt: nowIso(), UpdatedBy: clean(body.RecordedBy || body.recordedBy)
+  };
+  if (!payload.Name) { const err = new Error('Bank/cash account name is required.'); err.status = 400; throw err; }
+  await upsertDocument(env, 'accountingBanks', safeDocumentId(id), payload);
+  await writeAccountingAudit(env, 'SAVE', 'Bank Account', id, body, payload.Name);
+  return { ok: true, message: 'Bank/cash account saved.', bank: payload };
+}
+
+async function saveAccountingReconciliation(env, body) {
+  requireAccountingRole(body, ['Super Admin', 'Accounts Officer']);
+  const id = clean(body.ReconciliationNo || body.reconciliationNo) || ledgerDocumentId('REC');
+  const statement = asMoneyNumber(body.StatementBalance || body.statementBalance);
+  const book = asMoneyNumber(body.BookBalance || body.bookBalance);
+  const payload = {
+    ReconciliationNo: id, BankId: clean(body.BankId || body.bankId), AccountCode: clean(body.AccountCode || body.accountCode) || '1020',
+    StatementDate: clean(body.StatementDate || body.statementDate) || nowIso().slice(0, 10),
+    StatementBalance: statement, BookBalance: book,
+    OutstandingDeposits: asMoneyNumber(body.OutstandingDeposits || body.outstandingDeposits),
+    UnpresentedPayments: asMoneyNumber(body.UnpresentedPayments || body.unpresentedPayments),
+    ChargesAndAdjustments: asMoneyNumber(body.ChargesAndAdjustments || body.chargesAndAdjustments),
+    Difference: asMoneyNumber(body.Difference || (statement - book)), Status: clean(body.Status || body.status || 'Draft'),
+    Notes: clean(body.Notes || body.notes), PreparedBy: clean(body.RecordedBy || body.recordedBy), UpdatedAt: nowIso()
+  };
+  await upsertDocument(env, 'accountingReconciliations', safeDocumentId(id), payload);
+  await writeAccountingAudit(env, 'SAVE', 'Reconciliation', id, body, payload.Status);
+  return { ok: true, message: 'Bank reconciliation saved.', reconciliation: payload };
+}
+
+async function saveAccountingPeriod(env, body) {
+  requireAccountingRole(body, ['Super Admin']);
+  const id = clean(body.PeriodId || body.periodId) || `${safeDocumentId(body.StartDate)}-${safeDocumentId(body.EndDate)}`;
+  const payload = {
+    PeriodId: id, Name: clean(body.Name || body.name), StartDate: clean(body.StartDate || body.startDate),
+    EndDate: clean(body.EndDate || body.endDate), Status: clean(body.Status || body.status || 'Open'),
+    ClosedAt: lower(body.Status) === 'closed' ? nowIso() : '', ClosedBy: lower(body.Status) === 'closed' ? clean(body.RecordedBy) : '',
+    UpdatedAt: nowIso()
+  };
+  if (!payload.StartDate || !payload.EndDate || payload.StartDate > payload.EndDate) {
+    const err = new Error('A valid period start and end date are required.'); err.status = 400; throw err;
+  }
+  await upsertDocument(env, 'accountingPeriods', safeDocumentId(id), payload);
+  await writeAccountingAudit(env, 'SAVE', 'Accounting Period', id, body, payload.Status);
+  return { ok: true, message: `Accounting period saved as ${payload.Status}.`, period: payload };
+}
+
+function buildAccountingReport(chart, journals, expenses, budgets) {
+  const accounts = new Map(chart.map((row) => [clean(row.Code || row.code || row.__id), row]));
+  const balances = new Map();
+  const posted = journals.filter((row) => lower(row.Status || row.status) === 'posted');
+  posted.forEach((journal) => accountingLines(journal.Lines || journal.lines).forEach((line) => {
+    const code = clean(line.AccountCode || line.accountCode);
+    const item = balances.get(code) || { AccountCode: code, Debit: 0, Credit: 0, Balance: 0 };
+    item.Debit += asMoneyNumber(line.Debit || line.debit);
+    item.Credit += asMoneyNumber(line.Credit || line.credit);
+    item.Balance = item.Debit - item.Credit;
+    balances.set(code, item);
+  }));
+  const trialBalance = Array.from(balances.values()).map((item) => ({
+    ...item, AccountName: clean((accounts.get(item.AccountCode) || {}).Name),
+    Type: clean((accounts.get(item.AccountCode) || {}).Type), Group: clean((accounts.get(item.AccountCode) || {}).Group)
+  })).sort((a, b) => a.AccountCode.localeCompare(b.AccountCode));
+  const revenueRows = trialBalance.filter((row) => lower(row.Type) === 'revenue');
+  const grossRevenue = revenueRows.filter((row) => clean(row.Group) === 'Operating Revenue').reduce((sum, row) => sum + row.Credit - row.Debit, 0);
+  const otherIncome = revenueRows.filter((row) => clean(row.Group) === 'Other Income').reduce((sum, row) => sum + row.Credit - row.Debit, 0);
+  const concessions = revenueRows.filter((row) => row.AccountCode === '4100').reduce((sum, row) => sum + row.Debit - row.Credit, 0);
+  const netRevenue = grossRevenue - concessions;
+  const totalIncome = netRevenue + otherIncome;
+  const expenseRows = trialBalance.filter((row) => lower(row.Type) === 'expense');
+  const directCosts = expenseRows.filter((row) => clean(row.Group) === 'Direct Cost').reduce((sum, row) => sum + row.Debit - row.Credit, 0);
+  const totalExpenses = expenseRows.reduce((sum, row) => sum + row.Debit - row.Credit, 0);
+  const assets = trialBalance.filter((row) => lower(row.Type) === 'asset').reduce((sum, row) => sum + row.Debit - row.Credit, 0);
+  const liabilities = trialBalance.filter((row) => lower(row.Type) === 'liability').reduce((sum, row) => sum + row.Credit - row.Debit, 0);
+  const equity = trialBalance.filter((row) => lower(row.Type) === 'equity').reduce((sum, row) => sum + row.Credit - row.Debit, 0);
+  const cashPosition = trialBalance.filter((row) => ['1010', '1020', '1030'].includes(row.AccountCode)).reduce((sum, row) => sum + row.Debit - row.Credit, 0);
+  const receivables = trialBalance.filter((row) => row.AccountCode === '1100').reduce((sum, row) => sum + row.Debit - row.Credit, 0);
+  const postedExpense = expenses.filter((row) => lower(row.Status) === 'posted').reduce((sum, row) => sum + asMoneyNumber(row.Amount), 0);
+  const budgetTotal = budgets.reduce((sum, row) => sum + asMoneyNumber(row.Amount), 0);
+  return {
+    dashboard: { GrossRevenue: grossRevenue, OtherIncome: otherIncome, Concessions: concessions, NetRevenue: netRevenue, TotalIncome: totalIncome, DirectCosts: directCosts,
+      GrossSurplus: netRevenue - directCosts, TotalExpenditure: totalExpenses, NetSurplus: totalIncome - totalExpenses,
+      Assets: assets, Liabilities: liabilities, Equity: equity, PostedExpenses: postedExpense, BudgetTotal: budgetTotal,
+      CashPosition: cashPosition, Receivables: receivables, BudgetRemaining: budgetTotal - totalExpenses },
+    trialBalance,
+    incomeStatement: { revenue: revenueRows, expenses: expenseRows },
+    balanceSheet: { assets: trialBalance.filter((r) => lower(r.Type) === 'asset'), liabilities: trialBalance.filter((r) => lower(r.Type) === 'liability'), equity: trialBalance.filter((r) => lower(r.Type) === 'equity') }
+  };
+}
+
+async function getAccountingOverview(env) {
+  const synchronized = await syncRevenueToAccounting(env);
+  const [chart, journals, expenses, budgets, banks, reconciliations, periods, audit] = await Promise.all([
+    listCollection(env, 'chartOfAccounts'), listCollection(env, 'accountingJournals'), listCollection(env, 'accountingExpenses'),
+    listCollection(env, 'accountingBudgets'), listCollection(env, 'accountingBanks'), listCollection(env, 'accountingReconciliations'),
+    listCollection(env, 'accountingPeriods'), listCollection(env, 'accountingAudit')
+  ]);
+  return { ok: true, message: 'Finance and accounting records loaded.', synchronized, chart, journals, expenses, budgets, banks, reconciliations, periods, audit,
+    reports: buildAccountingReport(chart, journals, expenses, budgets) };
+}
+
 async function routeAction(env, action, body = {}) {
   switch (action) {
     case 'ping':
@@ -2954,6 +3401,26 @@ async function routeAction(env, action, body = {}) {
       return updateStudentStatus(env, body);
     case 'getAccountsOverview':
       return getAccountsOverview(env);
+    case 'getAccountingOverview':
+      return getAccountingOverview(env);
+    case 'syncAccountingRevenue':
+      requireAccountingRole(body, ['Super Admin', 'Accounts Officer']);
+      return { ok: true, message: 'Revenue subledgers synchronized.', created: await syncRevenueToAccounting(env) };
+    case 'saveChartAccount':
+      return saveChartAccount(env, body);
+    case 'saveAccountingJournal':
+      requireAccountingRole(body, ['Super Admin', 'Accounts Officer']);
+      return { ok: true, message: 'Journal saved.', journal: await saveAccountingJournal(env, body) };
+    case 'saveAccountingExpense':
+      return saveAccountingExpense(env, body);
+    case 'saveAccountingBudget':
+      return saveAccountingBudget(env, body);
+    case 'saveAccountingBank':
+      return saveAccountingBank(env, body);
+    case 'saveAccountingReconciliation':
+      return saveAccountingReconciliation(env, body);
+    case 'saveAccountingPeriod':
+      return saveAccountingPeriod(env, body);
     case 'saveBrevoSettings':
       return saveBrevoSettings(env, body);
     case 'saveSchoolProfile':
