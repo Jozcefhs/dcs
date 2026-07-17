@@ -7,7 +7,7 @@ async function loadSiteProfile() {
     PortalNotice: '',
     NameFormat: 'Surname, first name, middle name',
     ResultDisplayMode: 'subjects',
-    ShowResultsOnline: 'NO'
+    ShowResultsOnline: 'YES'
   };
   try {
     const response = await fetch('/api/settings');
