@@ -71,3 +71,9 @@ The `Bills & Requisitions` section now provides authenticated write workflows:
 Every web create, approval, rejection and Accounts review writes an entry to `accountingAudit` with the staff name, role, department, timestamp and `SourcePlatform: Web`.
 
 The web workflow intentionally does not post journals or pay suppliers. Those final accounting actions remain in the desktop app.
+
+## My Payroll and payslips
+
+Every active staff role receives a private **My Payroll** section. A payroll profile must use the same username as the staff login. Only payroll runs that Accounts has posted are visible, and each user can see only their own payroll items. PDF payslips are generated on demand through the authenticated payroll endpoint and are not publicly stored.
+
+Payroll preparation, approval, posting, and salary payments remain controlled from the desktop Finance & Accounting workspace. Management or Super Admin approves submitted payroll; Accounts or Super Admin posts it and records payments.

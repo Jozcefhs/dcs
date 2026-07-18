@@ -113,21 +113,21 @@ export function allowedSectionsFor(user = {}) {
   const role = clean(user.role || user.Role);
   const department = lower(user.department || user.Department);
   const roleSections = {
-    'Super Admin': ['admissions', 'formPurchases', 'students', 'accounts', 'financeRequests', 'clinic', 'kitchen', 'tuckShop', 'staffUsers'],
-    'Admissions Officer': ['admissions', 'formPurchases', 'students', 'financeRequests'],
-    'Accounts Officer': ['students', 'accounts', 'financeRequests', 'clinic', 'kitchen', 'tuckShop'],
-    Management: ['admissions', 'formPurchases', 'students', 'accounts', 'financeRequests', 'clinic', 'kitchen', 'tuckShop'],
-    'Tuck Shop User': ['tuckShop', 'financeRequests'],
-    'Clinic User': ['clinic', 'financeRequests'],
-    'Kitchen User': ['kitchen', 'financeRequests'],
-    'Front Desk': ['admissions', 'formPurchases', 'students', 'financeRequests']
+    'Super Admin': ['admissions', 'formPurchases', 'students', 'accounts', 'financeRequests', 'payroll', 'clinic', 'kitchen', 'tuckShop', 'staffUsers'],
+    'Admissions Officer': ['admissions', 'formPurchases', 'students', 'financeRequests', 'payroll'],
+    'Accounts Officer': ['students', 'accounts', 'financeRequests', 'payroll', 'clinic', 'kitchen', 'tuckShop'],
+    Management: ['admissions', 'formPurchases', 'students', 'accounts', 'financeRequests', 'payroll', 'clinic', 'kitchen', 'tuckShop'],
+    'Tuck Shop User': ['tuckShop', 'financeRequests', 'payroll'],
+    'Clinic User': ['clinic', 'financeRequests', 'payroll'],
+    'Kitchen User': ['kitchen', 'financeRequests', 'payroll'],
+    'Front Desk': ['admissions', 'formPurchases', 'students', 'financeRequests', 'payroll']
   };
   if (role === 'Department User') {
-    if (department.includes('clinic')) return ['clinic', 'financeRequests'];
-    if (department.includes('kitchen')) return ['kitchen', 'financeRequests'];
-    if (department.includes('tuck')) return ['tuckShop', 'financeRequests'];
-    if (department.includes('account') || department.includes('finance')) return ['accounts', 'financeRequests'];
-    return ['financeRequests'];
+    if (department.includes('clinic')) return ['clinic', 'financeRequests', 'payroll'];
+    if (department.includes('kitchen')) return ['kitchen', 'financeRequests', 'payroll'];
+    if (department.includes('tuck')) return ['tuckShop', 'financeRequests', 'payroll'];
+    if (department.includes('account') || department.includes('finance')) return ['accounts', 'financeRequests', 'payroll'];
+    return ['financeRequests', 'payroll'];
   }
   return roleSections[role] || [];
 }

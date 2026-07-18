@@ -2922,6 +2922,7 @@ const DEFAULT_CHART_OF_ACCOUNTS = [
   ['2000', 'Accounts Payable', 'Liability', 'Payables', 'Credit'],
   ['2100', 'Taxes and Statutory Deductions', 'Liability', 'Statutory', 'Credit'],
   ['2200', 'Student Wallet Liability', 'Liability', 'Student Wallets', 'Credit'],
+  ['2300', 'Salaries Payable', 'Liability', 'Payroll', 'Credit'],
   ['3000', 'Accumulated School Fund', 'Equity', 'School Fund', 'Credit'],
   ['4000', 'Tuition and School Fee Revenue', 'Revenue', 'Operating Revenue', 'Credit'],
   ['4010', 'Admission Form Revenue', 'Revenue', 'Operating Revenue', 'Credit'],
@@ -3790,20 +3791,207 @@ async function getAccountingOverview(env, body = {}) {
   await seedAccountingApprovalLimits(env);
   const periodsForChecklist = await listCollection(env, 'accountingPeriods');
   for (const period of periodsForChecklist) await seedAccountingCloseChecklist(env, clean(period.PeriodId || period.__id));
-  const [chart, journals, expenses, budgets, banks, reconciliations, periods, audit, vendors, supplierBills, supplierPayments, assets, adjustments, approvalLimits, closeChecklist, bankStatementItems, invoices, payments] = await Promise.all([
+  const [chart, journals, expenses, budgets, banks, reconciliations, periods, audit, vendors, supplierBills, supplierPayments, assets, adjustments, approvalLimits, closeChecklist, bankStatementItems, invoices, payments, payrollProfiles, payrollRuns, payrollItems, payrollPayments, payrollAudit] = await Promise.all([
     listCollection(env, 'chartOfAccounts'), listCollection(env, 'accountingJournals'), listCollection(env, 'accountingExpenses'),
     listCollection(env, 'accountingBudgets'), listCollection(env, 'accountingBanks'), listCollection(env, 'accountingReconciliations'),
     listCollection(env, 'accountingPeriods'), listCollection(env, 'accountingAudit'), listCollection(env, 'accountingVendors'),
     listCollection(env, 'accountingSupplierBills'), listCollection(env, 'accountingSupplierPayments'), listCollection(env, 'accountingAssets'),
     listCollection(env, 'accountingAdjustments'), listCollection(env, 'accountingApprovalLimits'), listCollection(env, 'accountingCloseChecklist'),
-    listCollection(env, 'accountingBankStatementItems'), listCollection(env, 'invoices'), listCollection(env, 'payments')
+    listCollection(env, 'accountingBankStatementItems'), listCollection(env, 'invoices'), listCollection(env, 'payments'),
+    listCollection(env, 'payrollProfiles'), listCollection(env, 'payrollRuns'), listCollection(env, 'payrollItems'),
+    listCollection(env, 'payrollPayments'), listCollection(env, 'payrollAudit')
   ]);
   const filter = accountingFilter(body);
   const reports = buildAccountingReport(chart, journals, expenses, budgets, filter);
   reports.receivablesAgeing = buildReceivablesAgeing(invoices, payments, filter.DateTo || nowIso().slice(0, 10));
   reports.payablesAgeing = buildAgeing(supplierBills, filter.DateTo || nowIso().slice(0, 10), 'payable');
   return { ok: true, message: 'Finance and accounting records loaded.', synchronized, filter, chart, journals, expenses, budgets, banks, reconciliations, periods, audit,
-    vendors, supplierBills, supplierPayments, assets, adjustments, approvalLimits, closeChecklist, bankStatementItems, reports };
+    vendors, supplierBills, supplierPayments, assets, adjustments, approvalLimits, closeChecklist, bankStatementItems,
+    payrollProfiles, payrollRuns, payrollItems, payrollPayments, payrollAudit, reports };
+}
+
+function payrollComponents(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed : []; } catch (_err) { return []; }
+  }
+  return [];
+}
+
+function normalizedPayrollComponents(value) {
+  return payrollComponents(value).map((row) => ({
+    Name: clean(row.Name || row.name || row.Label || row.label),
+    Amount: asMoneyNumber(row.Amount || row.amount)
+  })).filter((row) => row.Name && row.Amount > 0);
+}
+
+function payrollTotal(value) {
+  return normalizedPayrollComponents(value).reduce((sum, row) => sum + row.Amount, 0);
+}
+
+async function writePayrollAudit(env, action, entityType, entityId, body, details = '') {
+  const auditId = ledgerDocumentId('PAYAUD');
+  await upsertDocument(env, 'payrollAudit', safeDocumentId(auditId), {
+    AuditId: auditId, Timestamp: nowIso(), Action: clean(action), EntityType: clean(entityType), EntityId: clean(entityId),
+    UserRole: clean(body.UserRole || body.userRole), UserName: clean(body.RecordedBy || body.UpdatedBy), Details: clean(details)
+  });
+}
+
+async function savePayrollProfile(env, body) {
+  requireAccountingRole(body, ['Super Admin', 'Accounts Officer']);
+  const employeeId = clean(body.EmployeeId || body.employeeId) || ledgerDocumentId('EMP');
+  const profiles = await listCollection(env, 'payrollProfiles');
+  const existing = profiles.find((row) => sameText(row.EmployeeId, employeeId) || sameText(row.__id, safeDocumentId(employeeId))) || {};
+  const username = clean(body.Username || body.username);
+  const displayName = clean(body.DisplayName || body.displayName || body.Name);
+  const basicSalary = asMoneyNumber(body.BasicSalary || body.basicSalary);
+  if (!username || !displayName || basicSalary < 0) {
+    const err = new Error('Staff username, display name, and a valid basic salary are required.'); err.status = 400; throw err;
+  }
+  if (profiles.some((row) => !sameText(row.EmployeeId, employeeId) && sameText(row.Username, username))) {
+    const err = new Error('That staff username is already linked to another payroll profile.'); err.status = 409; throw err;
+  }
+  const payload = {
+    ...existing, EmployeeId: employeeId, Username: username, DisplayName: displayName,
+    Department: clean(body.Department), Position: clean(body.Position), EmploymentType: clean(body.EmploymentType) || 'Permanent',
+    BasicSalary: basicSalary, Allowances: normalizedPayrollComponents(body.Allowances), Deductions: normalizedPayrollComponents(body.Deductions),
+    PensionRate: Math.min(100, Math.max(0, asMoneyNumber(body.PensionRate))), TaxRate: Math.min(100, Math.max(0, asMoneyNumber(body.TaxRate))),
+    BankName: clean(body.BankName), AccountName: clean(body.AccountName), AccountNumber: clean(body.AccountNumber),
+    SalaryExpenseAccount: clean(body.SalaryExpenseAccount) || '6000', Active: yesNo(body.Active ?? 'YES') || 'YES',
+    Notes: clean(body.Notes), CreatedAt: existing.CreatedAt || nowIso(), CreatedBy: existing.CreatedBy || clean(body.RecordedBy),
+    UpdatedAt: nowIso(), UpdatedBy: clean(body.RecordedBy)
+  };
+  delete payload.__id; delete payload.__name;
+  await upsertDocument(env, 'payrollProfiles', safeDocumentId(employeeId), payload);
+  await writePayrollAudit(env, existing.EmployeeId ? 'UPDATE' : 'CREATE', 'Payroll Profile', employeeId, body, displayName);
+  return { ok: true, message: 'Payroll profile saved.', profile: payload };
+}
+
+async function generatePayrollRun(env, body) {
+  requireAccountingRole(body, ['Super Admin', 'Accounts Officer']);
+  const month = clean(body.Month || body.month);
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) { const err = new Error('Payroll month must use a valid YYYY-MM format.'); err.status = 400; throw err; }
+  const runId = clean(body.RunId) || `PAY-${month.replace('-', '')}`;
+  const runs = await listCollection(env, 'payrollRuns');
+  const existing = runs.find((row) => sameText(row.RunId, runId) || sameText(row.__id, safeDocumentId(runId))) || {};
+  if (['approved', 'posted', 'part paid', 'paid'].includes(lower(existing.Status))) {
+    const err = new Error('Approved or posted payroll cannot be regenerated.'); err.status = 409; throw err;
+  }
+  const profiles = (await listCollection(env, 'payrollProfiles')).filter((row) => yesNo(row.Active ?? 'YES') === 'YES');
+  if (!profiles.length) { const err = new Error('Create at least one active payroll profile first.'); err.status = 400; throw err; }
+  const existingItems = (await listCollection(env, 'payrollItems')).filter((row) => sameText(row.RunId, runId));
+  for (const item of existingItems) await deleteDocument(env, 'payrollItems', item.__id || safeDocumentId(item.ItemId));
+  let totalBasic = 0; let totalAllowances = 0; let totalGross = 0; let totalDeductions = 0; let totalNet = 0;
+  for (const profile of profiles) {
+    const basic = asMoneyNumber(profile.BasicSalary);
+    const allowances = payrollTotal(profile.Allowances);
+    const gross = basic + allowances;
+    const pension = gross * Math.max(0, asMoneyNumber(profile.PensionRate)) / 100;
+    const tax = gross * Math.max(0, asMoneyNumber(profile.TaxRate)) / 100;
+    const otherDeductions = payrollTotal(profile.Deductions);
+    const deductions = Math.min(gross, pension + tax + otherDeductions);
+    const net = Math.max(0, gross - deductions);
+    const itemId = `${runId}-${clean(profile.EmployeeId)}`;
+    const item = {
+      ItemId: itemId, RunId: runId, Month: month, EmployeeId: clean(profile.EmployeeId), Username: clean(profile.Username),
+      DisplayName: clean(profile.DisplayName), Department: clean(profile.Department), Position: clean(profile.Position),
+      BasicSalary: basic, Allowances: normalizedPayrollComponents(profile.Allowances), AllowanceTotal: allowances, GrossPay: gross,
+      PensionRate: asMoneyNumber(profile.PensionRate), PensionAmount: pension, TaxRate: asMoneyNumber(profile.TaxRate), TaxAmount: tax,
+      OtherDeductions: normalizedPayrollComponents(profile.Deductions), OtherDeductionTotal: otherDeductions,
+      TotalDeductions: deductions, NetPay: net, PaidAmount: 0, OutstandingAmount: net, PaymentStatus: 'Unpaid',
+      BankName: clean(profile.BankName), AccountName: clean(profile.AccountName), AccountNumber: clean(profile.AccountNumber),
+      SalaryExpenseAccount: clean(profile.SalaryExpenseAccount) || '6000', GeneratedAt: nowIso(), GeneratedBy: clean(body.RecordedBy)
+    };
+    await upsertDocument(env, 'payrollItems', safeDocumentId(itemId), item);
+    totalBasic += basic; totalAllowances += allowances; totalGross += gross; totalDeductions += deductions; totalNet += net;
+  }
+  const run = {
+    ...existing, RunId: runId, Month: month, PayDate: clean(body.PayDate) || `${month}-28`, Description: clean(body.Description) || `Payroll for ${month}`,
+    Status: 'Draft', EmployeeCount: profiles.length, TotalBasic: totalBasic, TotalAllowances: totalAllowances, TotalGross: totalGross,
+    TotalDeductions: totalDeductions, TotalNet: totalNet, PaidAmount: 0, OutstandingAmount: totalNet,
+    CreatedAt: existing.CreatedAt || nowIso(), CreatedBy: existing.CreatedBy || clean(body.RecordedBy), UpdatedAt: nowIso(), UpdatedBy: clean(body.RecordedBy)
+  };
+  await upsertDocument(env, 'payrollRuns', safeDocumentId(runId), run);
+  await writePayrollAudit(env, existing.RunId ? 'REGENERATE' : 'GENERATE', 'Payroll Run', runId, body, `${profiles.length} staff; net ${totalNet}`);
+  return { ok: true, message: `Payroll generated for ${profiles.length} staff.`, run };
+}
+
+async function savePayrollRunStatus(env, body) {
+  const requested = clean(body.Status || body.status);
+  const runId = clean(body.RunId || body.runId);
+  const runs = await listCollection(env, 'payrollRuns');
+  const run = runs.find((row) => sameText(row.RunId, runId) || sameText(row.__id, safeDocumentId(runId)));
+  if (!run) { const err = new Error('Payroll run was not found.'); err.status = 404; throw err; }
+  const current = lower(run.Status);
+  const target = lower(requested);
+  const allowed = {
+    draft: { submitted: ['Super Admin', 'Accounts Officer'] },
+    rejected: { submitted: ['Super Admin', 'Accounts Officer'] },
+    submitted: { approved: ['Super Admin', 'Management'], rejected: ['Super Admin', 'Management'] },
+    approved: { posted: ['Super Admin', 'Accounts Officer'] }
+  };
+  const roles = allowed[current] && allowed[current][target];
+  if (!roles) { const err = new Error(`Payroll cannot move from ${run.Status} to ${requested}.`); err.status = 409; throw err; }
+  requireAccountingRole(body, roles);
+  const updated = { ...run, Status: requested, UpdatedAt: nowIso(), UpdatedBy: clean(body.RecordedBy) };
+  if (target === 'submitted') { updated.SubmittedAt = nowIso(); updated.SubmittedBy = clean(body.RecordedBy); }
+  if (target === 'approved') { updated.ApprovedAt = nowIso(); updated.ApprovedBy = clean(body.RecordedBy); }
+  if (target === 'rejected') { updated.RejectedAt = nowIso(); updated.RejectedBy = clean(body.RecordedBy); updated.RejectionReason = clean(body.Reason); }
+  if (target === 'posted') {
+    const date = clean(body.Date || run.PayDate) || nowIso().slice(0, 10);
+    const items = (await listCollection(env, 'payrollItems')).filter((row) => sameText(row.RunId, runId));
+    const expenseByAccount = new Map();
+    for (const item of items) {
+      const code = clean(item.SalaryExpenseAccount) || '6000';
+      expenseByAccount.set(code, (expenseByAccount.get(code) || 0) + asMoneyNumber(item.GrossPay));
+    }
+    const lines = [...expenseByAccount.entries()].map(([AccountCode, Debit]) => ({ AccountCode, Debit, Credit: 0, Description: run.Description }));
+    if (asMoneyNumber(run.TotalDeductions) > 0) lines.push({ AccountCode: '2100', Debit: 0, Credit: asMoneyNumber(run.TotalDeductions), Description: 'Payroll deductions payable' });
+    lines.push({ AccountCode: '2300', Debit: 0, Credit: asMoneyNumber(run.TotalNet), Description: 'Net salaries payable' });
+    const journal = await saveAccountingJournal(env, { JournalNo: `SYS-PR-${safeDocumentId(runId)}`, Date: date, Status: 'Posted',
+      Description: run.Description, Reference: runId, Source: 'Payroll', SourceId: runId, RecordedBy: clean(body.RecordedBy), Lines: lines }, true);
+    updated.JournalNo = journal.JournalNo; updated.PostedAt = nowIso(); updated.PostedBy = clean(body.RecordedBy);
+  }
+  await upsertDocument(env, 'payrollRuns', safeDocumentId(runId), updated);
+  await writePayrollAudit(env, target.toUpperCase(), 'Payroll Run', runId, body, clean(body.Reason || requested));
+  return { ok: true, message: `Payroll ${requested.toLowerCase()}.`, run: updated };
+}
+
+async function payPayrollItem(env, body) {
+  requireAccountingRole(body, ['Super Admin', 'Accounts Officer']);
+  const itemId = clean(body.ItemId || body.itemId);
+  const items = await listCollection(env, 'payrollItems');
+  const item = items.find((row) => sameText(row.ItemId, itemId) || sameText(row.__id, safeDocumentId(itemId)));
+  if (!item) { const err = new Error('Payroll item was not found.'); err.status = 404; throw err; }
+  const run = (await listCollection(env, 'payrollRuns')).find((row) => sameText(row.RunId, item.RunId));
+  if (!run || !['posted', 'part paid'].includes(lower(run.Status))) { const err = new Error('Payroll must be posted before salary payment.'); err.status = 409; throw err; }
+  const outstanding = Math.max(0, asMoneyNumber(item.NetPay) - asMoneyNumber(item.PaidAmount));
+  const amount = asMoneyNumber(body.Amount || outstanding);
+  if (amount <= 0 || amount > outstanding + 0.005) { const err = new Error(`Payment must be between 0 and ${outstanding.toFixed(2)}.`); err.status = 400; throw err; }
+  const paymentNo = clean(body.PaymentNo) || ledgerDocumentId('SALPAY');
+  const date = clean(body.Date) || nowIso().slice(0, 10);
+  const paymentAccount = clean(body.PaymentAccount) || '1020';
+  const journal = await saveAccountingJournal(env, { JournalNo: `SYS-SALPAY-${safeDocumentId(paymentNo)}`, Date: date, Status: 'Posted',
+    Description: `Salary payment: ${clean(item.DisplayName)}`, Reference: clean(body.Reference) || paymentNo,
+    Source: 'Salary Payment', SourceId: paymentNo, RecordedBy: clean(body.RecordedBy), Lines: [
+      { AccountCode: '2300', Debit: amount, Credit: 0, Description: clean(item.DisplayName) },
+      { AccountCode: paymentAccount, Debit: 0, Credit: amount, Description: clean(body.Method) || 'Salary payment' }
+    ] }, true);
+  const paid = asMoneyNumber(item.PaidAmount) + amount;
+  const updatedItem = { ...item, PaidAmount: paid, OutstandingAmount: Math.max(0, asMoneyNumber(item.NetPay) - paid),
+    PaymentStatus: paid + 0.005 >= asMoneyNumber(item.NetPay) ? 'Paid' : 'Part Paid', LastPaidAt: date, UpdatedAt: nowIso() };
+  await upsertDocument(env, 'payrollItems', safeDocumentId(itemId), updatedItem);
+  const payment = { PaymentNo: paymentNo, RunId: item.RunId, ItemId: itemId, EmployeeId: item.EmployeeId, Username: item.Username,
+    DisplayName: item.DisplayName, Date: date, Amount: amount, PaymentAccount: paymentAccount, Method: clean(body.Method),
+    Reference: clean(body.Reference), JournalNo: journal.JournalNo, RecordedBy: clean(body.RecordedBy), RecordedAt: nowIso() };
+  await upsertDocument(env, 'payrollPayments', safeDocumentId(paymentNo), payment);
+  const runItems = items.filter((row) => sameText(row.RunId, item.RunId)).map((row) => sameText(row.ItemId, itemId) ? updatedItem : row);
+  const runPaid = runItems.reduce((sum, row) => sum + asMoneyNumber(row.PaidAmount), 0);
+  const updatedRun = { ...run, PaidAmount: runPaid, OutstandingAmount: Math.max(0, asMoneyNumber(run.TotalNet) - runPaid),
+    Status: runPaid + 0.005 >= asMoneyNumber(run.TotalNet) ? 'Paid' : 'Part Paid', UpdatedAt: nowIso() };
+  await upsertDocument(env, 'payrollRuns', safeDocumentId(run.RunId), updatedRun);
+  await writePayrollAudit(env, 'PAY', 'Payroll Item', itemId, body, `${paymentNo}: ${amount}`);
+  return { ok: true, message: 'Salary payment posted.', item: updatedItem, run: updatedRun, payment };
 }
 
 function requireStaffUserAdmin(body) {
@@ -3940,6 +4128,14 @@ async function routeAction(env, action, body = {}) {
       return getAccountsOverview(env);
     case 'getAccountingOverview':
       return getAccountingOverview(env, body);
+    case 'savePayrollProfile':
+      return savePayrollProfile(env, body);
+    case 'generatePayrollRun':
+      return generatePayrollRun(env, body);
+    case 'savePayrollRunStatus':
+      return savePayrollRunStatus(env, body);
+    case 'payPayrollItem':
+      return payPayrollItem(env, body);
     case 'getStaffUsers':
       return getStaffUsersForDesktop(env, body);
     case 'saveStaffUser':

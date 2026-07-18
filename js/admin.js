@@ -32,6 +32,7 @@ const tabConfig = [
   ['students', 'Students'],
   ['accounts', 'Accounts'],
   ['financeRequests', 'Bills & Requisitions'],
+  ['payroll', 'My Payroll'],
   ['clinic', 'Clinic'],
   ['kitchen', 'Kitchen'],
   ['tuckShop', 'Tuck Shop'],
@@ -261,6 +262,9 @@ function renderSection(active) {
   if (active === 'staffUsers') {
     panelEl.innerHTML = '<p class="muted">Loading staff accounts...</p>';
     loadStaffUsers();
+  } else if (active === 'payroll') {
+    panelEl.innerHTML = '<p class="muted">Loading your payroll history...</p>';
+    loadMyPayroll();
   } else if (active === 'financeRequests') {
     panelEl.innerHTML = '<p class="muted">Loading bills and requisitions...</p>';
     loadFinanceWorkflow();
@@ -326,6 +330,34 @@ function renderSection(active) {
     ]);
   } else {
     panelEl.innerHTML = '<p class="muted">No dashboard section is available for this role yet.</p>';
+  }
+}
+
+async function loadMyPayroll() {
+  try {
+    const response = await fetch('/api/staff-payroll', { credentials: 'same-origin', cache: 'no-store' });
+    const data = await response.json().catch(() => ({ ok: false, message: 'Payroll service did not return JSON.' }));
+    if (response.status === 401) { showLogin(data.message || 'Your staff session has expired.', 'bad'); return; }
+    if (!response.ok || !data.ok) throw new Error(data.message || 'Payroll history could not be loaded.');
+    const items = data.items || [];
+    const totals = items.reduce((summary, item) => {
+      summary.gross += Number(item.GrossPay || 0); summary.net += Number(item.NetPay || 0);
+      summary.paid += Number(item.PaidAmount || 0); summary.outstanding += Number(item.OutstandingAmount || 0); return summary;
+    }, { gross: 0, net: 0, paid: 0, outstanding: 0 });
+    panelEl.innerHTML = `
+      <div class="workflow-intro"><div><p class="eyebrow">Private staff record</p><h2>My Payroll & Payslips</h2><p class="muted">Only payroll posted for your signed-in staff username appears here.</p></div></div>
+      <div class="workflow-kpis"><div><small>Payroll periods</small><strong>${items.length}</strong><span>Available payslips</span></div><div><small>Total net pay</small><strong>${money(totals.net)}</strong><span>Posted payroll</span></div><div><small>Paid</small><strong>${money(totals.paid)}</strong><span>Recorded salary payments</span></div><div><small>Outstanding</small><strong>${money(totals.outstanding)}</strong><span>Unpaid balance</span></div></div>
+      ${table('Payroll History', items, [
+        { label: 'Month', value: (row) => row.Month },
+        { label: 'Gross Pay', value: (row) => money(row.GrossPay) },
+        { label: 'Deductions', value: (row) => money(row.TotalDeductions) },
+        { label: 'Net Pay', value: (row) => money(row.NetPay) },
+        { label: 'Paid', value: (row) => money(row.PaidAmount) },
+        { label: 'Status', value: (row) => row.PaymentStatus },
+        { label: 'Payslip', render: (row) => `<a class="payslip-download" href="/api/staff-payroll?action=payslip&itemId=${encodeURIComponent(row.ItemId)}">Download PDF</a>` }
+      ])}`;
+  } catch (error) {
+    panelEl.innerHTML = `<p class="status bad">${escapeHtml(error.message || String(error))}</p>`;
   }
 }
 
