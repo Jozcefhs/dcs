@@ -155,7 +155,6 @@ async function loadDashboard() {
 function renderSummary(summary) {
   const items = [
     ['Applications', summary.applications],
-    ['Students', summary.students],
     ['Form Purchases', summary.formPurchases],
     ['Payments', summary.payments],
     ['Invoices', summary.invoices],
@@ -165,7 +164,8 @@ function renderSummary(summary) {
     ['Low Clinic Stock', summary.lowClinicStock],
     ['Low Kitchen Stock', summary.lowKitchenStock]
   ].filter(([, value]) => value !== undefined);
-  summaryEl.innerHTML = items.map(([label, value]) => `<div><strong>${escapeHtml(value || 0)}</strong><span>${escapeHtml(label)}</span></div>`).join('');
+  const studentCard = summary.students === undefined ? '' : `<div class="student-summary-card"><strong>${escapeHtml(summary.students || 0)}</strong><span>Total Students</span><small><b>${escapeHtml(summary.dayStudents || 0)}</b> Day <i></i> <b>${escapeHtml(summary.boardingStudents || 0)}</b> Boarding</small></div>`;
+  summaryEl.innerHTML = studentCard + items.map(([label, value]) => `<div><strong>${escapeHtml(value || 0)}</strong><span>${escapeHtml(label)}</span></div>`).join('');
 }
 
 function renderTabs(allowed) {

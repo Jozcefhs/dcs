@@ -33,6 +33,11 @@ function accountKey(value) {
   return clean(value).toLowerCase();
 }
 
+function isBoardingStudent(row) {
+  const value = clean(row.StudentType || row.studentType || row.BoardingPreference || row.boardingPreference || row.ResidencyType || row.residencyType || row.Tags).toLowerCase();
+  return /board(ing|er)?|hostel|resident/.test(value) && !/non[- ]?boarding/.test(value);
+}
+
 function reconcileInvoiceDisplay(invoices, accounts) {
   const accountMap = new Map();
   (accounts || []).forEach((account) => {
@@ -146,7 +151,11 @@ export async function onRequestPost(context) {
     const departments = Object.fromEntries(Object.entries(allDepartments).filter(([key]) => allowed.has(key)));
     const summary = {};
     if (allowed.has('admissions')) summary.applications = visibleApplications.length;
-    if (allowed.has('students')) summary.students = visibleStudents.length;
+    if (allowed.has('students')) {
+      summary.students = visibleStudents.length;
+      summary.boardingStudents = visibleStudents.filter(isBoardingStudent).length;
+      summary.dayStudents = visibleStudents.length - summary.boardingStudents;
+    }
     if (allowed.has('formPurchases')) summary.formPurchases = formSales.length;
     if (allowed.has('accounts')) {
       summary.payments = payments.length;
