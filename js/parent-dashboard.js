@@ -7,6 +7,7 @@ const walletSummary = document.getElementById('walletSummary');
 const walletLedger = document.getElementById('walletLedger');
 const dueNotifications = document.getElementById('dueNotifications');
 const payableItems = document.getElementById('payableItems');
+const optionalPayments = document.getElementById('optionalPayments');
 const accountCreditSummary = document.getElementById('accountCreditSummary');
 const paymentRecords = document.getElementById('paymentRecords');
 const entranceResultPanel = document.getElementById('entranceResultPanel');
@@ -382,31 +383,17 @@ function renderSubscriptionSelector(child, title, fees, options = {}) {
       : 'No price has been set for this selection.';
     status.textContent = '';
     status.className = 'payment-status status';
+    payButton.disabled = !selectedFee.current;
   }
 
   routeSelect.addEventListener('change', chooseFee);
   modeSelect.addEventListener('change', chooseFee);
   clubSelect.addEventListener('change', chooseFee);
 
-  const loadButton = document.createElement('button');
-  loadButton.type = 'button';
-  loadButton.textContent = 'Load Amount';
   const payButton = document.createElement('button');
   payButton.type = 'button';
   payButton.textContent = 'Pay Selected';
   payButton.disabled = true;
-  loadButton.addEventListener('click', () => {
-    chooseFee();
-    if (!selectedFee.current) {
-      status.textContent = 'No matching amount was found for this selection.';
-      status.className = 'payment-status status bad';
-      payButton.disabled = true;
-      return;
-    }
-    status.textContent = 'Amount loaded. Click Pay Selected to continue.';
-    status.className = 'payment-status status ok';
-    payButton.disabled = false;
-  });
   payButton.addEventListener('click', () => {
     chooseFee();
     if (!selectedFee.current) {
@@ -418,7 +405,6 @@ function renderSubscriptionSelector(child, title, fees, options = {}) {
     payItem(child, selectedFee.current, box);
   });
   box.appendChild(amountLine);
-  box.appendChild(loadButton);
   box.appendChild(payButton);
   box.appendChild(status);
   chooseFee();
@@ -615,10 +601,12 @@ function renderPayableItems(child) {
   const clubFees = records.filter(isClubFee);
   const otherFees = records.filter(isOtherOptionalFee);
   const directRecords = records.filter((fee) => !isBusFee(fee) && !isClubFee(fee) && !isOtherOptionalFee(fee));
+  const optionalRecords = [...busFees, ...clubFees, ...otherFees];
   const payableError = dashboard.payableErrors?.[child.AccountRef] || '';
   const loading = !loadedPayables.has(child.AccountRef);
-  payableItems.innerHTML = records.length ? '' : `<p class="${payableError ? 'status bad' : 'muted'}">${payableError || (loading ? 'Loading payable items...' : 'There are no online payment items due at the moment.')}</p>`;
-  if (busFees.length || clubFees.length || otherFees.length) {
+  payableItems.innerHTML = directRecords.length ? '' : `<p class="${payableError ? 'status bad' : 'muted'}">${payableError || (loading ? 'Loading payable items...' : 'There are no regular online payment items due at the moment.')}</p>`;
+  optionalPayments.innerHTML = optionalRecords.length ? '' : `<p class="${payableError ? 'status bad' : 'muted'}">${payableError || (loading ? 'Loading optional payments...' : 'There are no optional payment items available at the moment.')}</p>`;
+  if (optionalRecords.length) {
     const optionalBox = document.createElement('div');
     optionalBox.className = 'activity-item optional-payments';
     const optionalHeading = document.createElement('strong');
@@ -630,7 +618,7 @@ function renderPayableItems(child) {
     if (clubSelector) optionalBox.appendChild(clubSelector);
     const otherSelector = renderSubscriptionSelector(child, 'Other Optional Item', otherFees, { kind: 'others' });
     if (otherSelector) optionalBox.appendChild(otherSelector);
-    payableItems.appendChild(optionalBox);
+    optionalPayments.appendChild(optionalBox);
   }
   directRecords.forEach((fee) => {
     const item = document.createElement('div');

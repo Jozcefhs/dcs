@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Parent Dashboard</title>
-  <link rel="stylesheet" href="css/style.css?v=20260718-dashboard-session">
+  <link rel="stylesheet" href="css/style.css?v=20260718-optional-payments">
 </head>
 <body>
   <main class="page-wrap">
@@ -42,6 +42,7 @@
         <nav class="dashboard-nav" id="dashboardNav" aria-label="Parent dashboard sections">
           <button type="button" class="selected" data-dashboard-target="overview" aria-selected="true">Overview</button>
           <button type="button" data-dashboard-target="payments" aria-selected="false">Payments</button>
+          <button type="button" data-dashboard-target="optional" aria-selected="false">Optional Payments</button>
           <button type="button" data-dashboard-target="results" aria-selected="false">Results</button>
           <button type="button" data-dashboard-target="wallet" aria-selected="false">Wallet</button>
           <button type="button" data-dashboard-target="clinic" aria-selected="false">Clinic</button>
@@ -56,6 +57,11 @@
           <section class="panel full-panel dashboard-view-panel" data-dashboard-view="payments" hidden>
             <h2>Pay Now</h2>
             <div id="payableItems" class="activity-list"></div>
+          </section>
+
+          <section class="panel full-panel dashboard-view-panel" data-dashboard-view="optional" hidden>
+            <h2>Optional Payments</h2>
+            <div id="optionalPayments" class="activity-list"></div>
           </section>
 
           <section class="panel full-panel dashboard-view-panel" data-dashboard-view="overview">
@@ -113,6 +119,6 @@
   </main>
 
   <script src="js/site-config.js"></script>
-  <script src="js/parent-dashboard.js?v=20260718-dashboard-session"></script>
+  <script src="js/parent-dashboard.js?v=20260718-optional-payments"></script>
 </body>
 </html>

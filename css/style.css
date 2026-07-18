@@ -196,7 +196,7 @@ img{max-width:100%}
 @media (max-width:680px){
   body{padding-bottom:76px}
   .dashboard-nav{position:fixed;left:0;right:0;bottom:0;top:auto;z-index:100;margin:0;padding:7px 5px calc(7px + env(safe-area-inset-bottom));gap:4px;border-width:1px 0 0;border-radius:0;box-shadow:0 -6px 18px rgba(15,52,89,.16)}
-  .dashboard-nav button{min-width:0;min-height:50px;padding:7px 3px;font-size:12px;line-height:1.15;border-radius:7px}
+  .dashboard-nav button{min-width:0;min-height:52px;padding:6px 2px;font-size:11px;line-height:1.1;border-radius:7px}
   .dashboard-grid{display:block}
   .dashboard-view-panel{margin-bottom:10px}
 }
