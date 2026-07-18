@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Parent Dashboard</title>
-  <link rel="stylesheet" href="css/style.css?v=20260718-dashboard-nav-scroll">
+  <link rel="stylesheet" href="css/style.css?v=20260718-dashboard-session">
 </head>
 <body>
   <main class="page-wrap">
@@ -35,6 +35,7 @@
       <section id="dashboardContent" hidden>
         <div class="dashboard-actions">
           <button type="button" id="refreshDashboardBtn">Refresh Dashboard</button>
+          <button type="button" id="signOutDashboardBtn" class="dashboard-signout">Sign Out</button>
         </div>
         <div id="childrenList" class="child-list"></div>
 
@@ -112,6 +113,6 @@
   </main>
 
   <script src="js/site-config.js"></script>
-  <script src="js/parent-dashboard.js?v=20260718-dashboard-nav-scroll"></script>
+  <script src="js/parent-dashboard.js?v=20260718-dashboard-session"></script>
 </body>
 </html>

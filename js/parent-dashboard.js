@@ -1,4 +1,5 @@
 const loginForm = document.getElementById('parentLoginForm');
+const loadDashboardBtn = document.getElementById('loadDashboardBtn');
 const statusEl = document.getElementById('parentStatus');
 const dashboardContent = document.getElementById('dashboardContent');
 const childrenList = document.getElementById('childrenList');
@@ -17,6 +18,7 @@ const txnLimit = document.getElementById('txnLimit');
 const dailyLimit = document.getElementById('dailyLimit');
 const pinThreshold = document.getElementById('pinThreshold');
 const refreshDashboardBtn = document.getElementById('refreshDashboardBtn');
+const signOutDashboardBtn = document.getElementById('signOutDashboardBtn');
 const dashboardNav = document.getElementById('dashboardNav');
 const dashboardViewPanels = Array.from(document.querySelectorAll('[data-dashboard-view]'));
 
@@ -83,6 +85,14 @@ function freshBody(payload) {
 function setStatus(message, type) {
   statusEl.textContent = message || '';
   statusEl.className = 'status ' + (type || '');
+}
+
+function setLoginLoading(loading) {
+  if (!loadDashboardBtn) return;
+  loadDashboardBtn.disabled = loading;
+  loadDashboardBtn.classList.toggle('is-loading', loading);
+  loadDashboardBtn.setAttribute('aria-busy', loading ? 'true' : 'false');
+  loadDashboardBtn.textContent = loading ? 'Opening dashboard...' : 'Open Dashboard';
 }
 
 function money(value) {
@@ -811,6 +821,7 @@ async function loadDashboard() {
   loadedPayables.clear();
   selectedAccountRef = data.children?.[0]?.AccountRef || '';
   dashboardContent.hidden = false;
+  loginForm.hidden = true;
   renderDashboard();
   showDashboardView(activeDashboardView);
   await loadPayablesForSelected(true);
@@ -819,11 +830,15 @@ async function loadDashboard() {
 
 loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
+  if (loadDashboardBtn?.disabled) return;
+  setLoginLoading(true);
   try {
     await loadDashboard();
   } catch (error) {
     dashboardContent.hidden = true;
     setStatus(error.message, 'bad');
+  } finally {
+    setLoginLoading(false);
   }
 });
 
@@ -868,6 +883,24 @@ if (refreshDashboardBtn) {
     } catch (error) {
       setStatus(error.message, 'bad');
     }
+  });
+}
+
+if (signOutDashboardBtn) {
+  signOutDashboardBtn.addEventListener('click', () => {
+    passportPhotoCache.forEach((objectUrl) => URL.revokeObjectURL(objectUrl));
+    passportPhotoCache.clear();
+    loadedPayables.clear();
+    dashboard = null;
+    selectedAccountRef = '';
+    activeDashboardView = 'overview';
+    dashboardContent.hidden = true;
+    loginForm.hidden = false;
+    loginForm.reset();
+    setLoginLoading(false);
+    setStatus('Signed out successfully.', 'ok');
+    document.getElementById('parentEmail')?.focus();
+    loginForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 }
 
