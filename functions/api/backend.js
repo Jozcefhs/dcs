@@ -3855,7 +3855,20 @@ async function getAccountingOverview(env, body = {}) {
 function payrollComponents(value) {
   if (Array.isArray(value)) return value;
   if (typeof value === 'string' && value.trim()) {
-    try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed : []; } catch (_err) { return []; }
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed;
+    } catch (_err) {
+      // CSV imports use the friendlier "Housing=5000; Transport=2000" format.
+    }
+    return value.replace(/\r?\n/g, ';').split(';').map((part) => {
+      const text = clean(part);
+      if (!text) return null;
+      const separator = text.includes('=') ? '=' : ':';
+      const pieces = text.split(separator);
+      if (pieces.length < 2) return null;
+      return { Name: clean(pieces.shift()), Amount: asMoneyNumber(pieces.join(separator)) };
+    }).filter(Boolean);
   }
   return [];
 }
@@ -3907,6 +3920,97 @@ async function savePayrollProfile(env, body) {
   await upsertDocument(env, 'payrollProfiles', safeDocumentId(employeeId), payload);
   await writePayrollAudit(env, existing.EmployeeId ? 'UPDATE' : 'CREATE', 'Payroll Profile', employeeId, body, displayName);
   return { ok: true, message: 'Payroll profile saved.', profile: payload };
+}
+
+async function createPayrollProfilesFromStaff(env, body) {
+  requireAccountingRole(body, ['Super Admin', 'Accounts Officer']);
+  const [staffUsers, profiles] = await Promise.all([
+    listCollection(env, 'staffUsers'),
+    listCollection(env, 'payrollProfiles')
+  ]);
+  const existingUsernames = new Set(profiles.map((row) => lower(row.Username)).filter(Boolean));
+  let created = 0; let skipped = 0; const failures = [];
+  for (const staff of staffUsers) {
+    const username = clean(staff.Username || staff.__id);
+    if (!username || yesNo(staff.Active ?? 'YES') !== 'YES' || existingUsernames.has(lower(username))) {
+      skipped += 1;
+      continue;
+    }
+    try {
+      await savePayrollProfile(env, {
+        ...body,
+        EmployeeId: ledgerDocumentId('EMP'),
+        Username: username,
+        DisplayName: clean(staff.DisplayName) || username,
+        Department: clean(staff.Department),
+        Position: clean(staff.Position),
+        EmploymentType: clean(staff.EmploymentType) || 'Permanent',
+        BasicSalary: 0,
+        Active: 'YES',
+        Notes: 'Created from staff account; complete salary and bank details before payroll generation.'
+      });
+      existingUsernames.add(lower(username));
+      created += 1;
+    } catch (error) {
+      failures.push({ username, message: error.message || String(error) });
+    }
+  }
+  await writePayrollAudit(env, 'BULK CREATE FROM STAFF', 'Payroll Profiles', 'staffUsers', body,
+    `${created} created; ${skipped} skipped; ${failures.length} failed`);
+  return {
+    ok: true,
+    message: `${created} payroll profile(s) created from active staff accounts; ${skipped} already linked or inactive${failures.length ? `; ${failures.length} failed` : ''}.`,
+    created, skipped, failures
+  };
+}
+
+async function importPayrollProfiles(env, body) {
+  requireAccountingRole(body, ['Super Admin', 'Accounts Officer']);
+  const rows = Array.isArray(body.Profiles || body.profiles) ? (body.Profiles || body.profiles).slice(0, 500) : [];
+  if (!rows.length) { const err = new Error('Choose a payroll CSV containing at least one profile row.'); err.status = 400; throw err; }
+  const updateExisting = yesNo(body.UpdateExisting ?? body.updateExisting ?? 'YES') === 'YES';
+  const profiles = await listCollection(env, 'payrollProfiles');
+  const byUsername = new Map(profiles.map((row) => [lower(row.Username), row]).filter(([username]) => username));
+  const byEmployeeId = new Map(profiles.map((row) => [lower(row.EmployeeId), row]).filter(([employeeId]) => employeeId));
+  const seenUsernames = new Set();
+  let created = 0; let updated = 0; let skipped = 0; const failures = [];
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index] || {};
+    const username = clean(row.Username || row.username);
+    const existing = byUsername.get(lower(username));
+    const requestedEmployeeId = clean(row.EmployeeId || row.employeeId);
+    const employeeIdOwner = byEmployeeId.get(lower(requestedEmployeeId));
+    if (seenUsernames.has(lower(username))) {
+      failures.push({ row: index + 2, username, message: 'Duplicate username in this CSV.' });
+      continue;
+    }
+    seenUsernames.add(lower(username));
+    if (employeeIdOwner && !sameText(employeeIdOwner.Username, username)) {
+      failures.push({ row: index + 2, username, message: `Employee ID ${requestedEmployeeId} belongs to another payroll profile.` });
+      continue;
+    }
+    if (existing && !updateExisting) { skipped += 1; continue; }
+    try {
+      const result = await savePayrollProfile(env, {
+        ...body,
+        ...row,
+        EmployeeId: clean(row.EmployeeId || row.employeeId || existing?.EmployeeId) || ledgerDocumentId('EMP'),
+        Username: username
+      });
+      byUsername.set(lower(username), result.profile);
+      byEmployeeId.set(lower(result.profile.EmployeeId), result.profile);
+      if (existing) updated += 1; else created += 1;
+    } catch (error) {
+      failures.push({ row: index + 2, username, message: error.message || String(error) });
+    }
+  }
+  await writePayrollAudit(env, 'BULK IMPORT', 'Payroll Profiles', 'CSV', body,
+    `${created} created; ${updated} updated; ${skipped} skipped; ${failures.length} failed`);
+  return {
+    ok: true,
+    message: `${created} payroll profile(s) created, ${updated} updated, ${skipped} skipped${failures.length ? `; ${failures.length} failed` : ''}.`,
+    created, updated, skipped, failures
+  };
 }
 
 async function generatePayrollRun(env, body) {
@@ -4172,6 +4276,10 @@ async function routeAction(env, action, body = {}) {
       return getAccountingOverview(env, body);
     case 'savePayrollProfile':
       return savePayrollProfile(env, body);
+    case 'createPayrollProfilesFromStaff':
+      return createPayrollProfilesFromStaff(env, body);
+    case 'importPayrollProfiles':
+      return importPayrollProfiles(env, body);
     case 'generatePayrollRun':
       return generatePayrollRun(env, body);
     case 'savePayrollRunStatus':
