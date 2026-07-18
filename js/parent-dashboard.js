@@ -474,6 +474,9 @@ async function loadPayablesForSelected(force = false) {
       dashboard.dueNotifications[child.AccountRef] = payableData.dueNotifications || [];
     }
     if (activityResponse.ok && activityData.ok) {
+      if (typeof activityData.showResultsOnline === 'boolean') {
+        dashboard.showResultsOnline = activityData.showResultsOnline;
+      }
       dashboard.walletActivity[child.AccountRef] = activityData.walletActivity || [];
       if (activityData.accountSummary) {
         dashboard.accountSummaries[child.AccountRef] = activityData.accountSummary;
@@ -698,20 +701,23 @@ function resultDisplayMode() {
 }
 
 function resultsOnlineEnabled() {
+  if (typeof dashboard?.showResultsOnline === 'boolean') {
+    return dashboard.showResultsOnline;
+  }
   const profileValue = String(window.SCHOOL_PROFILE?.ShowResultsOnline || '').trim().toUpperCase();
-  if (profileValue) return profileValue === 'YES';
-  return dashboard?.showResultsOnline === true;
+  return profileValue === 'YES';
 }
 
 function renderEntranceResults(child) {
+  const records = dashboard.entranceResults?.[child.AccountRef] || [];
+  const resultsVisible = resultsOnlineEnabled() || records.length > 0;
   if (entranceResultPanel) {
-    entranceResultPanel.hidden = !resultsOnlineEnabled();
+    entranceResultPanel.hidden = !resultsVisible;
   }
-  if (!resultsOnlineEnabled()) {
+  if (!resultsVisible) {
     entranceResults.innerHTML = '';
     return;
   }
-  const records = dashboard.entranceResults?.[child.AccountRef] || [];
   entranceResults.innerHTML = records.length ? '' : '<p class="muted">Entrance result is not available yet.</p>';
   records.forEach((record) => {
     const item = document.createElement('div');

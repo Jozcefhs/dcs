@@ -85,6 +85,10 @@ function normalizeReferenceText(value) {
   return clean(value).toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
+function normalizedPersonName(value) {
+  return lower(value).split(/[^a-z0-9]+/).filter(Boolean).sort().join('|');
+}
+
 function referencesMatch(left, right) {
   const a = normalizeReferenceText(left);
   const b = normalizeReferenceText(right);
@@ -119,6 +123,35 @@ function accountKeys(student) {
     pick(student, ['AdmissionNo', 'admissionNo']),
     pick(student, ['ApplicationReference', 'applicationReference', 'ApplicationID', 'applicationId'])
   ].map(clean).filter(Boolean);
+}
+
+function applicationKeys(application) {
+  return [
+    pick(application, ['ApplicationReference', 'applicationReference']),
+    pick(application, ['ApplicationID', 'applicationId']),
+    pick(application, ['AdmissionNo', 'admissionNo']),
+    pick(application, ['__id'])
+  ].map(clean).filter(Boolean);
+}
+
+function applicationMatchesChild(application, child) {
+  const appKeys = applicationKeys(application);
+  const childKeys = accountKeys(child);
+  if (appKeys.some((appKey) => childKeys.some((childKey) => sameText(appKey, childKey) || referencesMatch(appKey, childKey)))) {
+    return true;
+  }
+
+  const applicationName = formatPersonName(
+    application,
+    {},
+    pick(application, ['ApplicantName', 'applicantName', 'DisplayName', 'displayName', 'Name', 'name'])
+  );
+  const childName = pick(child, ['DisplayName', 'displayName', 'ApplicantName', 'applicantName', 'Name', 'name']);
+  const applicationEmail = lower(pick(application, ['VerificationEmail', 'verificationEmail', 'ParentEmail', 'parentEmail', 'Email', 'email']));
+  const childEmail = lower(pick(child, ['ParentEmail', 'parentEmail', 'VerificationEmail', 'verificationEmail', 'Email', 'email']));
+  return Boolean(applicationName && childName && applicationEmail && childEmail &&
+    normalizedPersonName(applicationName) === normalizedPersonName(childName) &&
+    applicationEmail === childEmail);
 }
 
 function studentLoginCode(student) {
@@ -854,10 +887,8 @@ async function getDashboard(env, body) {
     clinicVisits[child.AccountRef] = clinic.filter((record) => {
       return anyKeyMatches(record.AdmissionNo, keys);
     }).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
-    const resultSource = applications.find((app) => {
-      const appRef = pick(app, ['ApplicationReference', 'applicationReference', 'ApplicationID', 'applicationId', '__id']);
-      return keys.some((key) => referencesMatch(appRef, key) || sameText(appRef, key));
-    }) || (child.SourceType === 'Application' ? child : null);
+    const resultSource = applications.find((app) => applicationMatchesChild(app, child)) ||
+      (child.SourceType === 'Application' ? child : null);
     const result = buildEntranceResult(resultSource, schoolProfile);
     entranceResults[child.AccountRef] = result ? [result] : [];
   }
@@ -923,10 +954,8 @@ async function getChildActivity(env, body) {
   child.TotalCredit = accountSummary.TotalCredit;
   child.OutstandingBalance = accountSummary.OutstandingBalance;
   child.CreditBalance = accountSummary.CreditBalance;
-  const resultSource = applications.find((app) => {
-    const appRef = pick(app, ['ApplicationReference', 'applicationReference', 'ApplicationID', 'applicationId', '__id']);
-    return keys.some((key) => referencesMatch(appRef, key) || sameText(appRef, key));
-  }) || (child.SourceType === 'Application' ? child : null);
+  const resultSource = applications.find((app) => applicationMatchesChild(app, child)) ||
+    (child.SourceType === 'Application' ? child : null);
   const result = buildEntranceResult(resultSource, schoolProfile);
   return {
     ok: true,

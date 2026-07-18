@@ -136,3 +136,51 @@ button,.btn{display:inline-block;border:0;border-radius:8px;background:var(--blu
   color: #0d542b;
   font-weight: bold;
 }
+
+/* Responsive portal layout: comfortable touch targets and phone-friendly stacking. */
+img{max-width:100%}
+.card,.hero-card,.panel,.activity-item,.child-card{min-width:0;overflow-wrap:anywhere}
+
+@media (max-width:680px){
+  body{overflow-x:hidden}
+  .hero-wrap,.page-wrap{padding:8px;min-height:auto}
+  .card,.hero-card{padding:14px;border-radius:10px;box-shadow:none}
+  .form-header{display:grid;grid-template-columns:52px minmax(0,1fr);gap:10px;align-items:center;padding-bottom:12px;margin-bottom:14px}
+  .form-header .logo.small{width:52px;max-height:58px;margin:0}
+  .form-header h1{font-size:24px;margin-bottom:5px}
+  .form-header .muted{font-size:14px}
+  fieldset{padding:12px;margin:14px 0}
+  input,select,textarea,button,.btn{font-size:16px}
+  button,.btn{min-height:44px;padding:11px 14px}
+  .dashboard-login button,.dashboard-actions button,#restrictionForm button{width:100%}
+  .dashboard-actions{display:block;margin-bottom:10px}
+  .child-list{grid-template-columns:1fr;gap:8px;margin:10px 0 14px}
+  .child-card{width:100%;min-height:86px}
+  .dashboard-grid{gap:10px}
+  .panel{padding:12px}
+  .panel h2{font-size:17px}
+  .metric-row{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .activity-item{padding:11px}
+  .activity-item input{max-width:none}
+  .activity-item button,.activity-item .btn{width:100%;margin-left:0;margin-right:0}
+  .result-scores{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .admin-tabs{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .admin-table-wrap{margin-left:-12px;margin-right:-12px;padding:0 12px;-webkit-overflow-scrolling:touch}
+  .admin-table{min-width:680px}
+  .breakdown-row{align-items:flex-start}
+  .fee-option{padding:10px}
+  .nav-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .nav-actions a{display:flex;align-items:center;min-height:44px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff}
+}
+
+@media (max-width:420px){
+  .form-header{grid-template-columns:44px minmax(0,1fr)}
+  .form-header .logo.small{width:44px;max-height:50px}
+  .form-header h1{font-size:21px}
+  .metric-row,.result-scores,.admin-tabs,.nav-actions{grid-template-columns:1fr}
+  .child-card-layout{grid-template-columns:54px minmax(0,1fr);gap:10px}
+  .child-passport{width:54px;height:64px}
+  .breakdown-row{display:grid;gap:3px}
+  .fee-option span{display:grid;gap:4px}
+  .hero-copy h1{font-size:28px}
+}
