@@ -17,6 +17,9 @@ const passwordDialog = document.getElementById('staffPasswordDialog');
 const passwordForm = document.getElementById('staffPasswordForm');
 const passwordButton = document.getElementById('staffPasswordButton');
 const passwordStatus = document.getElementById('staffPasswordStatus');
+const menuToggleButton = document.getElementById('staffMenuToggle');
+const sidebarEl = document.getElementById('staffSidebar');
+const sidebarScrim = document.getElementById('staffSidebarScrim');
 
 let currentUser = null;
 let dashboardData = null;
@@ -77,7 +80,17 @@ function setButtonLoading(button, loading, loadingText, normalText) {
   button.textContent = loading ? loadingText : normalText;
 }
 
+function setSidebarOpen(open) {
+  const shouldOpen = Boolean(open) && window.matchMedia('(max-width: 680px)').matches && !dashboardEl.hidden;
+  sidebarEl.classList.toggle('is-open', shouldOpen);
+  sidebarScrim.hidden = !shouldOpen;
+  menuToggleButton.setAttribute('aria-expanded', shouldOpen ? 'true' : 'false');
+  document.body.classList.toggle('staff-sidebar-open', shouldOpen);
+  if (shouldOpen) sidebarEl.querySelector('[data-tab]')?.focus();
+}
+
 function showLogin(message = '', type = '') {
+  setSidebarOpen(false);
   currentUser = null;
   dashboardData = null;
   activeSection = '';
@@ -179,6 +192,7 @@ function renderTabs(allowed) {
       activeSection = button.dataset.tab;
       renderTabs(allowed);
       renderSection(activeSection);
+      setSidebarOpen(false);
       panelEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   });
@@ -797,6 +811,10 @@ signOutButton.addEventListener('click', async () => {
 });
 
 refreshButton.addEventListener('click', loadDashboard);
+menuToggleButton.addEventListener('click', () => setSidebarOpen(!sidebarEl.classList.contains('is-open')));
+sidebarScrim.addEventListener('click', () => setSidebarOpen(false));
+document.addEventListener('keydown', (event) => { if (event.key === 'Escape') setSidebarOpen(false); });
+window.addEventListener('resize', () => { if (window.innerWidth > 680) setSidebarOpen(false); });
 
 passwordForm.addEventListener('submit', async (event) => {
   event.preventDefault();

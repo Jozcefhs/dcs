@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>School Staff Portal</title>
-  <link rel="stylesheet" href="css/style.css?v=20260718-student-breakdown">
+  <link rel="stylesheet" href="css/style.css?v=20260718-mobile-sidebar">
 </head>
 <body class="staff-page">
   <header class="staff-topbar">
@@ -13,6 +13,7 @@
       <span><strong data-school-name>School Management Suite</strong><small>Web Companion</small></span>
     </a>
     <div id="staffIdentity" class="staff-identity" hidden>
+      <button type="button" id="staffMenuToggle" class="staff-menu-toggle" aria-controls="staffSidebar" aria-expanded="false"><span aria-hidden="true">☰</span> Menu</button>
       <span><strong id="staffDisplayName"></strong><small id="staffRole"></small></span>
       <button type="button" id="staffSignOut" class="dashboard-signout">Sign Out</button>
     </div>
@@ -36,7 +37,7 @@
 
     <section id="staffDashboard" class="staff-dashboard" hidden>
       <div class="staff-app-layout">
-        <aside class="staff-sidebar">
+        <aside class="staff-sidebar" id="staffSidebar">
           <div class="staff-sidebar-heading">
             <small>Workspace</small>
             <strong>Financial Operations</strong>
@@ -47,6 +48,7 @@
             <div><strong>Firestore Live</strong><small>Desktop and web are synchronized</small></div>
           </div>
         </aside>
+        <button type="button" id="staffSidebarScrim" class="staff-sidebar-scrim" aria-label="Close navigation menu" hidden></button>
         <div class="staff-main-content">
           <div class="staff-welcome">
             <div>
@@ -77,6 +79,6 @@
   </dialog>
 
   <script src="js/site-config.js?v=20260718-personalized-ui"></script>
-  <script src="js/admin.js?v=20260718-student-breakdown"></script>
+  <script src="js/admin.js?v=20260718-mobile-sidebar"></script>
 </body>
 </html>
