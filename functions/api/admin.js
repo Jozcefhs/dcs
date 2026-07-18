@@ -1,5 +1,6 @@
 import { getAccountsOverview } from './backend.js';
 import { listCollection, requireFirestoreEnv } from '../lib/firestore.js';
+import { requireStaffSession } from '../lib/staff-auth.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -17,20 +18,6 @@ function publicRows(rows, limit = 50) {
     delete copy.PasswordHash;
     return copy;
   });
-}
-
-function requireAdmin(env, body) {
-  const expected = clean(env.ADMIN_WEB_PASSWORD);
-  if (!expected) {
-    const err = new Error('Web admin login is not configured. Add ADMIN_WEB_PASSWORD in Cloudflare.');
-    err.status = 500;
-    throw err;
-  }
-  if (clean(body.password) !== expected) {
-    const err = new Error('Invalid admin password.');
-    err.status = 401;
-    throw err;
-  }
 }
 
 function sortRecent(rows, dateKeys) {
@@ -76,8 +63,13 @@ export async function onRequestPost(context) {
   try {
     const { request, env } = context;
     requireFirestoreEnv(env);
-    const body = await request.json().catch(() => ({}));
-    requireAdmin(env, body);
+    const user = await requireStaffSession(env, request);
+    const allowed = new Set(user.allowedSections || []);
+    if (!allowed.size) {
+      const err = new Error('Your staff role does not currently have a web dashboard section assigned.');
+      err.status = 403;
+      throw err;
+    }
 
     const [
       applications,
@@ -92,71 +84,84 @@ export async function onRequestPost(context) {
       clinicMovements,
       kitchenMovements
     ] = await Promise.all([
-      listCollection(env, 'applications'),
-      listCollection(env, 'students'),
-      listCollection(env, 'formSales'),
-      listCollection(env, 'payments'),
-      listCollection(env, 'invoices'),
-      listCollection(env, 'ledger'),
-      listCollection(env, 'clinicRecords'),
-      listCollection(env, 'clinicInventory'),
-      listCollection(env, 'kitchenInventory'),
-      listCollection(env, 'clinicMovements'),
-      listCollection(env, 'kitchenMovements')
+      allowed.has('admissions') ? listCollection(env, 'applications') : Promise.resolve([]),
+      allowed.has('students') ? listCollection(env, 'students') : Promise.resolve([]),
+      allowed.has('formPurchases') ? listCollection(env, 'formSales') : Promise.resolve([]),
+      allowed.has('accounts') ? listCollection(env, 'payments') : Promise.resolve([]),
+      allowed.has('accounts') ? listCollection(env, 'invoices') : Promise.resolve([]),
+      (allowed.has('accounts') || allowed.has('tuckShop')) ? listCollection(env, 'ledger') : Promise.resolve([]),
+      allowed.has('clinic') ? listCollection(env, 'clinicRecords') : Promise.resolve([]),
+      allowed.has('clinic') ? listCollection(env, 'clinicInventory') : Promise.resolve([]),
+      allowed.has('kitchen') ? listCollection(env, 'kitchenInventory') : Promise.resolve([]),
+      allowed.has('clinic') ? listCollection(env, 'clinicMovements') : Promise.resolve([]),
+      allowed.has('kitchen') ? listCollection(env, 'kitchenMovements') : Promise.resolve([])
     ]);
 
     let accountOverview = null;
-    try {
-      accountOverview = await getAccountsOverview(env);
-    } catch (_err) {
-      accountOverview = null;
+    if (allowed.has('accounts')) {
+      try {
+        accountOverview = await getAccountsOverview(env);
+      } catch (_err) {
+        accountOverview = null;
+      }
     }
     const displayInvoices = reconcileInvoiceDisplay(invoices, accountOverview && accountOverview.ok ? accountOverview.accounts : []);
     const walletPurchases = ledger.filter((row) => clean(row.EntryType).toLowerCase() === 'wallet purchase');
     const lowClinic = clinicInventory.filter((row) => toNumber(row.ReorderLevel) > 0 && toNumber(row.Quantity) <= toNumber(row.ReorderLevel));
     const lowKitchen = kitchenInventory.filter((row) => toNumber(row.ReorderLevel) > 0 && toNumber(row.Quantity) <= toNumber(row.ReorderLevel));
 
+    const allDepartments = {
+      admissions: publicRows(sortRecent(applications, ['SubmittedAt', 'UpdatedAt', 'Timestamp']), 80),
+      students: publicRows(sortRecent(students, ['UpdatedAt', 'EnrolledAt', 'CreatedAt']), 80),
+      formPurchases: publicRows(sortRecent(formSales, ['PaymentDate', 'UpdatedAt', 'CreatedAt']), 80),
+      accounts: {
+        payments: publicRows(sortRecent(payments, ['PaidAt', 'Date', 'RecordedAt']), 80),
+        invoices: publicRows(sortRecent(displayInvoices, ['Date', 'CreatedAt', 'DueDate']), 80),
+        ledger: publicRows(sortRecent(ledger, ['Date', 'CreatedAt']), 100)
+      },
+      clinic: {
+        records: publicRows(sortRecent(clinicRecords, ['Date', 'CreatedAt']), 80),
+        inventory: publicRows(sortRecent(clinicInventory, ['LastUpdated', 'UpdatedAt']), 80),
+        lowStock: publicRows(lowClinic, 80),
+        movements: publicRows(sortRecent(clinicMovements, ['Date', 'CreatedAt']), 80)
+      },
+      kitchen: {
+        inventory: publicRows(sortRecent(kitchenInventory, ['LastUpdated', 'UpdatedAt']), 80),
+        lowStock: publicRows(lowKitchen, 80),
+        movements: publicRows(sortRecent(kitchenMovements, ['Date', 'CreatedAt']), 80)
+      },
+      tuckShop: {
+        purchases: publicRows(sortRecent(walletPurchases, ['Date', 'CreatedAt']), 100)
+      }
+    };
+    const departments = Object.fromEntries(Object.entries(allDepartments).filter(([key]) => allowed.has(key)));
+    const summary = {};
+    if (allowed.has('admissions')) summary.applications = applications.length;
+    if (allowed.has('students')) summary.students = students.length;
+    if (allowed.has('formPurchases')) summary.formPurchases = formSales.length;
+    if (allowed.has('accounts')) {
+      summary.payments = payments.length;
+      summary.invoices = invoices.length;
+    }
+    if (allowed.has('clinic')) {
+      summary.clinicRecords = clinicRecords.length;
+      summary.clinicInventory = clinicInventory.length;
+      summary.lowClinicStock = lowClinic.length;
+    }
+    if (allowed.has('kitchen')) {
+      summary.kitchenInventory = kitchenInventory.length;
+      summary.lowKitchenStock = lowKitchen.length;
+    }
+    if (allowed.has('tuckShop')) summary.tuckShopPurchases = walletPurchases.length;
+
     return Response.json({
       ok: true,
-      message: 'Admin dashboard loaded.',
-      summary: {
-        applications: applications.length,
-        students: students.length,
-        formPurchases: formSales.length,
-        payments: payments.length,
-        invoices: invoices.length,
-        clinicRecords: clinicRecords.length,
-        clinicInventory: clinicInventory.length,
-        kitchenInventory: kitchenInventory.length,
-        tuckShopPurchases: walletPurchases.length,
-        lowClinicStock: lowClinic.length,
-        lowKitchenStock: lowKitchen.length
-      },
-      departments: {
-        admissions: publicRows(sortRecent(applications, ['SubmittedAt', 'UpdatedAt', 'Timestamp']), 80),
-        students: publicRows(sortRecent(students, ['UpdatedAt', 'EnrolledAt', 'CreatedAt']), 80),
-        formPurchases: publicRows(sortRecent(formSales, ['PaymentDate', 'UpdatedAt', 'CreatedAt']), 80),
-        accounts: {
-          payments: publicRows(sortRecent(payments, ['PaidAt', 'Date', 'RecordedAt']), 80),
-          invoices: publicRows(sortRecent(displayInvoices, ['Date', 'CreatedAt', 'DueDate']), 80),
-          ledger: publicRows(sortRecent(ledger, ['Date', 'CreatedAt']), 100)
-        },
-        clinic: {
-          records: publicRows(sortRecent(clinicRecords, ['Date', 'CreatedAt']), 80),
-          inventory: publicRows(sortRecent(clinicInventory, ['LastUpdated', 'UpdatedAt']), 80),
-          lowStock: publicRows(lowClinic, 80),
-          movements: publicRows(sortRecent(clinicMovements, ['Date', 'CreatedAt']), 80)
-        },
-        kitchen: {
-          inventory: publicRows(sortRecent(kitchenInventory, ['LastUpdated', 'UpdatedAt']), 80),
-          lowStock: publicRows(lowKitchen, 80),
-          movements: publicRows(sortRecent(kitchenMovements, ['Date', 'CreatedAt']), 80)
-        },
-        tuckShop: {
-          purchases: publicRows(sortRecent(walletPurchases, ['Date', 'CreatedAt']), 100)
-        }
-      }
-    });
+      message: 'Staff dashboard loaded.',
+      user,
+      allowedSections: user.allowedSections,
+      summary,
+      departments
+    }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err) {
     return Response.json({ ok: false, message: err.message || String(err) }, { status: err.status || 500 });
   }

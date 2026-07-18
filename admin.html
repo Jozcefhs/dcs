@@ -3,39 +3,54 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Integrated School Management Suite - Web Admin</title>
-  <link rel="stylesheet" href="css/style.css?v=20260718-mobile">
+  <title>School Staff Portal</title>
+  <link rel="stylesheet" href="css/style.css?v=20260718-staff-foundation">
 </head>
-<body>
-  <main class="page-wrap">
-    <section class="card dashboard-card">
-      <h1>School Web Admin</h1>
-      <p class="muted">Department activity dashboard for admissions, accounts, clinic, kitchen, tuck shop, and students.</p>
-      <p><a href="setup.html">School setup</a></p>
+<body class="staff-page">
+  <header class="staff-topbar">
+    <a class="staff-brand" href="index.html">
+      <img src="images/logo.png" alt="" class="nav-logo" onerror="this.style.display='none'">
+      <span><strong data-school-name>School Management Suite</strong><small>Web Companion</small></span>
+    </a>
+    <div id="staffIdentity" class="staff-identity" hidden>
+      <span><strong id="staffDisplayName"></strong><small id="staffRole"></small></span>
+      <button type="button" id="staffSignOut" class="dashboard-signout">Sign Out</button>
+    </div>
+  </header>
 
-      <form id="adminLogin" class="dashboard-login">
-        <div class="grid two">
-          <div>
-            <label for="adminPassword">Admin Password <span class="required">*</span></label>
-            <input id="adminPassword" type="password" autocomplete="current-password" required>
-          </div>
-          <div>
-            <label>&nbsp;</label>
-            <button type="submit">Open Dashboard</button>
-          </div>
-        </div>
-        <p id="adminStatus" class="status"></p>
+  <main class="staff-shell">
+    <section id="staffLoginCard" class="card staff-login-card">
+      <p class="eyebrow">Authorized staff only</p>
+      <h1>Staff Web Companion</h1>
+      <p class="lead">Sign in to access the Firestore records permitted for your role.</p>
+      <form id="staffLoginForm" autocomplete="on">
+        <label for="staffUsername">Username</label>
+        <input id="staffUsername" name="username" autocomplete="username" required>
+        <label for="staffPassword">Password</label>
+        <input id="staffPassword" name="password" type="password" autocomplete="current-password" required>
+        <button id="staffLoginButton" type="submit">Sign In</button>
+        <p id="staffLoginStatus" class="status" role="status"></p>
       </form>
+      <p class="muted staff-login-note">This web portal complements the desktop application. Both use the same Firestore data.</p>
+    </section>
 
-      <section id="adminDashboard" hidden>
-        <div id="adminSummary" class="metric-row"></div>
-        <div class="admin-tabs" id="adminTabs"></div>
-        <section id="adminPanel" class="panel full-panel"></section>
-      </section>
-
-      <p><a href="index.html">Return to admission portal</a></p>
+    <section id="staffDashboard" class="staff-dashboard" hidden>
+      <div class="staff-welcome">
+        <div>
+          <p class="eyebrow">Live Firestore overview</p>
+          <h1 id="staffWelcomeTitle">Dashboard</h1>
+          <p class="muted">The available sections are controlled by your assigned staff role.</p>
+        </div>
+        <button type="button" id="staffRefresh">Refresh Dashboard</button>
+      </div>
+      <p id="staffDashboardStatus" class="status" role="status"></p>
+      <div id="adminSummary" class="metric-row staff-summary"></div>
+      <nav class="admin-tabs staff-tabs" id="adminTabs" aria-label="Staff dashboard sections"></nav>
+      <section id="adminPanel" class="panel full-panel staff-panel"></section>
     </section>
   </main>
-  <script src="js/admin.js"></script>
+
+  <script src="js/site-config.js"></script>
+  <script src="js/admin.js?v=20260718-staff-foundation"></script>
 </body>
 </html>

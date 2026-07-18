@@ -200,3 +200,25 @@ img{max-width:100%}
   .dashboard-grid{display:block}
   .dashboard-view-panel{margin-bottom:10px}
 }
+
+/* Staff web companion */
+.staff-page{min-height:100vh;background:linear-gradient(180deg,#e8f0f9 0,#f4f7fa 260px,#eef3f8 100%)}
+.staff-topbar{position:sticky;top:0;z-index:50;display:flex;align-items:center;justify-content:space-between;gap:18px;padding:12px max(18px,calc((100vw - 1240px)/2));border-bottom:1px solid var(--line);background:rgba(255,255,255,.97);box-shadow:0 4px 14px rgba(15,52,89,.08)}
+.staff-brand{display:flex;align-items:center;gap:11px;color:var(--blue2);text-decoration:none}.staff-brand span,.staff-brand strong,.staff-brand small{display:block}.staff-brand small{color:var(--muted)}
+.staff-identity{display:flex;align-items:center;justify-content:flex-end;gap:12px;text-align:right}.staff-identity span,.staff-identity strong,.staff-identity small{display:block}.staff-identity small{color:var(--muted)}.staff-identity button{margin:0}
+.staff-shell{width:100%;max-width:1240px;margin:0 auto;padding:28px 18px 48px}
+.staff-login-card{max-width:500px;margin:42px auto}.staff-login-card .lead{font-size:17px;margin-bottom:18px}.staff-login-card button{width:100%}.staff-login-note{margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}
+.staff-dashboard{display:grid;gap:16px}.staff-welcome{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:20px;border:1px solid var(--line);border-radius:12px;background:#fff}.staff-welcome h1{margin-bottom:5px}.staff-welcome button{margin:0;white-space:nowrap}
+.staff-summary{margin:0}.staff-summary div{box-shadow:0 4px 12px rgba(15,52,89,.05)}
+.staff-tabs{position:sticky;top:75px;z-index:30;padding:8px;border:1px solid var(--line);border-radius:11px;background:rgba(255,255,255,.97);box-shadow:0 5px 15px rgba(15,52,89,.08)}.staff-tabs .child-card{min-height:46px;text-align:center}.staff-tabs .child-card.selected{color:#fff;background:var(--blue);border-color:var(--blue2)}
+.staff-panel{background:#fff;scroll-margin-top:145px}.staff-panel h2:not(:first-child){margin-top:28px}
+
+@media (max-width:680px){
+  .staff-page{padding-bottom:0}
+  .staff-topbar{padding:9px 10px}.staff-brand .nav-logo{max-width:38px}.staff-brand strong{font-size:14px}.staff-brand small{font-size:11px}
+  .staff-identity span{display:none}.staff-identity button{min-height:40px;padding:8px 11px;font-size:13px}
+  .staff-shell{padding:14px 8px 30px}.staff-login-card{margin:18px auto}
+  .staff-welcome{display:grid;padding:15px}.staff-welcome button{width:100%}
+  .staff-tabs{top:59px;display:flex;overflow-x:auto;grid-template-columns:none;-webkit-overflow-scrolling:touch;scrollbar-width:thin}.staff-tabs .child-card{flex:0 0 auto;min-width:130px;min-height:44px}
+  .staff-panel{padding:12px;scroll-margin-top:124px}
+}

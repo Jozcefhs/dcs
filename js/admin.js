@@ -1,13 +1,22 @@
-const loginForm = document.getElementById('adminLogin');
-const passwordInput = document.getElementById('adminPassword');
-const statusEl = document.getElementById('adminStatus');
-const dashboardEl = document.getElementById('adminDashboard');
+const loginCard = document.getElementById('staffLoginCard');
+const loginForm = document.getElementById('staffLoginForm');
+const loginButton = document.getElementById('staffLoginButton');
+const loginStatus = document.getElementById('staffLoginStatus');
+const dashboardEl = document.getElementById('staffDashboard');
+const dashboardStatus = document.getElementById('staffDashboardStatus');
+const identityEl = document.getElementById('staffIdentity');
+const displayNameEl = document.getElementById('staffDisplayName');
+const roleEl = document.getElementById('staffRole');
+const welcomeTitle = document.getElementById('staffWelcomeTitle');
+const signOutButton = document.getElementById('staffSignOut');
+const refreshButton = document.getElementById('staffRefresh');
 const summaryEl = document.getElementById('adminSummary');
 const tabsEl = document.getElementById('adminTabs');
 const panelEl = document.getElementById('adminPanel');
 
-let adminPassword = '';
+let currentUser = null;
 let dashboardData = null;
+let activeSection = '';
 
 const tabConfig = [
   ['admissions', 'Admissions'],
@@ -19,41 +28,108 @@ const tabConfig = [
   ['tuckShop', 'Tuck Shop']
 ];
 
-function setStatus(message, type = '') {
-  statusEl.textContent = message || '';
-  statusEl.className = type ? `status ${type}` : 'status';
-}
-
-function text(value) {
+function clean(value) {
   return String(value ?? '').trim();
 }
 
-function money(value) {
-  const amount = Number(String(value ?? '0').replace(/[₦,\s]/g, ''));
-  if (!Number.isFinite(amount)) return text(value);
-  return `₦${amount.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
 function pick(row, keys) {
   for (const key of keys) {
-    if (row && row[key] !== undefined && row[key] !== null && String(row[key]).trim() !== '') return row[key];
+    if (row && row[key] !== undefined && row[key] !== null && clean(row[key]) !== '') return row[key];
   }
   return '';
 }
 
-async function loadDashboard() {
-  setStatus('Loading dashboard...');
-  const res = await fetch('/api/admin', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password: adminPassword })
-  });
-  const data = await res.json().catch(() => ({ ok: false, message: 'Admin API did not return JSON.' }));
-  if (!res.ok || !data.ok) throw new Error(data.message || 'Could not load admin dashboard.');
-  dashboardData = data;
-  renderDashboard('admissions');
+function money(value) {
+  const amount = Number(String(value ?? '0').replace(/[₦,\s]/g, ''));
+  return Number.isFinite(amount)
+    ? new Intl.NumberFormat('en-NG', { style: 'currency', currency: 'NGN' }).format(amount)
+    : clean(value);
+}
+
+function setStatus(element, message, type = '') {
+  element.textContent = message || '';
+  element.className = type ? `status ${type}` : 'status';
+}
+
+function setButtonLoading(button, loading, loadingText, normalText) {
+  button.disabled = loading;
+  button.classList.toggle('is-loading', loading);
+  button.setAttribute('aria-busy', loading ? 'true' : 'false');
+  button.textContent = loading ? loadingText : normalText;
+}
+
+function showLogin(message = '', type = '') {
+  currentUser = null;
+  dashboardData = null;
+  activeSection = '';
+  dashboardEl.hidden = true;
+  identityEl.hidden = true;
+  loginCard.hidden = false;
+  setStatus(loginStatus, message, type);
+}
+
+function showDashboard(user) {
+  currentUser = user;
+  displayNameEl.textContent = user.displayName || user.username;
+  roleEl.textContent = [user.role, user.department].filter(Boolean).join(' • ');
+  welcomeTitle.textContent = `Welcome, ${user.displayName || user.username}`;
+  loginCard.hidden = true;
+  identityEl.hidden = false;
   dashboardEl.hidden = false;
-  setStatus('Dashboard loaded.', 'ok');
+}
+
+async function sessionRequest(method = 'GET', body = null) {
+  const response = await fetch('/api/staff-session', {
+    method,
+    credentials: 'same-origin',
+    cache: 'no-store',
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const data = await response.json().catch(() => ({ ok: false, message: 'Staff authentication did not return JSON.' }));
+  return { response, data };
+}
+
+async function loadDashboard() {
+  setButtonLoading(refreshButton, true, 'Refreshing...', 'Refresh Dashboard');
+  setStatus(dashboardStatus, 'Loading permitted Firestore records...');
+  try {
+    const response = await fetch('/api/admin', {
+      method: 'POST',
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}'
+    });
+    const data = await response.json().catch(() => ({ ok: false, message: 'Staff dashboard did not return JSON.' }));
+    if (response.status === 401) {
+      showLogin(data.message || 'Your staff session has expired.', 'bad');
+      return;
+    }
+    if (!response.ok || !data.ok) throw new Error(data.message || 'Could not load staff dashboard.');
+    dashboardData = data;
+    currentUser = data.user || currentUser;
+    showDashboard(currentUser);
+    renderSummary(data.summary || {});
+    const allowed = data.allowedSections || currentUser.allowedSections || [];
+    if (!activeSection || !allowed.includes(activeSection)) activeSection = allowed[0] || '';
+    renderTabs(allowed);
+    renderSection(activeSection);
+    setStatus(dashboardStatus, 'Dashboard updated.', 'ok');
+  } catch (error) {
+    setStatus(dashboardStatus, error.message || String(error), 'bad');
+  } finally {
+    setButtonLoading(refreshButton, false, 'Refreshing...', 'Refresh Dashboard');
+  }
 }
 
 function renderSummary(summary) {
@@ -65,48 +141,63 @@ function renderSummary(summary) {
     ['Invoices', summary.invoices],
     ['Clinic Records', summary.clinicRecords],
     ['Kitchen Items', summary.kitchenInventory],
-    ['Low Stock', Number(summary.lowClinicStock || 0) + Number(summary.lowKitchenStock || 0)]
-  ];
-  summaryEl.innerHTML = items.map(([label, value]) => `<div><strong>${value || 0}</strong><span>${label}</span></div>`).join('');
+    ['Tuck Shop Purchases', summary.tuckShopPurchases],
+    ['Low Clinic Stock', summary.lowClinicStock],
+    ['Low Kitchen Stock', summary.lowKitchenStock]
+  ].filter(([, value]) => value !== undefined);
+  summaryEl.innerHTML = items.map(([label, value]) => `<div><strong>${escapeHtml(value || 0)}</strong><span>${escapeHtml(label)}</span></div>`).join('');
 }
 
-function renderTabs(active) {
-  tabsEl.innerHTML = tabConfig.map(([key, label]) => {
-    const selected = key === active ? ' selected' : '';
-    return `<button type="button" class="child-card${selected}" data-tab="${key}">${label}</button>`;
+function renderTabs(allowed) {
+  const tabs = tabConfig.filter(([key]) => allowed.includes(key));
+  tabsEl.innerHTML = tabs.map(([key, label]) => {
+    const selected = key === activeSection ? ' selected' : '';
+    return `<button type="button" class="child-card${selected}" data-tab="${escapeHtml(key)}" aria-selected="${key === activeSection}">${escapeHtml(label)}</button>`;
   }).join('');
-  tabsEl.querySelectorAll('button').forEach((button) => {
-    button.addEventListener('click', () => renderDashboard(button.dataset.tab));
+  tabsEl.querySelectorAll('[data-tab]').forEach((button) => {
+    button.addEventListener('click', () => {
+      activeSection = button.dataset.tab;
+      renderTabs(allowed);
+      renderSection(activeSection);
+      panelEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
   });
 }
 
 function table(title, rows, columns) {
   const body = rows && rows.length
-    ? rows.map((row) => `<tr>${columns.map((col) => `<td>${text(col.value(row))}</td>`).join('')}</tr>`).join('')
+    ? rows.map((row) => `<tr>${columns.map((column) => `<td>${escapeHtml(column.value(row))}</td>`).join('')}</tr>`).join('')
     : `<tr><td colspan="${columns.length}">No records found.</td></tr>`;
   return `
-    <h2>${title}</h2>
+    <h2>${escapeHtml(title)}</h2>
     <div class="admin-table-wrap">
       <table class="admin-table">
-        <thead><tr>${columns.map((col) => `<th>${col.label}</th>`).join('')}</tr></thead>
+        <thead><tr>${columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join('')}</tr></thead>
         <tbody>${body}</tbody>
       </table>
     </div>
   `;
 }
 
-function renderDashboard(active) {
+function inventoryColumns() {
+  return [
+    { label: 'Item', value: (row) => pick(row, ['ItemName', '__id']) },
+    { label: 'Category', value: (row) => pick(row, ['Category']) },
+    { label: 'Unit', value: (row) => pick(row, ['Unit']) },
+    { label: 'Quantity', value: (row) => pick(row, ['Quantity']) },
+    { label: 'Reorder Level', value: (row) => pick(row, ['ReorderLevel']) }
+  ];
+}
+
+function renderSection(active) {
   if (!dashboardData) return;
-  renderSummary(dashboardData.summary || {});
-  renderTabs(active);
   const departments = dashboardData.departments || {};
   if (active === 'admissions') {
     panelEl.innerHTML = table('Admissions', departments.admissions || [], [
       { label: 'Reference', value: (row) => pick(row, ['ApplicationReference', 'ApplicationID', '__id']) },
       { label: 'Name', value: (row) => pick(row, ['ApplicantName', 'Name']) },
       { label: 'Class', value: (row) => pick(row, ['ClassApplyingFor', 'ClassAppliedFor']) },
-      { label: 'Status', value: (row) => pick(row, ['Status', 'ResultStatus']) },
-      { label: 'Duplicate', value: (row) => pick(row, ['DuplicateWarning']) }
+      { label: 'Status', value: (row) => pick(row, ['Status', 'ResultStatus']) }
     ]);
   } else if (active === 'formPurchases') {
     panelEl.innerHTML = table('Admission Form Purchases', departments.formPurchases || [], [
@@ -114,8 +205,7 @@ function renderDashboard(active) {
       { label: 'Applicant', value: (row) => pick(row, ['ApplicantName']) },
       { label: 'Email', value: (row) => pick(row, ['Email']) },
       { label: 'Class', value: (row) => pick(row, ['ClassApplyingFor']) },
-      { label: 'Amount', value: (row) => pick(row, ['AmountPaid', 'Amount']) },
-      { label: 'Expiry', value: (row) => pick(row, ['ExpiryDate']) }
+      { label: 'Amount', value: (row) => money(pick(row, ['AmountPaid', 'Amount'])) }
     ]);
   } else if (active === 'students') {
     panelEl.innerHTML = table('Students', departments.students || [], [
@@ -161,25 +251,53 @@ function renderDashboard(active) {
       { label: 'Amount', value: (row) => money(pick(row, ['Debit'])) },
       { label: 'Description', value: (row) => pick(row, ['Description']) }
     ]);
+  } else {
+    panelEl.innerHTML = '<p class="muted">No dashboard section is available for this role yet.</p>';
   }
-}
-
-function inventoryColumns() {
-  return [
-    { label: 'Item', value: (row) => pick(row, ['ItemName', '__id']) },
-    { label: 'Category', value: (row) => pick(row, ['Category']) },
-    { label: 'Unit', value: (row) => pick(row, ['Unit']) },
-    { label: 'Qty', value: (row) => pick(row, ['Quantity']) },
-    { label: 'Reorder', value: (row) => pick(row, ['ReorderLevel']) }
-  ];
 }
 
 loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
-  adminPassword = passwordInput.value;
+  if (loginButton.disabled) return;
+  setButtonLoading(loginButton, true, 'Signing in...', 'Sign In');
+  setStatus(loginStatus, 'Verifying staff account...');
   try {
+    const { response, data } = await sessionRequest('POST', {
+      action: 'login',
+      username: document.getElementById('staffUsername').value.trim(),
+      password: document.getElementById('staffPassword').value
+    });
+    if (!response.ok || !data.ok) throw new Error(data.message || 'Could not sign in.');
+    loginForm.reset();
+    showDashboard(data.user);
     await loadDashboard();
-  } catch (err) {
-    setStatus(err.message || String(err), 'bad');
+  } catch (error) {
+    setStatus(loginStatus, error.message || String(error), 'bad');
+  } finally {
+    setButtonLoading(loginButton, false, 'Signing in...', 'Sign In');
   }
 });
+
+signOutButton.addEventListener('click', async () => {
+  signOutButton.disabled = true;
+  try {
+    await sessionRequest('POST', { action: 'logout' });
+  } finally {
+    signOutButton.disabled = false;
+    showLogin('Signed out successfully.', 'ok');
+    document.getElementById('staffUsername').focus();
+  }
+});
+
+refreshButton.addEventListener('click', loadDashboard);
+
+(async function restoreSession() {
+  setStatus(loginStatus, 'Checking staff session...');
+  const { response, data } = await sessionRequest();
+  if (response.ok && data.authenticated && data.user) {
+    showDashboard(data.user);
+    await loadDashboard();
+  } else {
+    showLogin();
+  }
+}());
