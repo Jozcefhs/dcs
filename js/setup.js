@@ -3,6 +3,8 @@ const setupForm = document.getElementById('setupForm');
 const setupLoginStatus = document.getElementById('setupLoginStatus');
 const setupStatus = document.getElementById('setupStatus');
 let unlockedPassword = '';
+let webLogoDataUrl = '';
+let webLogoChanged = false;
 
 function setStatus(message, type) {
   setupStatus.textContent = message || '';
@@ -21,7 +23,7 @@ function setField(id, value) {
 
 function profileFromForm() {
   const data = new FormData(setupForm);
-  return {
+  const profile = {
     SchoolName: data.get('SchoolName'),
     SchoolCode: data.get('SchoolCode'),
     SchoolAddress: data.get('SchoolAddress'),
@@ -44,6 +46,8 @@ function profileFromForm() {
     ShowResultsOnline: data.get('ShowResultsOnline'),
     ProductKeyMode: data.get('ProductKeyMode')
   };
+  if (webLogoChanged) profile.WebLogoDataUrl = webLogoDataUrl;
+  return profile;
 }
 
 async function loadProfile(password = '') {
@@ -76,6 +80,9 @@ async function loadProfile(password = '') {
     setField('portalHeadline', profile.PortalHeadline);
     setField('portalSubheading', profile.PortalSubheading);
     setField('portalNotice', profile.PortalNotice);
+    webLogoDataUrl = '';
+    webLogoChanged = false;
+    document.getElementById('webLogoPreview').src = profile.WebLogoUrl || 'images/logo.png';
     setField('resultDisplayMode', profile.ResultDisplayMode || 'subjects');
     setField('showResultsOnline', profile.ShowResultsOnline || 'NO');
     setField('productKeyMode', profile.ProductKeyMode || 'off');
@@ -99,6 +106,50 @@ setupLoginForm.addEventListener('submit', async (event) => {
     setLoginStatus(error.message, 'bad');
   }
 });
+
+document.getElementById('webLogoFile').addEventListener('change', async (event) => {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  try {
+    webLogoDataUrl = await resizeLogo(file);
+    webLogoChanged = true;
+    document.getElementById('webLogoPreview').src = webLogoDataUrl;
+    setStatus('Web logo selected. Save Setup to publish it.', 'ok');
+  } catch (error) {
+    event.target.value = '';
+    setStatus(error.message, 'bad');
+  }
+});
+
+document.getElementById('removeWebLogo').addEventListener('click', () => {
+  webLogoDataUrl = '';
+  webLogoChanged = true;
+  document.getElementById('webLogoFile').value = '';
+  document.getElementById('webLogoPreview').src = 'images/logo.png';
+  setStatus('Default web logo selected. Save Setup to publish it.', 'ok');
+});
+
+function resizeLogo(file) {
+  if (!file.type.startsWith('image/')) return Promise.reject(new Error('Choose a PNG, JPG, or WebP image.'));
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('The selected logo could not be read.'));
+    reader.onload = () => { image.src = reader.result; };
+    image.onerror = () => reject(new Error('The selected file is not a valid image.'));
+    image.onload = () => {
+      const scale = Math.min(1, 360 / Math.max(image.width, image.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(image.width * scale));
+      canvas.height = Math.max(1, Math.round(image.height * scale));
+      canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+      const result = canvas.toDataURL('image/png');
+      if (result.length > 750000) reject(new Error('The logo is still too large after resizing. Choose a simpler image.'));
+      else resolve(result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 setupForm.addEventListener('submit', async (event) => {
   event.preventDefault();

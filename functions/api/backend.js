@@ -1523,6 +1523,15 @@ async function saveSchoolProfile(env, body) {
     UpdatedAt: nowIso(),
     UpdatedBy: clean(body.UserRole || body.UpdatedBy || body.updatedBy) || 'Super Admin'
   };
+  if (body.WebLogoDataUrl !== undefined || body.webLogoDataUrl !== undefined) {
+    const webLogo = clean(body.WebLogoDataUrl ?? body.webLogoDataUrl);
+    if (webLogo && (!/^data:image\/(png|jpeg|webp);base64,/i.test(webLogo) || webLogo.length > 750000)) {
+      const error = new Error('The web logo must be a resized PNG, JPG, or WebP image below the allowed size.');
+      error.status = 400;
+      throw error;
+    }
+    await upsertDocument(env, 'settings', 'webBranding', { WebLogoDataUrl: webLogo, UpdatedAt: nowIso() });
+  }
   await upsertDocument(env, 'settings', 'schoolProfile', profile);
   return { ok: true, message: 'School profile saved to Firestore.', profile };
 }
@@ -1530,9 +1539,10 @@ async function saveSchoolProfile(env, body) {
 async function getSchoolProfile(env) {
   const rows = await listCollection(env, 'settings');
   const profile = rows.find((row) => row.__id === 'schoolProfile') || rows.find((row) => clean(row.SchoolName));
+  const branding = rows.find((row) => row.__id === 'webBranding');
   return {
     ok: true,
-    profile: profile || {
+    profile: { ...(profile || {
       SchoolName: 'Integrated School Management Suite',
       SchoolCode: normalizeSchoolCode(env.SCHOOL_CODE),
       SchoolAddress: '',
@@ -1553,7 +1563,7 @@ async function getSchoolProfile(env) {
       PortalNotice: '',
       ResultDisplayMode: 'subjects',
       ShowResultsOnline: 'NO'
-    }
+    }), WebLogoConfigured: Boolean(branding && clean(branding.WebLogoDataUrl)), WebLogoUrl: branding && clean(branding.WebLogoDataUrl) ? '/api/web-logo' : '' }
   };
 }
 

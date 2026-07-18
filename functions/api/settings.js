@@ -42,6 +42,8 @@ function defaultProfile(env) {
     PortalHeadline: clean(env.PORTAL_HEADLINE) || 'Admissions and parent services in one place',
     PortalSubheading: clean(env.PORTAL_SUBHEADING) || 'Buy forms, complete applications, upload documents, pay fees, and monitor student activity from a secure school portal.',
     PortalNotice: clean(env.PORTAL_NOTICE) || '',
+    WebLogoUrl: '',
+    WebLogoConfigured: false,
     ResultDisplayMode: clean(env.RESULT_DISPLAY_MODE) || 'subjects',
     ShowResultsOnline: clean(env.SHOW_RESULTS_ONLINE) || 'NO',
     ProductKeyMode: clean(env.PRODUCT_KEY_MODE) || 'off',
@@ -57,6 +59,11 @@ async function getProfile(env) {
     const saved = rows.find((row) => row.__id === 'schoolProfile') || rows.find((row) => clean(row.SchoolName));
     if (saved) {
       profile = { ...profile, ...saved };
+    }
+    const branding = rows.find((row) => row.__id === 'webBranding');
+    if (branding && clean(branding.WebLogoDataUrl)) {
+      profile.WebLogoConfigured = true;
+      profile.WebLogoUrl = `/api/web-logo?v=${encodeURIComponent(clean(branding.UpdatedAt))}`;
     }
   } catch (_err) {
     // Public pages should still load with environment/default values if Firestore is unavailable.
@@ -108,8 +115,19 @@ export async function onRequestPost(context) {
       ProductKeyMode: ['off', 'required'].includes(clean(incoming.ProductKeyMode)) ? clean(incoming.ProductKeyMode) : 'off',
       UpdatedAt: new Date().toISOString()
     };
+    if (incoming.WebLogoDataUrl !== undefined) {
+      const webLogo = clean(incoming.WebLogoDataUrl);
+      if (webLogo && (!/^data:image\/(png|jpeg|webp);base64,/i.test(webLogo) || webLogo.length > 750000)) {
+        const error = new Error('The web logo must be a resized PNG, JPG, or WebP image below the allowed size.');
+        error.status = 400;
+        throw error;
+      }
+      await upsertDocument(env, 'settings', 'webBranding', { WebLogoDataUrl: webLogo, UpdatedAt: new Date().toISOString() });
+    }
+    delete profile.WebLogoUrl;
+    delete profile.WebLogoConfigured;
     await upsertDocument(env, 'settings', 'schoolProfile', profile);
-    return Response.json({ ok: true, message: 'School setup saved.', profile });
+    return Response.json({ ok: true, message: 'School setup saved.', profile: await getProfile(env) });
   } catch (err) {
     return Response.json({
       ok: false,

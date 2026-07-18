@@ -9,6 +9,7 @@ const displayNameEl = document.getElementById('staffDisplayName');
 const roleEl = document.getElementById('staffRole');
 const welcomeTitle = document.getElementById('staffWelcomeTitle');
 const signOutButton = document.getElementById('staffSignOut');
+const fullscreenButton = document.getElementById('staffFullscreen');
 const refreshButton = document.getElementById('staffRefresh');
 const summaryEl = document.getElementById('adminSummary');
 const tabsEl = document.getElementById('adminTabs');
@@ -74,6 +75,22 @@ function setButtonLoading(button, loading, loadingText, normalText) {
   button.classList.toggle('is-loading', loading);
   button.setAttribute('aria-busy', loading ? 'true' : 'false');
   button.textContent = loading ? loadingText : normalText;
+}
+
+async function toggleStaffFullscreen(forceEnter = false) {
+  try {
+    if (!document.fullscreenElement && (forceEnter || document.documentElement.requestFullscreen)) {
+      await document.documentElement.requestFullscreen();
+    } else if (document.fullscreenElement && !forceEnter) {
+      await document.exitFullscreen();
+    }
+  } catch (_error) {
+    // Fullscreen is browser-controlled; the viewport layout remains fully expanded if denied.
+  }
+}
+
+function updateFullscreenButton() {
+  fullscreenButton.textContent = document.fullscreenElement ? 'Exit Full Screen' : 'Full Screen';
 }
 
 function showLogin(message = '', type = '') {
@@ -185,7 +202,7 @@ function renderTabs(allowed) {
 
 function table(title, rows, columns) {
   const body = rows && rows.length
-    ? rows.map((row) => `<tr>${columns.map((column) => `<td>${escapeHtml(column.value(row))}</td>`).join('')}</tr>`).join('')
+    ? rows.map((row) => `<tr>${columns.map((column) => `<td>${column.render ? column.render(row) : escapeHtml(column.value(row))}</td>`).join('')}</tr>`).join('')
     : `<tr><td colspan="${columns.length}">No records found.</td></tr>`;
   return `
     <h2>${escapeHtml(title)}</h2>
@@ -196,6 +213,36 @@ function table(title, rows, columns) {
       </table>
     </div>
   `;
+}
+
+const admissionDocuments = [
+  ['BirthCertificate', 'Birth Certificate'],
+  ['PreviousSchoolReport', 'Previous School Report'],
+  ['PassportPhotograph', 'Passport Photograph'],
+  ['MedicalReport', 'Medical Report'],
+  ['TransferCertificateDoc', 'Transfer Certificate'],
+  ['AcceptanceForm', 'Acceptance Form']
+];
+
+function uploadedDocument(row, key) {
+  const documents = row && row.documents && typeof row.documents === 'object' ? row.documents : {};
+  const entry = documents[key] && typeof documents[key] === 'object' ? documents[key] : {};
+  const url = clean(entry.url || row[`Doc${key}Url`] || row[`${key}Url`] || row[`${key}Link`]);
+  return url ? { key, fileName: clean(entry.fileName) } : null;
+}
+
+function renderAdmissionDocuments(row) {
+  const reference = pick(row, ['ApplicationReference', 'ApplicationID', '__id']);
+  const uploaded = admissionDocuments.map(([key, label]) => {
+    const item = uploadedDocument(row, key);
+    return item ? { ...item, label } : null;
+  }).filter(Boolean);
+  if (!uploaded.length) return '<span class="muted">None uploaded</span>';
+  const links = uploaded.map((item) => {
+    const query = `applicationReference=${encodeURIComponent(reference)}&documentType=${encodeURIComponent(item.key)}`;
+    return `<div class="document-action-row"><span>${escapeHtml(item.label)}</span><a href="/api/staff-document?${query}&mode=view" target="_blank" rel="noopener">View</a><a href="/api/staff-document?${query}&mode=download">Download</a></div>`;
+  }).join('');
+  return `<details class="document-actions"><summary>${uploaded.length} document${uploaded.length === 1 ? '' : 's'}</summary>${links}</details>`;
 }
 
 function inventoryColumns() {
@@ -222,7 +269,8 @@ function renderSection(active) {
       { label: 'Reference', value: (row) => pick(row, ['ApplicationReference', 'ApplicationID', '__id']) },
       { label: 'Name', value: (row) => pick(row, ['ApplicantName', 'Name']) },
       { label: 'Class', value: (row) => pick(row, ['ClassApplyingFor', 'ClassAppliedFor']) },
-      { label: 'Status', value: (row) => pick(row, ['Status', 'ResultStatus']) }
+      { label: 'Status', value: (row) => pick(row, ['Status', 'ResultStatus']) },
+      { label: 'Uploaded Documents', render: renderAdmissionDocuments }
     ]);
   } else if (active === 'formPurchases') {
     panelEl.innerHTML = table('Admission Form Purchases', departments.formPurchases || [], [
@@ -632,6 +680,7 @@ async function loadStaffUsers() {
 loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (loginButton.disabled) return;
+  toggleStaffFullscreen(true);
   setButtonLoading(loginButton, true, 'Signing in...', 'Sign In');
   setStatus(loginStatus, 'Verifying staff account...');
   try {
@@ -657,9 +706,13 @@ signOutButton.addEventListener('click', async () => {
   } finally {
     signOutButton.disabled = false;
     showLogin('Signed out successfully.', 'ok');
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     document.getElementById('staffUsername').focus();
   }
 });
+
+fullscreenButton.addEventListener('click', () => toggleStaffFullscreen(false));
+document.addEventListener('fullscreenchange', updateFullscreenButton);
 
 refreshButton.addEventListener('click', loadDashboard);
 

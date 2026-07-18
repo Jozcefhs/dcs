@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>School Setup</title>
-  <link rel="stylesheet" href="css/style.css?v=20260718-mobile">
+  <link rel="stylesheet" href="css/style.css?v=20260718-personalized-ui">
 </head>
 <body>
   <main class="page-wrap">
@@ -117,6 +117,17 @@
               <label for="schoolAddress">School Address</label>
               <input id="schoolAddress" name="SchoolAddress">
             </div>
+            <div class="full web-logo-setting">
+              <label for="webLogoFile">School Web Logo</label>
+              <div class="web-logo-picker">
+                <img id="webLogoPreview" src="images/logo.png" alt="Current web logo">
+                <div>
+                  <input id="webLogoFile" type="file" accept="image/png,image/jpeg,image/webp">
+                  <button id="removeWebLogo" type="button" class="secondary">Use Default Logo</button>
+                  <p class="muted">Used only on web pages. It does not change the logo used in PDFs.</p>
+                </div>
+              </div>
+            </div>
           </div>
         </fieldset>
 
@@ -150,6 +161,6 @@
     </section>
   </main>
 
-  <script src="js/setup.js"></script>
+  <script src="js/setup.js?v=20260718-personalized-ui"></script>
 </body>
 </html>

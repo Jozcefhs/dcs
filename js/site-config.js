@@ -37,6 +37,12 @@ function applySiteProfile(profile) {
     node.textContent = profile.PortalNotice || '';
     node.hidden = !profile.PortalNotice;
   });
+  if (profile.WebLogoUrl) {
+    document.querySelectorAll('img.logo, img.nav-logo').forEach((node) => {
+      node.src = profile.WebLogoUrl;
+      node.style.display = '';
+    });
+  }
   window.SCHOOL_PROFILE = profile;
   window.dispatchEvent(new CustomEvent('school-profile-ready', { detail: profile }));
 }
