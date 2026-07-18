@@ -9,7 +9,6 @@ const displayNameEl = document.getElementById('staffDisplayName');
 const roleEl = document.getElementById('staffRole');
 const welcomeTitle = document.getElementById('staffWelcomeTitle');
 const signOutButton = document.getElementById('staffSignOut');
-const fullscreenButton = document.getElementById('staffFullscreen');
 const refreshButton = document.getElementById('staffRefresh');
 const summaryEl = document.getElementById('adminSummary');
 const tabsEl = document.getElementById('adminTabs');
@@ -76,22 +75,6 @@ function setButtonLoading(button, loading, loadingText, normalText) {
   button.classList.toggle('is-loading', loading);
   button.setAttribute('aria-busy', loading ? 'true' : 'false');
   button.textContent = loading ? loadingText : normalText;
-}
-
-async function toggleStaffFullscreen(forceEnter = false) {
-  try {
-    if (!document.fullscreenElement && (forceEnter || document.documentElement.requestFullscreen)) {
-      await document.documentElement.requestFullscreen();
-    } else if (document.fullscreenElement && !forceEnter) {
-      await document.exitFullscreen();
-    }
-  } catch (_error) {
-    // Fullscreen is browser-controlled; the viewport layout remains fully expanded if denied.
-  }
-}
-
-function updateFullscreenButton() {
-  fullscreenButton.textContent = document.fullscreenElement ? 'Exit Full Screen' : 'Full Screen';
 }
 
 function showLogin(message = '', type = '') {
@@ -241,7 +224,8 @@ function renderAdmissionDocuments(row) {
   if (!uploaded.length) return '<span class="muted">None uploaded</span>';
   const links = uploaded.map((item) => {
     const query = `applicationReference=${encodeURIComponent(reference)}&documentType=${encodeURIComponent(item.key)}`;
-    return `<div class="document-action-row"><span>${escapeHtml(item.label)}</span><a href="/api/staff-document?${query}&mode=view" target="_blank" rel="noopener">View</a><a href="/api/staff-document?${query}&mode=download">Download</a></div>`;
+    const canDelete = ['Super Admin', 'Admissions Officer'].includes(clean(currentUser?.role));
+    return `<div class="document-action-row"><span>${escapeHtml(item.label)}</span><a href="/api/staff-document?${query}&mode=view" target="_blank" rel="noopener">View</a><a href="/api/staff-document?${query}&mode=download">Download</a>${canDelete ? `<button type="button" class="document-delete" data-delete-document="${escapeHtml(item.key)}" data-application-reference="${escapeHtml(reference)}">Delete</button>` : ''}</div>`;
   }).join('');
   return `<details class="document-actions"><summary>${uploaded.length} document${uploaded.length === 1 ? '' : 's'}</summary>${links}</details>`;
 }
@@ -276,6 +260,7 @@ function renderSection(active) {
       { label: 'Status', value: (row) => pick(row, ['Status', 'ResultStatus']) },
       { label: 'Uploaded Documents', render: renderAdmissionDocuments }
     ]);
+    bindDocumentDeleteEvents();
   } else if (active === 'formPurchases') {
     panelEl.innerHTML = table('Admission Form Purchases', departments.formPurchases || [], [
       { label: 'Receipt', value: (row) => pick(row, ['ReceiptNo', '__id']) },
@@ -331,6 +316,28 @@ function renderSection(active) {
   } else {
     panelEl.innerHTML = '<p class="muted">No dashboard section is available for this role yet.</p>';
   }
+}
+
+function bindDocumentDeleteEvents() {
+  panelEl.querySelectorAll('[data-delete-document]').forEach((button) => button.addEventListener('click', async () => {
+    const applicationReference = button.dataset.applicationReference;
+    const documentType = button.dataset.deleteDocument;
+    if (!window.confirm('Delete this uploaded document? The file will be moved to Google Drive trash.')) return;
+    setButtonLoading(button, true, 'Deleting...', 'Delete');
+    try {
+      const response = await fetch('/api/staff-document', {
+        method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', applicationReference, documentType })
+      });
+      const data = await response.json().catch(() => ({ ok: false, message: 'Document service did not return JSON.' }));
+      if (!response.ok || !data.ok) throw new Error(data.message || 'Document could not be deleted.');
+      await loadDashboard();
+      setStatus(dashboardStatus, data.message, 'ok');
+    } catch (error) {
+      setStatus(dashboardStatus, error.message || String(error), 'bad');
+      setButtonLoading(button, false, 'Deleting...', 'Delete');
+    }
+  }));
 }
 
 async function loadMyPayroll() {
@@ -591,7 +598,7 @@ function renderStaffUsers() {
   panelEl.innerHTML = `
     <div class="workflow-intro">
       <div><p class="eyebrow">Identity & access</p><h2>Staff & Permissions</h2><p class="muted">Shared Firestore accounts for desktop and web access</p></div>
-      <div class="workflow-primary-actions"><button type="button" id="newStaffUser">+ New Staff Account</button><button type="button" class="workflow-icon-action" id="refreshStaffUsers">Refresh</button></div>
+      <div class="workflow-primary-actions"><button type="button" id="newStaffUser">+ New Staff Account</button><button type="button" id="uploadStaffCsv">Upload Staff CSV</button><button type="button" class="workflow-icon-action" id="staffCsvTemplate">CSV Template</button><button type="button" class="workflow-icon-action" id="refreshStaffUsers">Refresh</button><input type="file" id="staffCsvFile" accept=".csv,text/csv" hidden></div>
     </div>
     <p id="staffUsersStatus" class="status"></p>
     <div class="workflow-kpis staff-user-kpis">
@@ -604,7 +611,7 @@ function renderStaffUsers() {
       ${staffUsersData.length ? staffUsersData.map((user) => `
         <article class="staff-user-row">
           <div class="staff-user-avatar">${escapeHtml((user.DisplayName || user.Username || 'U').split(/\s+/).slice(0,2).map((part) => part[0]).join('').toUpperCase())}</div>
-          <div class="staff-user-copy"><strong>${escapeHtml(user.DisplayName || user.Username)}</strong><span>@${escapeHtml(user.Username)} • ${escapeHtml(user.Role)}</span><small>${escapeHtml(user.Department || 'No department')}${yes(user.MustChangePassword) ? ' • Password change required' : ''}</small></div>
+          <div class="staff-user-copy"><strong>${escapeHtml(user.DisplayName || user.Username)}</strong><span>@${escapeHtml(user.Username)} • ${escapeHtml(user.Role)}</span><small>${escapeHtml(user.Department || 'No department')} • ${escapeHtml(user.BranchId || 'All branches')} / ${escapeHtml(user.SchoolSectionAccess || 'All sections')}${yes(user.MustChangePassword) ? ' • Password change required' : ''}</small></div>
           <span class="workflow-status ${yes(user.Active) ? 'status-approved' : 'status-rejected'}">${yes(user.Active) ? 'Active' : 'Disabled'}</span>
           <div class="staff-user-actions"><button type="button" data-edit-user="${escapeHtml(user.Username)}">Manage</button><button type="button" class="workflow-reject" data-delete-user="${escapeHtml(user.Username)}">Delete</button></div>
         </article>
@@ -625,6 +632,8 @@ function renderStaffUsers() {
           ${['Super Admin','Admissions Officer','Accounts Officer','Management','Department User','Tuck Shop User','Clinic User','Kitchen User','Front Desk'].map((role) => `<option>${role}</option>`).join('')}
         </select></label>
         <label>Department<input name="Department" placeholder="Required for Department User"></label>
+        <label>Branch ID<input name="BranchId" placeholder="Blank allows all branches"></label>
+        <label>School section<select name="SchoolSectionAccess"><option>All</option><option>Primary</option><option>Secondary</option></select></label>
         <label>New or reset password<input name="Password" type="password" minlength="6" autocomplete="new-password"><small>Required for a new account. Leave blank when editing unless resetting it.</small></label>
         <label class="check-row"><input name="Active" type="checkbox" checked> Account active</label>
         <label class="check-row"><input name="MustChangePassword" type="checkbox" checked> Require password change at next sign-in</label>
@@ -648,6 +657,8 @@ function openStaffUserDialog(username = '') {
     form.elements.DisplayName.value = user.DisplayName || user.Username;
     form.elements.Role.value = user.Role;
     form.elements.Department.value = user.Department || '';
+    form.elements.BranchId.value = user.BranchId || '';
+    form.elements.SchoolSectionAccess.value = user.SchoolSectionAccess || 'All';
     form.elements.Active.checked = yes(user.Active);
     form.elements.MustChangePassword.checked = yes(user.MustChangePassword);
   } else {
@@ -660,6 +671,9 @@ function openStaffUserDialog(username = '') {
 function bindStaffUserEvents() {
   document.getElementById('newStaffUser')?.addEventListener('click', () => openStaffUserDialog());
   document.getElementById('refreshStaffUsers')?.addEventListener('click', loadStaffUsers);
+  document.getElementById('uploadStaffCsv')?.addEventListener('click', () => document.getElementById('staffCsvFile').click());
+  document.getElementById('staffCsvTemplate')?.addEventListener('click', downloadStaffCsvTemplate);
+  document.getElementById('staffCsvFile')?.addEventListener('change', importStaffCsv);
   document.querySelector('[data-close-user-dialog]')?.addEventListener('click', () => document.getElementById('staffUserDialog').close());
   panelEl.querySelectorAll('[data-edit-user]').forEach((button) => button.addEventListener('click', () => openStaffUserDialog(button.dataset.editUser)));
   panelEl.querySelectorAll('[data-delete-user]').forEach((button) => button.addEventListener('click', async () => {
@@ -697,6 +711,47 @@ function bindStaffUserEvents() {
   });
 }
 
+function parseCsv(text) {
+  const rows = []; let row = []; let field = ''; let quoted = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '"' && quoted && text[index + 1] === '"') { field += '"'; index += 1; }
+    else if (char === '"') quoted = !quoted;
+    else if (char === ',' && !quoted) { row.push(field); field = ''; }
+    else if ((char === '\n' || char === '\r') && !quoted) {
+      if (char === '\r' && text[index + 1] === '\n') index += 1;
+      row.push(field); if (row.some((value) => clean(value))) rows.push(row); row = []; field = '';
+    } else field += char;
+  }
+  row.push(field); if (row.some((value) => clean(value))) rows.push(row);
+  if (rows.length < 2) return [];
+  const headers = rows[0].map((value) => clean(value).replace(/^\uFEFF/, ''));
+  return rows.slice(1).map((values) => Object.fromEntries(headers.map((header, index) => [header, clean(values[index])])));
+}
+
+function downloadStaffCsvTemplate() {
+  const content = 'Username,DisplayName,Role,Department,BranchId,SchoolSectionAccess,Password,Active,MustChangePassword\nexample.user,Example User,Front Desk,Administration,main,All,ChangeMe123,YES,YES\n';
+  const url = URL.createObjectURL(new Blob([content], { type: 'text/csv' }));
+  const link = document.createElement('a'); link.href = url; link.download = 'staff_upload_template.csv'; link.click(); URL.revokeObjectURL(url);
+}
+
+async function importStaffCsv(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  try {
+    const users = parseCsv(await file.text());
+    if (!users.length) throw new Error('The CSV has no staff data rows. Download the template and try again.');
+    const data = await staffUserRequest('import', { users });
+    await loadStaffUsers();
+    const failureText = (data.failures || []).slice(0, 5).map((row) => `Row ${row.row}: ${row.message}`).join(' | ');
+    setStatus(document.getElementById('staffUsersStatus'), `${data.message}${failureText ? ` ${failureText}` : ''}`, data.failures?.length ? 'bad' : 'ok');
+  } catch (error) {
+    setStatus(document.getElementById('staffUsersStatus'), error.message || String(error), 'bad');
+  } finally {
+    event.target.value = '';
+  }
+}
+
 async function loadStaffUsers() {
   if (activeSection !== 'staffUsers') return;
   try {
@@ -712,7 +767,6 @@ async function loadStaffUsers() {
 loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (loginButton.disabled) return;
-  toggleStaffFullscreen(true);
   setButtonLoading(loginButton, true, 'Signing in...', 'Sign In');
   setStatus(loginStatus, 'Verifying staff account...');
   try {
@@ -738,13 +792,9 @@ signOutButton.addEventListener('click', async () => {
   } finally {
     signOutButton.disabled = false;
     showLogin('Signed out successfully.', 'ok');
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     document.getElementById('staffUsername').focus();
   }
 });
-
-fullscreenButton.addEventListener('click', () => toggleStaffFullscreen(false));
-document.addEventListener('fullscreenchange', updateFullscreenButton);
 
 refreshButton.addEventListener('click', loadDashboard);
 

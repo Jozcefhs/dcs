@@ -2,6 +2,7 @@
 // Firestore remains authoritative; Google Drive only stores the private bytes.
 
 import { getDocument, listCollection, requireFirestoreEnv } from '../lib/firestore.js';
+import { listSchoolCollection } from '../lib/school-scope.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -84,7 +85,7 @@ export async function onRequestPost(context) {
     const reference = clean(body.applicationReference || body.ApplicationReference || body.accountRef || body.AccountRef);
     if (!reference) return Response.json({ ok: false, message: 'Application reference is required.' }, { status: 400 });
 
-    const applications = await listCollection(env, 'applications');
+    const applications = await listSchoolCollection(env, 'applications');
     const application = applications.find((row) => sameText(applicationReference(row), reference) || sameText(row.__id, reference));
     if (!application) return Response.json({ ok: false, message: 'Application was not found in Firestore.' }, { status: 404 });
 

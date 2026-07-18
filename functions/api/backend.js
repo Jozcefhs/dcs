@@ -1,4 +1,5 @@
 import { deleteDocument, listCollection, requireFirestoreEnv, upsertDocument } from '../lib/firestore.js';
+import { deleteSchoolDocument, getSchoolStructure, listSchoolCollection, safeScopeId, upsertSchoolDocument } from '../lib/school-scope.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -123,7 +124,7 @@ function studentIdFrom(data) {
 }
 
 async function findApplication(env, id) {
-  const rows = await listCollection(env, 'applications');
+  const rows = await listSchoolCollection(env, 'applications');
   return rows.find((row) => {
     return sameText(row.__id, safeDocumentId(id)) ||
       sameText(row.ApplicationReference, id) ||
@@ -133,7 +134,7 @@ async function findApplication(env, id) {
 }
 
 async function findStudent(env, admissionNo, applicationReference = '') {
-  const rows = await listCollection(env, 'students');
+  const rows = await listSchoolCollection(env, 'students');
   return rows.find((row) => {
     return (admissionNo && (sameText(row.__id, safeDocumentId(admissionNo)) || sameText(row.AdmissionNo, admissionNo) || sameText(row.admissionNo, admissionNo))) ||
       (applicationReference && (sameText(row.ApplicationReference, applicationReference) || sameText(row.applicationReference, applicationReference)));
@@ -143,14 +144,14 @@ async function findStudent(env, admissionNo, applicationReference = '') {
 async function findStudentByWalletCard(env, cardId) {
   const wanted = clean(cardId).toUpperCase();
   if (!wanted) return null;
-  const rows = await listCollection(env, 'students');
+  const rows = await listSchoolCollection(env, 'students');
   return rows.map(normalizeStudent).find((row) => clean(row.WalletCardId).toUpperCase() === wanted) || null;
 }
 
 async function findStudentByAccountRef(env, accountRef) {
   const wanted = clean(accountRef);
   if (!wanted) return null;
-  const rows = await listCollection(env, 'students');
+  const rows = await listSchoolCollection(env, 'students');
   return rows.map(normalizeStudent).find((row) => {
     return referencesMatch(row.AdmissionNo, wanted) ||
       referencesMatch(row.ApplicationReference, wanted) ||
@@ -179,8 +180,8 @@ async function saveApplication(env, application) {
     err.status = 400;
     throw err;
   }
-  await upsertDocument(env, 'applications', safeDocumentId(id), application);
-  return normalizeApplication(application);
+  const saved = await upsertSchoolDocument(env, 'applications', safeDocumentId(id), application);
+  return normalizeApplication(saved);
 }
 
 async function saveStudent(env, student) {
@@ -190,8 +191,8 @@ async function saveStudent(env, student) {
     err.status = 400;
     throw err;
   }
-  await upsertDocument(env, 'students', safeDocumentId(id), student);
-  return normalizeStudent(student);
+  const saved = await upsertSchoolDocument(env, 'students', safeDocumentId(id), student);
+  return normalizeStudent(saved);
 }
 
 function normalizeApplication(row, profile = {}) {
@@ -712,7 +713,7 @@ function isGeneralFeeCredit(row) {
 }
 
 async function findStudentForApplication(env, app) {
-  const students = (await listCollection(env, 'students')).map(normalizeStudent);
+  const students = (await listSchoolCollection(env, 'students')).map(normalizeStudent);
   const refs = [
     accountRefFromApplication(app),
     app.ApplicationReference,
@@ -846,9 +847,9 @@ export async function getPayableFees(env, body = {}) {
   }
 
   const [firestoreApplications, sheetApplications, firestoreStudents, sheetStudents, firestoreSales, sheetSales] = await Promise.all([
-    listCollection(env, 'applications').catch(() => []),
+    listSchoolCollection(env, 'applications').catch(() => []),
     getAppsScriptApplications(env),
-    listCollection(env, 'students').catch(() => []),
+    listSchoolCollection(env, 'students').catch(() => []),
     getAppsScriptStudents(env),
     listCollection(env, 'formSales').catch(() => []),
     getAppsScriptFormSales(env)
@@ -1255,8 +1256,8 @@ export async function getAccountsOverview(env) {
     listCollection(env, 'invoices'),
     listCollection(env, 'feeItems'),
     listCollection(env, 'ledger'),
-    listCollection(env, 'applications'),
-    listCollection(env, 'students'),
+    listSchoolCollection(env, 'applications'),
+    listSchoolCollection(env, 'students'),
     listCollection(env, 'settings')
   ]);
   const schoolProfile = settings.find((row) => row.__id === 'schoolProfile') || settings.find((row) => clean(row.SchoolName)) || {};
@@ -1499,6 +1500,26 @@ async function saveBrevoSettings(env, body) {
 }
 
 async function saveSchoolProfile(env, body) {
+  const branchValues = Array.isArray(body.SchoolBranches) ? body.SchoolBranches : clean(body.SchoolBranches || body.schoolBranches || 'Main Branch').split(',');
+  const requestedActiveBranchId = safeScopeId(body.ActiveBranchId || body.activeBranchId || 'main');
+  const branches = branchValues.map((value) => {
+    const name = clean(typeof value === 'string' ? value : value.Name || value.name || value.Id || value.id);
+    return { Id: safeScopeId(typeof value === 'string' ? name : value.Id || value.id || name), Name: name || 'Main Branch' };
+  }).filter((row, index, rows) => rows.findIndex((candidate) => candidate.Id === row.Id) === index);
+  if (branches.length && !branches.some((row) => row.Id === requestedActiveBranchId)) branches[0].Id = requestedActiveBranchId;
+  const activeBranchId = requestedActiveBranchId || branches[0]?.Id || 'main';
+  const sections = [];
+  if (yesNo(body.EnablePrimarySection ?? body.enablePrimarySection ?? 'YES') === 'YES') sections.push('primary');
+  if (yesNo(body.EnableSecondarySection ?? body.enableSecondarySection ?? 'YES') === 'YES') sections.push('secondary');
+  if (!sections.length) sections.push('primary', 'secondary');
+  const documentRequirements = {
+    BirthCertificate: yesNo(body.EnableBirthCertificate ?? 'YES') === 'YES',
+    PreviousSchoolReport: yesNo(body.EnablePreviousSchoolReport ?? 'YES') === 'YES',
+    PassportPhotograph: yesNo(body.EnablePassportPhotograph ?? 'YES') === 'YES',
+    MedicalReport: yesNo(body.EnableMedicalReport ?? 'YES') === 'YES',
+    TransferCertificateDoc: yesNo(body.EnableTransferCertificateDoc ?? 'YES') === 'YES',
+    AcceptanceForm: yesNo(body.EnableAcceptanceForm ?? 'YES') === 'YES'
+  };
   const profile = {
     SchoolName: clean(body.SchoolName || body.schoolName) || 'Integrated School Management Suite',
     SchoolCode: normalizeSchoolCode(body.SchoolCode || body.schoolCode),
@@ -1532,6 +1553,13 @@ async function saveSchoolProfile(env, body) {
     }
     await upsertDocument(env, 'settings', 'webBranding', { WebLogoDataUrl: webLogo, UpdatedAt: nowIso() });
   }
+  await upsertDocument(env, 'settings', 'schoolStructure', {
+    Branches: branches.length ? branches : [{ Id: 'main', Name: 'Main Branch' }], ActiveBranchId: activeBranchId,
+    Sections: sections, UpdatedAt: nowIso(), UpdatedBy: profile.UpdatedBy
+  });
+  await upsertDocument(env, 'settings', 'admissionDocuments', {
+    Enabled: documentRequirements, UpdatedAt: nowIso(), UpdatedBy: profile.UpdatedBy
+  });
   await upsertDocument(env, 'settings', 'schoolProfile', profile);
   return { ok: true, message: 'School profile saved to Firestore.', profile };
 }
@@ -1540,6 +1568,9 @@ async function getSchoolProfile(env) {
   const rows = await listCollection(env, 'settings');
   const profile = rows.find((row) => row.__id === 'schoolProfile') || rows.find((row) => clean(row.SchoolName));
   const branding = rows.find((row) => row.__id === 'webBranding');
+  const structure = rows.find((row) => row.__id === 'schoolStructure') || await getSchoolStructure(env);
+  const documentSettings = rows.find((row) => row.__id === 'admissionDocuments') || {};
+  const enabledDocuments = documentSettings.Enabled && typeof documentSettings.Enabled === 'object' ? documentSettings.Enabled : {};
   return {
     ok: true,
     profile: { ...(profile || {
@@ -1563,7 +1594,18 @@ async function getSchoolProfile(env) {
       PortalNotice: '',
       ResultDisplayMode: 'subjects',
       ShowResultsOnline: 'NO'
-    }), WebLogoConfigured: Boolean(branding && clean(branding.WebLogoDataUrl)), WebLogoUrl: branding && clean(branding.WebLogoDataUrl) ? '/api/web-logo' : '' }
+    }),
+      SchoolBranches: (structure.Branches || []).map((row) => clean(typeof row === 'string' ? row : row.Name || row.Id)).filter(Boolean).join(', '),
+      ActiveBranchId: clean(structure.ActiveBranchId || 'main'),
+      EnablePrimarySection: (structure.Sections || []).includes('primary') ? 'YES' : 'NO',
+      EnableSecondarySection: (structure.Sections || []).includes('secondary') ? 'YES' : 'NO',
+      EnableBirthCertificate: enabledDocuments.BirthCertificate === false ? 'NO' : 'YES',
+      EnablePreviousSchoolReport: enabledDocuments.PreviousSchoolReport === false ? 'NO' : 'YES',
+      EnablePassportPhotograph: enabledDocuments.PassportPhotograph === false ? 'NO' : 'YES',
+      EnableMedicalReport: enabledDocuments.MedicalReport === false ? 'NO' : 'YES',
+      EnableTransferCertificateDoc: enabledDocuments.TransferCertificateDoc === false ? 'NO' : 'YES',
+      EnableAcceptanceForm: enabledDocuments.AcceptanceForm === false ? 'NO' : 'YES',
+      WebLogoConfigured: Boolean(branding && clean(branding.WebLogoDataUrl)), WebLogoUrl: branding && clean(branding.WebLogoDataUrl) ? '/api/web-logo' : '' }
   };
 }
 
@@ -1687,7 +1729,7 @@ async function deleteApplication(env, body) {
   const existing = id ? await findApplication(env, id) : null;
   if (!existing) throw applicationNotFound(id);
   const docId = safeDocumentId(pick(existing, ['ApplicationReference', 'ApplicationID', '__id']) || id);
-  await deleteDocument(env, 'applications', docId);
+  await deleteSchoolDocument(env, 'applications', docId, existing);
   return { ok: true, message: 'Application deleted.', applicationReference: id };
 }
 
@@ -1711,7 +1753,7 @@ async function importStudents(env, body) {
     err.status = 400;
     throw err;
   }
-  const existingStudents = await listCollection(env, 'students');
+  const existingStudents = await listSchoolCollection(env, 'students');
   const schoolCode = await getSchoolCode(env);
   const importedBy = clean(body.ImportedBy || body.importedBy) || 'Admissions Office';
   let imported = 0;
@@ -1765,7 +1807,7 @@ async function importStudents(env, body) {
     savedStudents.push(saved);
     imported += 1;
   }
-  return { ok: true, message: 'Student import completed.', imported, skipped, failures, students: (await listCollection(env, 'students')).map(normalizeStudent) };
+  return { ok: true, message: 'Student import completed.', imported, skipped, failures, students: (await listSchoolCollection(env, 'students')).map(normalizeStudent) };
 }
 
 async function promoteStudents(env, body) {
@@ -1810,7 +1852,7 @@ async function promoteStudents(env, body) {
     });
     promoted += 1;
   }
-  return { ok: true, message: 'Student promotion completed.', promoted, skipped, failures, students: (await listCollection(env, 'students')).map(normalizeStudent) };
+  return { ok: true, message: 'Student promotion completed.', promoted, skipped, failures, students: (await listSchoolCollection(env, 'students')).map(normalizeStudent) };
 }
 
 async function enrollStudent(env, body) {
@@ -4086,13 +4128,13 @@ async function routeAction(env, action, body = {}) {
       return {
         ok: true,
         message: 'Applications loaded from Firestore.',
-        applications: (await listCollection(env, 'applications')).map(normalizeApplication)
+        applications: (await listSchoolCollection(env, 'applications')).map(normalizeApplication)
       };
     case 'getStudents':
       return {
         ok: true,
         message: 'Students loaded from Firestore.',
-        students: (await listCollection(env, 'students')).map(normalizeStudent)
+        students: (await listSchoolCollection(env, 'students')).map(normalizeStudent)
       };
     case 'getAdmissionClasses':
       return getAdmissionClasses(env);

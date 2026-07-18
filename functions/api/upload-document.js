@@ -2,6 +2,7 @@
 // Lets parents upload missing admission documents using their verification email/code.
 
 import { listCollection, requireFirestoreEnv, upsertDocument } from '../lib/firestore.js';
+import { listSchoolCollection, upsertSchoolDocument } from '../lib/school-scope.js';
 
 function clean(value) {
   return String(value || '').trim();
@@ -60,13 +61,20 @@ function documentUploaded(app, documentType) {
 
 async function findFirestoreApplication(env, email, code) {
   requireFirestoreEnv(env);
-  const rows = await listCollection(env, 'applications');
+  const rows = await listSchoolCollection(env, 'applications');
   return rows.find((row) => {
     const parent = row.parent && typeof row.parent === 'object' ? row.parent : {};
     const rowEmail = lower(pick(row, ['VerificationEmail', 'verificationEmail', 'ParentEmail', 'parentEmail', 'Email', 'email'], parent.email));
     const rowCode = clean(pick(row, ['VerificationCode', 'verificationCode'])).toUpperCase();
     return rowEmail === email && rowCode === code;
   }) || null;
+}
+
+async function enabledDocumentFields(env) {
+  const rows = await listCollection(env, 'settings');
+  const settings = rows.find((row) => row.__id === 'admissionDocuments');
+  const enabled = settings && settings.Enabled && typeof settings.Enabled === 'object' ? settings.Enabled : {};
+  return DOCUMENT_FIELDS.filter((item) => enabled[item.key] !== false);
 }
 
 async function saveFirestoreDocumentMetadata(env, app, definition, file, url, replaceExisting) {
@@ -96,15 +104,16 @@ async function saveFirestoreDocumentMetadata(env, app, definition, file, url, re
     IntelligenceUpdatedAt: now,
     UpdatedAt: now
   };
-  const completed = DOCUMENT_FIELDS.filter((item) => documentUploaded(next, item.key)).length;
-  next.DocumentsCompletion = `${Math.round((completed / DOCUMENT_FIELDS.length) * 100)}%`;
-  next.MissingDocuments = DOCUMENT_FIELDS.filter((item) => !documentUploaded(next, item.key)).map((item) => item.label).join(', ');
+  const enabledFields = await enabledDocumentFields(env);
+  const completed = enabledFields.filter((item) => documentUploaded(next, item.key)).length;
+  next.DocumentsCompletion = `${enabledFields.length ? Math.round((completed / enabledFields.length) * 100) : 100}%`;
+  next.MissingDocuments = enabledFields.filter((item) => !documentUploaded(next, item.key)).map((item) => item.label).join(', ');
   const historyLine = [now, definition.label, replaceExisting && previousUrl ? 'Replaced' : 'Uploaded', file.fileName, url,
     previousUrl ? `Previous: ${previousUrl}` : ''].filter(Boolean).join(' | ');
   next.DocumentUploadHistory = clean(app.DocumentUploadHistory) ? `${clean(app.DocumentUploadHistory)}\n${historyLine}` : historyLine;
   delete next.__id;
   delete next.__name;
-  await upsertDocument(env, 'applications', safeDocumentId(reference), next);
+  await upsertSchoolDocument(env, 'applications', safeDocumentId(reference), next);
   return { application: next, previousUrl };
 }
 
@@ -145,6 +154,10 @@ export async function onRequestPost(context) {
     const definition = documentDefinition(documentType);
     if (!definition) {
       return Response.json({ ok: false, message: `Invalid document type: ${documentType}` }, { status: 400 });
+    }
+    const enabledFields = await enabledDocumentFields(env);
+    if (!enabledFields.some((item) => item.key === definition.key)) {
+      return Response.json({ ok: false, message: `${definition.label} is not currently requested by the school.` }, { status: 409 });
     }
     const firestoreApp = await findFirestoreApplication(env, email, code);
     if (!firestoreApp) {

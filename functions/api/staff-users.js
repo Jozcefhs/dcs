@@ -13,6 +13,8 @@ function publicUser(row) {
     DisplayName: clean(row.DisplayName || row.displayName),
     Role: clean(row.Role || row.role) || 'Front Desk',
     Department: clean(row.Department || row.department),
+    BranchId: clean(row.BranchId || row.branchId),
+    SchoolSectionAccess: clean(row.SchoolSectionAccess || row.schoolSectionAccess) || 'All',
     Active: row.Active === undefined ? true : activeValue(row.Active),
     MustChangePassword: row.MustChangePassword === undefined ? false : activeValue(row.MustChangePassword),
     CreatedAt: clean(row.CreatedAt),
@@ -84,6 +86,8 @@ async function saveUser(env, actor, body) {
     DisplayName: clean(body.DisplayName || body.displayName) || username,
     Role: role,
     Department: department,
+    BranchId: clean(body.BranchId || body.branchId),
+    SchoolSectionAccess: clean(body.SchoolSectionAccess || body.schoolSectionAccess) || 'All',
     Active: active,
     MustChangePassword: password ? activeValue(body.MustChangePassword === undefined ? true : body.MustChangePassword) : activeValue(existing?.MustChangePassword || false),
     ...passwordFields,
@@ -97,6 +101,22 @@ async function saveUser(env, actor, body) {
   await upsertDocument(env, 'staffUsers', id, payload);
   await audit(env, actor, existing ? 'UPDATE USER' : 'CREATE USER', username, `${role}${department ? ` | ${department}` : ''}`);
   return { ok: true, message: existing ? 'Staff account updated.' : 'Staff account created.', user: publicUser(payload) };
+}
+
+async function importUsers(env, actor, body) {
+  const users = Array.isArray(body.users) ? body.users.slice(0, 500) : [];
+  if (!users.length) { const err = new Error('Choose a CSV containing at least one staff row.'); err.status = 400; throw err; }
+  let imported = 0; const failures = [];
+  for (let index = 0; index < users.length; index += 1) {
+    try {
+      await saveUser(env, actor, users[index]);
+      imported += 1;
+    } catch (error) {
+      failures.push({ row: index + 2, username: clean(users[index]?.Username), message: error.message || String(error) });
+    }
+  }
+  await audit(env, actor, 'BULK IMPORT', `${imported} staff`, `${failures.length} failed`);
+  return { ok: true, message: `${imported} staff account(s) uploaded${failures.length ? `; ${failures.length} failed.` : '.'}`, imported, failures };
 }
 
 async function deleteUser(env, actor, body) {
@@ -128,6 +148,7 @@ export async function onRequestPost(context) {
     }
     else if (action === 'save') result = await saveUser(env, actor, body);
     else if (action === 'delete') result = await deleteUser(env, actor, body);
+    else if (action === 'import') result = await importUsers(env, actor, body);
     else { const err = new Error('Unknown staff-user action.'); err.status = 400; throw err; }
     return Response.json(result, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err) {

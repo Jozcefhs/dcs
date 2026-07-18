@@ -6,6 +6,22 @@ const progressEl = document.getElementById('documentUploadProgress');
 const progressFillEl = document.getElementById('documentUploadProgressFill');
 const progressTextEl = document.getElementById('documentUploadProgressText');
 
+async function loadDocumentSettings() {
+  try {
+    const response = await fetch('/api/admission-document-settings', { cache: 'no-store' });
+    const data = await response.json();
+    if (!response.ok || !data.ok) return;
+    const enabled = new Set((data.documents || []).map((item) => item.key));
+    document.querySelectorAll('[data-document-row]').forEach((row) => {
+      const active = enabled.has(row.dataset.documentRow);
+      row.hidden = !active;
+      row.querySelector('input[type="file"]')?.toggleAttribute('disabled', !active);
+    });
+  } catch (_error) {
+    // Keep the built-in defaults if settings are temporarily unavailable.
+  }
+}
+
 const MAX_FILE_SIZE = 8 * 1024 * 1024;
 
 function setStatus(message, type) {
@@ -175,3 +191,5 @@ form.addEventListener('submit', async (event) => {
     if (!failedCount && !skippedCount) resetProgress();
   }, 1200);
 });
+
+loadDocumentSettings();

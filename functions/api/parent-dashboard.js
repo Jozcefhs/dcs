@@ -3,6 +3,7 @@
 
 import { getAccountsOverview, getPayableFees } from './backend.js';
 import { listCollection, requireFirestoreEnv, upsertDocument } from '../lib/firestore.js';
+import { listSchoolCollection, upsertSchoolDocument } from '../lib/school-scope.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -168,7 +169,7 @@ function studentLoginCode(student) {
 async function firestoreRows(env, collection) {
   try {
     requireFirestoreEnv(env);
-    return await listCollection(env, collection);
+    return ['applications', 'students'].includes(collection) ? await listSchoolCollection(env, collection) : await listCollection(env, collection);
   } catch (_err) {
     return [];
   }
@@ -1002,7 +1003,7 @@ async function updateWalletRestrictions(env, body) {
   requireFirestoreEnv(env);
   const sources = await loadParentSources(env);
   const { applications } = await assertParentAccess(sources, email, body.code || body.VerificationCode);
-  const students = (await listCollection(env, 'students')).map(normalizeStudent);
+  const students = (await listSchoolCollection(env, 'students')).map(normalizeStudent);
   const accountRef = clean(body.accountRef || body.AccountRef || body.AdmissionNo);
   const student = students.find((row) => {
     return parentOwnsStudent(row, email, applications) &&
@@ -1023,7 +1024,7 @@ async function updateWalletRestrictions(env, body) {
     WalletRestrictionUpdatedBy: 'Parent',
     WalletRestrictionUpdatedAt: nowIso()
   };
-  await upsertDocument(env, 'students', safeDocumentId(student.AdmissionNo || student.AccountRef), updates);
+  await upsertSchoolDocument(env, 'students', safeDocumentId(student.AdmissionNo || student.AccountRef), updates);
   return { ok: true, message: 'Wallet restrictions saved.' };
 }
 

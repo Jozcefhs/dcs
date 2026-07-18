@@ -103,6 +103,8 @@ function publicUser(user) {
     displayName: clean(user.DisplayName || user.displayName || user.Username || user.username || user.__id),
     role: clean(user.Role || user.role) || 'Front Desk',
     department: inferDepartment(user),
+    branchId: clean(user.BranchId || user.branchId),
+    schoolSectionAccess: clean(user.SchoolSectionAccess || user.schoolSectionAccess) || 'All',
     mustChangePassword: user.MustChangePassword === undefined && user.mustChangePassword === undefined
       ? false
       : !['no', 'false', '0'].includes(lower(user.MustChangePassword ?? user.mustChangePassword))

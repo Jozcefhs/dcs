@@ -1,6 +1,7 @@
 import { getAccountsOverview } from './backend.js';
 import { listCollection, requireFirestoreEnv } from '../lib/firestore.js';
 import { requireStaffSession } from '../lib/staff-auth.js';
+import { listSchoolCollection } from '../lib/school-scope.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -84,8 +85,8 @@ export async function onRequestPost(context) {
       clinicMovements,
       kitchenMovements
     ] = await Promise.all([
-      allowed.has('admissions') ? listCollection(env, 'applications') : Promise.resolve([]),
-      allowed.has('students') ? listCollection(env, 'students') : Promise.resolve([]),
+      allowed.has('admissions') ? listSchoolCollection(env, 'applications') : Promise.resolve([]),
+      allowed.has('students') ? listSchoolCollection(env, 'students') : Promise.resolve([]),
       allowed.has('formPurchases') ? listCollection(env, 'formSales') : Promise.resolve([]),
       allowed.has('accounts') ? listCollection(env, 'payments') : Promise.resolve([]),
       allowed.has('accounts') ? listCollection(env, 'invoices') : Promise.resolve([]),
@@ -106,13 +107,21 @@ export async function onRequestPost(context) {
       }
     }
     const displayInvoices = reconcileInvoiceDisplay(invoices, accountOverview && accountOverview.ok ? accountOverview.accounts : []);
+    const staffScope = (rows) => rows.filter((row) => {
+      const branchAllowed = !clean(user.branchId) || !clean(row.BranchId) || clean(row.BranchId).toLowerCase() === clean(user.branchId).toLowerCase();
+      const sectionAccess = clean(user.schoolSectionAccess || 'All').toLowerCase();
+      const sectionAllowed = sectionAccess === 'all' || !clean(row.SchoolSection) || clean(row.SchoolSection).toLowerCase() === sectionAccess;
+      return user.role === 'Super Admin' || (branchAllowed && sectionAllowed);
+    });
+    const visibleApplications = staffScope(applications);
+    const visibleStudents = staffScope(students);
     const walletPurchases = ledger.filter((row) => clean(row.EntryType).toLowerCase() === 'wallet purchase');
     const lowClinic = clinicInventory.filter((row) => toNumber(row.ReorderLevel) > 0 && toNumber(row.Quantity) <= toNumber(row.ReorderLevel));
     const lowKitchen = kitchenInventory.filter((row) => toNumber(row.ReorderLevel) > 0 && toNumber(row.Quantity) <= toNumber(row.ReorderLevel));
 
     const allDepartments = {
-      admissions: publicRows(sortRecent(applications, ['SubmittedAt', 'UpdatedAt', 'Timestamp']), 80),
-      students: publicRows(sortRecent(students, ['UpdatedAt', 'EnrolledAt', 'CreatedAt']), 80),
+      admissions: publicRows(sortRecent(visibleApplications, ['SubmittedAt', 'UpdatedAt', 'Timestamp']), 80),
+      students: publicRows(sortRecent(visibleStudents, ['UpdatedAt', 'EnrolledAt', 'CreatedAt']), 80),
       formPurchases: publicRows(sortRecent(formSales, ['PaymentDate', 'UpdatedAt', 'CreatedAt']), 80),
       accounts: {
         payments: publicRows(sortRecent(payments, ['PaidAt', 'Date', 'RecordedAt']), 80),
@@ -136,8 +145,8 @@ export async function onRequestPost(context) {
     };
     const departments = Object.fromEntries(Object.entries(allDepartments).filter(([key]) => allowed.has(key)));
     const summary = {};
-    if (allowed.has('admissions')) summary.applications = applications.length;
-    if (allowed.has('students')) summary.students = students.length;
+    if (allowed.has('admissions')) summary.applications = visibleApplications.length;
+    if (allowed.has('students')) summary.students = visibleStudents.length;
     if (allowed.has('formPurchases')) summary.formPurchases = formSales.length;
     if (allowed.has('accounts')) {
       summary.payments = payments.length;

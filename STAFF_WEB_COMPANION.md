@@ -77,3 +77,11 @@ The web workflow intentionally does not post journals or pay suppliers. Those fi
 Every active staff role receives a private **My Payroll** section. A payroll profile must use the same username as the staff login. Only payroll runs that Accounts has posted are visible, and each user can see only their own payroll items. PDF payslips are generated on demand through the authenticated payroll endpoint and are not publicly stored.
 
 Payroll preparation, approval, posting, and salary payments remain controlled from the desktop Finance & Accounting workspace. Management or Super Admin approves submitted payroll; Accounts or Super Admin posts it and records payments.
+
+## Branches, school sections, documents, and staff upload
+
+New applications and student records use isolated Firestore paths under `schoolBranches/{branchId}/sections/{primary|secondary}`. Existing top-level records remain readable for a safe transition. Shared settings, authentication, and central finance records remain central by design.
+
+Super Admin can upload staff accounts from **Staff & Permissions** using the downloadable CSV template. Imported rows support role, department, branch, school-section access, temporary password, active status, and forced password change.
+
+The desktop Settings tab controls which admission documents parents are asked to upload. Disabled rows disappear from the parent upload page and are excluded from completion calculations. Super Admin and Admissions Officer can delete an uploaded document; its Google Drive file is moved to trash and the Firestore application metadata is recalculated.

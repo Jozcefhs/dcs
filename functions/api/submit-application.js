@@ -1,5 +1,6 @@
 import { listCollection, requireFirestoreEnv, upsertDocument } from '../lib/firestore.js';
 import { getSchoolCode } from './backend.js';
+import { getSchoolStructure, listSchoolCollection, schoolSectionFor, upsertSchoolDocument } from '../lib/school-scope.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -85,8 +86,9 @@ async function submitToFirestore(env, email, code, receiptNo, application) {
     return { ok: false, message: 'This verification code has already been used.' };
   }
 
-  const applications = await listCollection(env, 'applications');
+  const applications = await listSchoolCollection(env, 'applications');
   const profile = await getSchoolProfile(env);
+  const structure = await getSchoolStructure(env);
   const reference = nextApplicationReference(applications, await getSchoolCode(env));
   const now = new Date().toISOString();
   const parentEmail = lower(application.ParentEmail || application.parentEmail || email);
@@ -113,13 +115,15 @@ async function submitToFirestore(env, email, code, receiptNo, application) {
     ParentEmail: parentEmail,
     ReceiptNo: receiptNo || clean(sale.ReceiptNo),
     ClassApplyingFor: clean(application.ClassApplyingFor || sale.ClassApplyingFor),
+    BranchId: clean(application.BranchId || structure.ActiveBranchId),
     Status: 'Submitted',
     DuplicateWarning: duplicateRefs.length ? 'Possible duplicate' : '',
     DuplicateMatches: duplicateRefs.length ? `First name + surname + parent email match ${duplicateRefs.join(', ')}` : '',
     SubmittedAt: now,
     UpdatedAt: now
   };
-  await upsertDocument(env, 'applications', safeDocumentId(reference), app);
+  app.SchoolSection = schoolSectionFor(app);
+  await upsertSchoolDocument(env, 'applications', safeDocumentId(reference), app);
   await upsertDocument(env, 'formSales', safeDocumentId(clean(sale.ReceiptNo) || receiptNo || sale.__id), {
     ...sale,
     Used: 'YES',
