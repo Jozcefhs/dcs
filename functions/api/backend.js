@@ -3796,6 +3796,85 @@ async function getAccountingOverview(env, body = {}) {
     vendors, supplierBills, supplierPayments, assets, adjustments, approvalLimits, closeChecklist, bankStatementItems, reports };
 }
 
+function requireStaffUserAdmin(body) {
+  if (clean(body.UserRole || body.userRole) === 'Super Admin') return;
+  const err = new Error('Only Super Admin can manage staff accounts.');
+  err.status = 403;
+  throw err;
+}
+
+function staffUserIsActive(row) {
+  return !['no', 'false', '0', 'inactive', 'disabled'].includes(lower(row.Active === undefined ? 'YES' : row.Active));
+}
+
+function activeStaffSuperAdmins(rows, excluding = '') {
+  return rows.filter((row) => !sameText(row.Username || row.__id, excluding) && clean(row.Role) === 'Super Admin' && staffUserIsActive(row));
+}
+
+async function getStaffUsersForDesktop(env, body) {
+  requireStaffUserAdmin(body);
+  const users = await listCollection(env, 'staffUsers');
+  return { ok: true, message: 'Staff users loaded from Firestore.', users };
+}
+
+async function saveStaffUserFromDesktop(env, body) {
+  requireStaffUserAdmin(body);
+  const incoming = body.User && typeof body.User === 'object' ? body.User : body;
+  const username = clean(incoming.Username || incoming.username);
+  if (!username) { const err = new Error('Username is required.'); err.status = 400; throw err; }
+  const users = await listCollection(env, 'staffUsers');
+  const existing = users.find((row) => sameText(row.Username || row.__id, username));
+  const role = clean(incoming.Role || incoming.role) || 'Front Desk';
+  const department = clean(incoming.Department || incoming.department);
+  const active = incoming.Active === undefined ? true : staffUserIsActive(incoming);
+  if (role === 'Department User' && !department) { const err = new Error('Department is required for a Department User.'); err.status = 400; throw err; }
+  if (!clean(incoming.Salt) || !clean(incoming.PasswordHash)) { const err = new Error('A password hash and salt are required.'); err.status = 400; throw err; }
+  if (existing && clean(existing.Role) === 'Super Admin' && staffUserIsActive(existing) && (role !== 'Super Admin' || !active) && activeStaffSuperAdmins(users, username).length === 0) {
+    const err = new Error('At least one active Super Admin must remain.'); err.status = 409; throw err;
+  }
+  const payload = {
+    ...(existing || {}),
+    Username: username,
+    DisplayName: clean(incoming.DisplayName) || username,
+    Role: role,
+    Department: department,
+    Active: active,
+    Salt: clean(incoming.Salt),
+    PasswordHash: clean(incoming.PasswordHash),
+    PasswordIterations: asMoneyNumber(incoming.PasswordIterations || 120000),
+    MustChangePassword: incoming.MustChangePassword === undefined ? Boolean(existing?.MustChangePassword) : staffUserIsActive({ Active: incoming.MustChangePassword }),
+    CreatedAt: existing?.CreatedAt || clean(incoming.CreatedAt) || nowIso(),
+    UpdatedAt: nowIso(),
+    UpdatedBy: clean(body.RecordedBy || body.recordedBy) || 'Desktop Super Admin'
+  };
+  delete payload.__id;
+  delete payload.__name;
+  await upsertDocument(env, 'staffUsers', safeDocumentId(lower(username)), payload);
+  await upsertDocument(env, 'staffSecurityAudit', safeDocumentId(`DESKTOP-${Date.now()}-${username}`), {
+    Timestamp: nowIso(), Action: existing ? 'UPDATE USER' : 'CREATE USER', Username: username,
+    Actor: clean(body.RecordedBy) || 'Desktop Super Admin', SourcePlatform: 'Desktop'
+  });
+  return { ok: true, message: existing ? 'Staff user updated in Firestore.' : 'Staff user created in Firestore.', user: payload };
+}
+
+async function deleteStaffUserFromDesktop(env, body) {
+  requireStaffUserAdmin(body);
+  const username = clean(body.Username || body.username);
+  const users = await listCollection(env, 'staffUsers');
+  const existing = users.find((row) => sameText(row.Username || row.__id, username));
+  if (!existing) { const err = new Error('Staff account was not found.'); err.status = 404; throw err; }
+  if (sameText(username, body.RecordedBy)) { const err = new Error('You cannot delete the account currently signed in.'); err.status = 409; throw err; }
+  if (clean(existing.Role) === 'Super Admin' && staffUserIsActive(existing) && activeStaffSuperAdmins(users, username).length === 0) {
+    const err = new Error('At least one active Super Admin must remain.'); err.status = 409; throw err;
+  }
+  await deleteDocument(env, 'staffUsers', existing.__id || safeDocumentId(lower(username)));
+  await upsertDocument(env, 'staffSecurityAudit', safeDocumentId(`DESKTOP-${Date.now()}-${username}`), {
+    Timestamp: nowIso(), Action: 'DELETE USER', Username: username,
+    Actor: clean(body.RecordedBy) || 'Desktop Super Admin', SourcePlatform: 'Desktop'
+  });
+  return { ok: true, message: 'Staff user deleted from Firestore.' };
+}
+
 async function routeAction(env, action, body = {}) {
   switch (action) {
     case 'ping':
@@ -3851,6 +3930,12 @@ async function routeAction(env, action, body = {}) {
       return getAccountsOverview(env);
     case 'getAccountingOverview':
       return getAccountingOverview(env, body);
+    case 'getStaffUsers':
+      return getStaffUsersForDesktop(env, body);
+    case 'saveStaffUser':
+      return saveStaffUserFromDesktop(env, body);
+    case 'deleteStaffUser':
+      return deleteStaffUserFromDesktop(env, body);
     case 'syncAccountingRevenue':
       requireAccountingRole(body, ['Super Admin', 'Accounts Officer']);
       return { ok: true, message: 'Revenue subledgers synchronized.', created: await syncRevenueToAccounting(env) };

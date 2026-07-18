@@ -1,4 +1,4 @@
-import { listCollection } from './firestore.js';
+import { listCollection, upsertDocument } from './firestore.js';
 
 const encoder = new TextEncoder();
 const SESSION_COOKIE = 'school_staff_session';
@@ -74,6 +74,21 @@ async function verifyDesktopPassword(user, password) {
   return secureEqual(bytesToHex(bits), expected);
 }
 
+export async function hashStaffPassword(password, iterations = 120000) {
+  if (String(password || '').length < 6) {
+    const err = new Error('Password must be at least 6 characters.');
+    err.status = 400;
+    throw err;
+  }
+  const saltBytes = crypto.getRandomValues(new Uint8Array(16));
+  const salt = bytesToHex(saltBytes);
+  const material = await crypto.subtle.importKey('raw', encoder.encode(String(password)), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({
+    name: 'PBKDF2', salt: encoder.encode(salt), iterations, hash: 'SHA-256'
+  }, material, 256);
+  return { Salt: salt, PasswordHash: bytesToHex(bits), PasswordIterations: iterations };
+}
+
 function inferDepartment(user) {
   return clean(user.Department || user.department || ({
     'Tuck Shop User': 'Tuck Shop',
@@ -87,7 +102,10 @@ function publicUser(user) {
     username: clean(user.Username || user.username || user.__id),
     displayName: clean(user.DisplayName || user.displayName || user.Username || user.username || user.__id),
     role: clean(user.Role || user.role) || 'Front Desk',
-    department: inferDepartment(user)
+    department: inferDepartment(user),
+    mustChangePassword: user.MustChangePassword === undefined && user.mustChangePassword === undefined
+      ? false
+      : !['no', 'false', '0'].includes(lower(user.MustChangePassword ?? user.mustChangePassword))
   };
 }
 
@@ -95,7 +113,7 @@ export function allowedSectionsFor(user = {}) {
   const role = clean(user.role || user.Role);
   const department = lower(user.department || user.Department);
   const roleSections = {
-    'Super Admin': ['admissions', 'formPurchases', 'students', 'accounts', 'financeRequests', 'clinic', 'kitchen', 'tuckShop'],
+    'Super Admin': ['admissions', 'formPurchases', 'students', 'accounts', 'financeRequests', 'clinic', 'kitchen', 'tuckShop', 'staffUsers'],
     'Admissions Officer': ['admissions', 'formPurchases', 'students', 'financeRequests'],
     'Accounts Officer': ['students', 'accounts', 'financeRequests', 'clinic', 'kitchen', 'tuckShop'],
     Management: ['admissions', 'formPurchases', 'students', 'accounts', 'financeRequests', 'clinic', 'kitchen', 'tuckShop'],
@@ -127,18 +145,34 @@ export async function authenticateStaff(env, username, password) {
   if (user) {
     const active = user.Active === undefined ? true : !['no', 'false', '0', 'inactive', 'disabled'].includes(lower(user.Active));
     if (!active || !(await verifyDesktopPassword(user, password))) return null;
-    return publicUser(user);
+    const loginAt = new Date().toISOString();
+    const saved = { ...user, LastLoginAt: loginAt };
+    delete saved.__id;
+    delete saved.__name;
+    await upsertDocument(env, 'staffUsers', user.__id, saved);
+    const auditId = `LOGIN-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+    await upsertDocument(env, 'staffSecurityAudit', auditId, {
+      Timestamp: loginAt, Action: 'LOGIN', Username: clean(user.Username || user.__id),
+      Role: clean(user.Role), Department: inferDepartment(user), SourcePlatform: 'Web'
+    });
+    return publicUser(saved);
   }
 
   const envUsername = lower(env.ADMIN_WEB_USERNAME || 'admin');
   const envPassword = clean(env.ADMIN_WEB_PASSWORD);
   if (wanted === envUsername && envPassword && secureEqual(password, envPassword)) {
-    return {
+    const envUser = {
       username: clean(env.ADMIN_WEB_USERNAME || 'admin'),
       displayName: clean(env.ADMIN_WEB_DISPLAY_NAME || 'Super Admin'),
       role: 'Super Admin',
       department: ''
     };
+    const auditId = `LOGIN-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+    await upsertDocument(env, 'staffSecurityAudit', auditId, {
+      Timestamp: new Date().toISOString(), Action: 'LOGIN', Username: envUser.username,
+      Role: envUser.role, Department: '', SourcePlatform: 'Web Environment Admin'
+    });
+    return envUser;
   }
   return null;
 }
@@ -178,10 +212,31 @@ export async function readStaffSession(env, request) {
 }
 
 export async function requireStaffSession(env, request) {
-  const user = await readStaffSession(env, request);
+  let user = await readStaffSession(env, request);
   if (!user) {
     const err = new Error('Your staff session has expired. Please sign in again.');
     err.status = 401;
+    throw err;
+  }
+  const envAdmin = lower(env.ADMIN_WEB_USERNAME || 'admin');
+  const users = await listCollection(env, 'staffUsers');
+  const current = users.find((row) => lower(row.Username || row.username || row.__id) === lower(user.username));
+  if (current) {
+    const active = current && (current.Active === undefined || !['no', 'false', '0', 'inactive', 'disabled'].includes(lower(current.Active)));
+    if (!active) {
+      const err = new Error('This staff account has been disabled or deleted.');
+      err.status = 401;
+      throw err;
+    }
+    user = publicUser(current);
+  } else if (lower(user.username) !== envAdmin || user.role !== 'Super Admin') {
+    const err = new Error('This staff account has been disabled or deleted.');
+    err.status = 401;
+    throw err;
+  }
+  if (user.mustChangePassword) {
+    const err = new Error('You must change your temporary password before continuing.');
+    err.status = 428;
     throw err;
   }
   return { ...user, allowedSections: allowedSectionsFor(user) };

@@ -33,6 +33,22 @@ The login API also supports documents in the `staffUsers` collection. Each docum
 
 Passwords use PBKDF2-HMAC-SHA256 and are compatible with the current desktop application's password format. Passwords themselves must never be stored in Firestore.
 
+## Unified desktop and web accounts
+
+The desktop app now synchronizes its local `users.json` cache with the Firestore `staffUsers` collection when running in Firestore mode:
+
+- If Firestore already contains staff users, they replace the desktop login cache.
+- If Firestore is empty and desktop users already exist, the desktop accounts are migrated to Firestore.
+- Desktop user creation, password reset, role changes, activation and deletion are written to Firestore before the local cache is changed.
+- Opening desktop User Management or switching users refreshes the Firestore account cache.
+- Web sessions revalidate role, activation and deletion against Firestore on every protected request.
+
+Only password hashes and unique salts are synchronized. Plaintext passwords are never saved.
+
+New or reset accounts can be marked `MustChangePassword`. Both desktop and web interfaces require the temporary password to be replaced before access is granted.
+
+Super Admins can use the web `Staff & Permissions` section to create, update, disable, reset or delete shared staff accounts. The system prevents deletion, deactivation or demotion of the final active Super Admin and records login/user-management activity in `staffSecurityAudit`.
+
 ## Current role access
 
 - Super Admin and Management: all foundation dashboard sections.

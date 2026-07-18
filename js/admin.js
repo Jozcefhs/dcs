@@ -13,11 +13,17 @@ const refreshButton = document.getElementById('staffRefresh');
 const summaryEl = document.getElementById('adminSummary');
 const tabsEl = document.getElementById('adminTabs');
 const panelEl = document.getElementById('adminPanel');
+const passwordDialog = document.getElementById('staffPasswordDialog');
+const passwordForm = document.getElementById('staffPasswordForm');
+const passwordButton = document.getElementById('staffPasswordButton');
+const passwordStatus = document.getElementById('staffPasswordStatus');
 
 let currentUser = null;
 let dashboardData = null;
 let activeSection = '';
 let financeData = null;
+let staffUsersData = [];
+let staffAuditData = [];
 
 const tabConfig = [
   ['admissions', 'Admissions'],
@@ -27,7 +33,8 @@ const tabConfig = [
   ['financeRequests', 'Bills & Requisitions'],
   ['clinic', 'Clinic'],
   ['kitchen', 'Kitchen'],
-  ['tuckShop', 'Tuck Shop']
+  ['tuckShop', 'Tuck Shop'],
+  ['staffUsers', 'Staff & Permissions']
 ];
 
 function clean(value) {
@@ -87,6 +94,16 @@ function showDashboard(user) {
   loginCard.hidden = true;
   identityEl.hidden = false;
   dashboardEl.hidden = false;
+}
+
+async function continueAfterAuthentication(user) {
+  showDashboard(user);
+  if (user.mustChangePassword) {
+    passwordDialog.showModal();
+    document.getElementById('staffNewPassword').focus();
+    return;
+  }
+  await loadDashboard();
 }
 
 async function sessionRequest(method = 'GET', body = null) {
@@ -194,7 +211,10 @@ function inventoryColumns() {
 function renderSection(active) {
   if (!dashboardData) return;
   const departments = dashboardData.departments || {};
-  if (active === 'financeRequests') {
+  if (active === 'staffUsers') {
+    panelEl.innerHTML = '<p class="muted">Loading staff accounts...</p>';
+    loadStaffUsers();
+  } else if (active === 'financeRequests') {
     panelEl.innerHTML = '<p class="muted">Loading bills and requisitions...</p>';
     loadFinanceWorkflow();
   } else if (active === 'admissions') {
@@ -468,6 +488,147 @@ async function loadFinanceWorkflow() {
   }
 }
 
+async function staffUserRequest(action, payload = {}) {
+  const response = await fetch('/api/staff-users', {
+    method: 'POST', credentials: 'same-origin', cache: 'no-store',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, ...payload })
+  });
+  const data = await response.json().catch(() => ({ ok: false, message: 'Staff-user management did not return JSON.' }));
+  if (response.status === 401) showLogin(data.message || 'Your staff session has expired.', 'bad');
+  if (!response.ok || !data.ok) throw new Error(data.message || 'Staff-user action failed.');
+  return data;
+}
+
+function yes(value) {
+  return value === true || ['yes', 'true', '1', 'active'].includes(clean(value).toLowerCase());
+}
+
+function renderStaffUsers() {
+  if (activeSection !== 'staffUsers') return;
+  const activeUsers = staffUsersData.filter((user) => yes(user.Active)).length;
+  const admins = staffUsersData.filter((user) => user.Role === 'Super Admin' && yes(user.Active)).length;
+  panelEl.innerHTML = `
+    <div class="workflow-intro">
+      <div><p class="eyebrow">Identity & access</p><h2>Staff & Permissions</h2><p class="muted">Shared Firestore accounts for desktop and web access</p></div>
+      <div class="workflow-primary-actions"><button type="button" id="newStaffUser">+ New Staff Account</button><button type="button" class="workflow-icon-action" id="refreshStaffUsers">Refresh</button></div>
+    </div>
+    <p id="staffUsersStatus" class="status"></p>
+    <div class="workflow-kpis staff-user-kpis">
+      <div><small>Total Accounts</small><strong>${staffUsersData.length}</strong><span>Firestore staff users</span></div>
+      <div><small>Active</small><strong>${activeUsers}</strong><span>Can sign in</span></div>
+      <div><small>Super Admins</small><strong>${admins}</strong><span>Active administrators</span></div>
+      <div><small>Disabled</small><strong>${staffUsersData.length - activeUsers}</strong><span>Access blocked</span></div>
+    </div>
+    <div class="staff-user-list">
+      ${staffUsersData.length ? staffUsersData.map((user) => `
+        <article class="staff-user-row">
+          <div class="staff-user-avatar">${escapeHtml((user.DisplayName || user.Username || 'U').split(/\s+/).slice(0,2).map((part) => part[0]).join('').toUpperCase())}</div>
+          <div class="staff-user-copy"><strong>${escapeHtml(user.DisplayName || user.Username)}</strong><span>@${escapeHtml(user.Username)} • ${escapeHtml(user.Role)}</span><small>${escapeHtml(user.Department || 'No department')}${yes(user.MustChangePassword) ? ' • Password change required' : ''}</small></div>
+          <span class="workflow-status ${yes(user.Active) ? 'status-approved' : 'status-rejected'}">${yes(user.Active) ? 'Active' : 'Disabled'}</span>
+          <div class="staff-user-actions"><button type="button" data-edit-user="${escapeHtml(user.Username)}">Manage</button><button type="button" class="workflow-reject" data-delete-user="${escapeHtml(user.Username)}">Delete</button></div>
+        </article>
+      `).join('') : '<p class="muted">No Firestore staff accounts found. Create the first shared staff account.</p>'}
+    </div>
+    <section class="staff-security-activity">
+      <h2>Recent Security Activity</h2>
+      <div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>Time</th><th>Action</th><th>Account</th><th>Actor</th><th>Platform</th></tr></thead><tbody>
+        ${staffAuditData.length ? staffAuditData.map((row) => `<tr><td>${escapeHtml(row.Timestamp)}</td><td>${escapeHtml(row.Action)}</td><td>${escapeHtml(row.Username)}</td><td>${escapeHtml(row.Actor)}</td><td>${escapeHtml(row.SourcePlatform)}</td></tr>`).join('') : '<tr><td colspan="5">No security activity recorded yet.</td></tr>'}
+      </tbody></table></div>
+    </section>
+    <dialog id="staffUserDialog" class="workflow-dialog">
+      <div class="workflow-dialog-header"><div><small>Identity & access</small><h2 id="staffUserDialogTitle">New Staff Account</h2></div><button type="button" data-close-user-dialog aria-label="Close">×</button></div>
+      <form id="staffUserForm" class="workflow-form">
+        <label>Username <span class="required">*</span><input name="Username" required></label>
+        <label>Display name <span class="required">*</span><input name="DisplayName" required></label>
+        <label>Role <select name="Role" required>
+          ${['Super Admin','Admissions Officer','Accounts Officer','Management','Department User','Tuck Shop User','Clinic User','Kitchen User','Front Desk'].map((role) => `<option>${role}</option>`).join('')}
+        </select></label>
+        <label>Department<input name="Department" placeholder="Required for Department User"></label>
+        <label>New or reset password<input name="Password" type="password" minlength="6" autocomplete="new-password"><small>Required for a new account. Leave blank when editing unless resetting it.</small></label>
+        <label class="check-row"><input name="Active" type="checkbox" checked> Account active</label>
+        <label class="check-row"><input name="MustChangePassword" type="checkbox" checked> Require password change at next sign-in</label>
+        <button type="submit">Save Staff Account</button>
+        <p class="status" data-user-form-status></p>
+      </form>
+    </dialog>
+  `;
+  bindStaffUserEvents();
+}
+
+function openStaffUserDialog(username = '') {
+  const dialog = document.getElementById('staffUserDialog');
+  const form = document.getElementById('staffUserForm');
+  const user = staffUsersData.find((row) => row.Username.toLowerCase() === username.toLowerCase());
+  form.reset();
+  form.elements.Username.readOnly = Boolean(user);
+  document.getElementById('staffUserDialogTitle').textContent = user ? 'Manage Staff Account' : 'New Staff Account';
+  if (user) {
+    form.elements.Username.value = user.Username;
+    form.elements.DisplayName.value = user.DisplayName || user.Username;
+    form.elements.Role.value = user.Role;
+    form.elements.Department.value = user.Department || '';
+    form.elements.Active.checked = yes(user.Active);
+    form.elements.MustChangePassword.checked = yes(user.MustChangePassword);
+  } else {
+    form.elements.Active.checked = true;
+    form.elements.MustChangePassword.checked = true;
+  }
+  dialog.showModal();
+}
+
+function bindStaffUserEvents() {
+  document.getElementById('newStaffUser')?.addEventListener('click', () => openStaffUserDialog());
+  document.getElementById('refreshStaffUsers')?.addEventListener('click', loadStaffUsers);
+  document.querySelector('[data-close-user-dialog]')?.addEventListener('click', () => document.getElementById('staffUserDialog').close());
+  panelEl.querySelectorAll('[data-edit-user]').forEach((button) => button.addEventListener('click', () => openStaffUserDialog(button.dataset.editUser)));
+  panelEl.querySelectorAll('[data-delete-user]').forEach((button) => button.addEventListener('click', async () => {
+    const username = button.dataset.deleteUser;
+    if (!window.confirm(`Delete staff account ${username}? This cannot be undone.`)) return;
+    const normalText = button.textContent;
+    setButtonLoading(button, true, 'Deleting...', normalText);
+    try {
+      const data = await staffUserRequest('delete', { Username: username });
+      await loadStaffUsers();
+      setStatus(document.getElementById('staffUsersStatus'), data.message, 'ok');
+    } catch (error) {
+      setStatus(document.getElementById('staffUsersStatus'), error.message || String(error), 'bad');
+      setButtonLoading(button, false, 'Deleting...', normalText);
+    }
+  }));
+  document.getElementById('staffUserForm')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = form.querySelector('button[type="submit"]');
+    const status = form.querySelector('[data-user-form-status]');
+    const payload = Object.fromEntries(new FormData(form).entries());
+    payload.Active = form.elements.Active.checked;
+    payload.MustChangePassword = form.elements.MustChangePassword.checked;
+    setButtonLoading(button, true, 'Saving...', 'Save Staff Account');
+    try {
+      const data = await staffUserRequest('save', payload);
+      document.getElementById('staffUserDialog').close();
+      await loadStaffUsers();
+      setStatus(document.getElementById('staffUsersStatus'), data.message, 'ok');
+    } catch (error) {
+      setStatus(status, error.message || String(error), 'bad');
+      setButtonLoading(button, false, 'Saving...', 'Save Staff Account');
+    }
+  });
+}
+
+async function loadStaffUsers() {
+  if (activeSection !== 'staffUsers') return;
+  try {
+    const data = await staffUserRequest('list');
+    staffUsersData = data.users || [];
+    staffAuditData = data.audit || [];
+    renderStaffUsers();
+  } catch (error) {
+    if (activeSection === 'staffUsers') panelEl.innerHTML = `<p class="status bad">${escapeHtml(error.message || String(error))}</p>`;
+  }
+}
+
 loginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (loginButton.disabled) return;
@@ -481,8 +642,7 @@ loginForm.addEventListener('submit', async (event) => {
     });
     if (!response.ok || !data.ok) throw new Error(data.message || 'Could not sign in.');
     loginForm.reset();
-    showDashboard(data.user);
-    await loadDashboard();
+    await continueAfterAuthentication(data.user);
   } catch (error) {
     setStatus(loginStatus, error.message || String(error), 'bad');
   } finally {
@@ -503,12 +663,42 @@ signOutButton.addEventListener('click', async () => {
 
 refreshButton.addEventListener('click', loadDashboard);
 
+passwordForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (passwordButton.disabled) return;
+  const password = document.getElementById('staffNewPassword').value;
+  const confirmPassword = document.getElementById('staffConfirmPassword').value;
+  if (password !== confirmPassword) {
+    setStatus(passwordStatus, 'Passwords do not match.', 'bad');
+    return;
+  }
+  setButtonLoading(passwordButton, true, 'Changing...', 'Change Password');
+  setStatus(passwordStatus, 'Updating your Firestore staff account...');
+  try {
+    const { response, data } = await sessionRequest('POST', { action: 'changePassword', password, confirmPassword });
+    if (!response.ok || !data.ok) throw new Error(data.message || 'Password could not be changed.');
+    passwordForm.reset();
+    passwordDialog.close();
+    await continueAfterAuthentication(data.user);
+  } catch (error) {
+    setStatus(passwordStatus, error.message || String(error), 'bad');
+  } finally {
+    setButtonLoading(passwordButton, false, 'Changing...', 'Change Password');
+  }
+});
+
+document.getElementById('staffPasswordSignOut').addEventListener('click', async () => {
+  await sessionRequest('POST', { action: 'logout' });
+  passwordDialog.close();
+  passwordForm.reset();
+  showLogin('Signed out successfully.', 'ok');
+});
+
 (async function restoreSession() {
   setStatus(loginStatus, 'Checking staff session...');
   const { response, data } = await sessionRequest();
   if (response.ok && data.authenticated && data.user) {
-    showDashboard(data.user);
-    await loadDashboard();
+    await continueAfterAuthentication(data.user);
   } else {
     showLogin();
   }

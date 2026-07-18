@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>School Staff Portal</title>
-  <link rel="stylesheet" href="css/style.css?v=20260718-financial-app">
+  <link rel="stylesheet" href="css/style.css?v=20260718-unified-staff">
 </head>
 <body class="staff-page">
   <header class="staff-topbar">
@@ -64,7 +64,19 @@
     </section>
   </main>
 
+  <dialog id="staffPasswordDialog" class="workflow-dialog staff-password-dialog">
+    <div class="workflow-dialog-header"><div><small>Security required</small><h2>Change Temporary Password</h2></div></div>
+    <form id="staffPasswordForm" class="workflow-form">
+      <p class="muted">Create a permanent password before accessing school records.</p>
+      <label>New password<input id="staffNewPassword" type="password" minlength="6" autocomplete="new-password" required></label>
+      <label>Confirm password<input id="staffConfirmPassword" type="password" minlength="6" autocomplete="new-password" required></label>
+      <button id="staffPasswordButton" type="submit">Change Password</button>
+      <button id="staffPasswordSignOut" type="button" class="dashboard-signout">Sign Out Instead</button>
+      <p id="staffPasswordStatus" class="status" role="status"></p>
+    </form>
+  </dialog>
+
   <script src="js/site-config.js"></script>
-  <script src="js/admin.js?v=20260718-financial-app"></script>
+  <script src="js/admin.js?v=20260718-unified-staff"></script>
 </body>
 </html>
