@@ -42,4 +42,16 @@ Passwords use PBKDF2-HMAC-SHA256 and are compatible with the current desktop app
 - Clinic, Kitchen and Tuck Shop users: their own departmental section.
 - Department User: section inferred from the assigned department.
 
-This block is intentionally read-only. Department requisitions, bills, approvals and other write workflows should be added through authenticated backend actions in the next block.
+## Bills and requisitions workflow
+
+The `Bills & Requisitions` section now provides authenticated write workflows:
+
+1. A department submits an expense requisition or supplier bill.
+2. The record is saved as `Submitted` in `accountingExpenses` or `accountingSupplierBills`.
+3. Management or Super Admin approves or rejects the submission. Configured accounting approval limits are enforced.
+4. Accounts or Super Admin marks an approved record as reviewed.
+5. Accounts completes final posting or supplier payment in the desktop Finance & Accounting tab, preserving its journal and bank controls.
+
+Every web create, approval, rejection and Accounts review writes an entry to `accountingAudit` with the staff name, role, department, timestamp and `SourcePlatform: Web`.
+
+The web workflow intentionally does not post journals or pay suppliers. Those final accounting actions remain in the desktop app.

@@ -17,12 +17,14 @@ const panelEl = document.getElementById('adminPanel');
 let currentUser = null;
 let dashboardData = null;
 let activeSection = '';
+let financeData = null;
 
 const tabConfig = [
   ['admissions', 'Admissions'],
   ['formPurchases', 'Form Purchases'],
   ['students', 'Students'],
   ['accounts', 'Accounts'],
+  ['financeRequests', 'Bills & Requisitions'],
   ['clinic', 'Clinic'],
   ['kitchen', 'Kitchen'],
   ['tuckShop', 'Tuck Shop']
@@ -192,7 +194,10 @@ function inventoryColumns() {
 function renderSection(active) {
   if (!dashboardData) return;
   const departments = dashboardData.departments || {};
-  if (active === 'admissions') {
+  if (active === 'financeRequests') {
+    panelEl.innerHTML = '<p class="muted">Loading bills and requisitions...</p>';
+    loadFinanceWorkflow();
+  } else if (active === 'admissions') {
     panelEl.innerHTML = table('Admissions', departments.admissions || [], [
       { label: 'Reference', value: (row) => pick(row, ['ApplicationReference', 'ApplicationID', '__id']) },
       { label: 'Name', value: (row) => pick(row, ['ApplicantName', 'Name']) },
@@ -253,6 +258,190 @@ function renderSection(active) {
     ]);
   } else {
     panelEl.innerHTML = '<p class="muted">No dashboard section is available for this role yet.</p>';
+  }
+}
+
+async function financeRequest(action, payload = {}) {
+  const response = await fetch('/api/finance-workflow', {
+    method: 'POST',
+    credentials: 'same-origin',
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, ...payload })
+  });
+  const data = await response.json().catch(() => ({ ok: false, message: 'Finance workflow did not return JSON.' }));
+  if (response.status === 401) {
+    showLogin(data.message || 'Your staff session has expired.', 'bad');
+    throw new Error(data.message || 'Your staff session has expired.');
+  }
+  if (!response.ok || !data.ok) throw new Error(data.message || 'Finance workflow request failed.');
+  return data;
+}
+
+function financeRecordCard(record, type, capabilities) {
+  const id = pick(record, type === 'bill' ? ['BillNo', '__id'] : ['ExpenseNo', '__id']);
+  const status = pick(record, ['Status']) || 'Submitted';
+  const title = type === 'bill'
+    ? pick(record, ['VendorName', 'Vendor']) || 'Supplier Bill'
+    : pick(record, ['Description']) || 'Requisition';
+  const description = pick(record, ['Description']);
+  const accountsReviewed = clean(record.AccountsReviewStatus).toLowerCase() === 'reviewed';
+  let actions = '';
+  if (capabilities.canApprove && clean(status).toLowerCase() === 'submitted') {
+    actions += `<button type="button" class="workflow-approve" data-workflow-action="review" data-decision="Approved" data-record-type="${type}" data-record-id="${escapeHtml(id)}">Approve</button>`;
+    actions += `<button type="button" class="workflow-reject" data-workflow-action="review" data-decision="Rejected" data-record-type="${type}" data-record-id="${escapeHtml(id)}">Reject</button>`;
+  }
+  if (capabilities.canAccountsReview && clean(status).toLowerCase() === 'approved' && !accountsReviewed) {
+    actions += `<button type="button" data-workflow-action="accountsReview" data-record-type="${type}" data-record-id="${escapeHtml(id)}">Mark Accounts Reviewed</button>`;
+  }
+  return `
+    <article class="workflow-record">
+      <div class="workflow-record-heading">
+        <div><strong>${escapeHtml(title)}</strong><small>${escapeHtml(id)}</small></div>
+        <span class="workflow-status status-${escapeHtml(clean(status).toLowerCase().replace(/\s+/g, '-'))}">${escapeHtml(status)}</span>
+      </div>
+      <p>${escapeHtml(description)}</p>
+      <div class="workflow-record-meta">
+        <span><strong>${escapeHtml(money(record.Amount))}</strong>Amount</span>
+        <span><strong>${escapeHtml(record.Department || '-')}</strong>Department</span>
+        <span><strong>${escapeHtml(record.Date || '-')}</strong>Date</span>
+        <span><strong>${escapeHtml(type === 'bill' ? (record.DueDate || '-') : (record.Vendor || '-'))}</strong>${type === 'bill' ? 'Due Date' : 'Vendor'}</span>
+      </div>
+      ${record.Notes ? `<small>Notes: ${escapeHtml(record.Notes)}</small>` : ''}
+      ${record.ReviewNotes ? `<small>Review: ${escapeHtml(record.ReviewNotes)}</small>` : ''}
+      ${accountsReviewed ? `<small class="status ok">Accounts reviewed by ${escapeHtml(record.AccountsReviewedBy || 'Accounts')}</small>` : ''}
+      ${actions ? `<div class="workflow-actions">${actions}</div>` : ''}
+    </article>
+  `;
+}
+
+function financeRecordsSection(title, records, type, capabilities) {
+  return `
+    <section class="workflow-list-section">
+      <h2>${escapeHtml(title)} <small>(${records.length})</small></h2>
+      <div class="workflow-record-list">
+        ${records.length ? records.map((record) => financeRecordCard(record, type, capabilities)).join('') : '<p class="muted">No records found.</p>'}
+      </div>
+    </section>
+  `;
+}
+
+function renderFinanceWorkflow() {
+  if (!financeData || activeSection !== 'financeRequests') return;
+  const capabilities = financeData.capabilities || {};
+  const department = financeData.department || 'Unassigned';
+  const submissionForms = capabilities.canSubmit ? `
+    <section class="workflow-submit-section">
+      <div class="workflow-heading">
+        <div><h2>New Department Submission</h2><p class="muted">Submitting for: <strong>${escapeHtml(department)}</strong></p></div>
+      </div>
+      <div class="workflow-form-grid">
+        <form id="requisitionForm" class="workflow-form">
+          <h3>Expense Requisition</h3>
+          <label>Description <span class="required">*</span><textarea name="description" rows="3" required></textarea></label>
+          <label>Amount <span class="required">*</span><input name="amount" type="number" min="1" step="0.01" inputmode="decimal" required></label>
+          <label>Preferred vendor<input name="vendor"></label>
+          <label>Required date<input name="date" type="date"></label>
+          <label>Reference<input name="reference"></label>
+          <label>Supporting document URL<input name="attachmentUrl" type="url"></label>
+          <label>Notes<textarea name="notes" rows="2"></textarea></label>
+          <button type="submit">Submit Requisition</button>
+          <p class="status" data-form-status></p>
+        </form>
+        <form id="supplierBillForm" class="workflow-form">
+          <h3>Supplier Bill</h3>
+          <label>Supplier <span class="required">*</span><input name="vendorName" required></label>
+          <label>Invoice reference<input name="invoiceReference"></label>
+          <label>Description <span class="required">*</span><textarea name="description" rows="3" required></textarea></label>
+          <label>Amount <span class="required">*</span><input name="amount" type="number" min="1" step="0.01" inputmode="decimal" required></label>
+          <label>Bill date<input name="date" type="date"></label>
+          <label>Due date<input name="dueDate" type="date"></label>
+          <label>Supporting document URL<input name="attachmentUrl" type="url"></label>
+          <label>Notes<textarea name="notes" rows="2"></textarea></label>
+          <button type="submit">Submit Supplier Bill</button>
+          <p class="status" data-form-status></p>
+        </form>
+      </div>
+    </section>
+  ` : `<p class="status bad">A department must be assigned to your staff account before you can submit requests.</p>`;
+
+  panelEl.innerHTML = `
+    <div class="workflow-intro">
+      <div><p class="eyebrow">Department finance workflow</p><h2>Bills & Requisitions</h2></div>
+      <button type="button" id="refreshFinanceWorkflow">Refresh Requests</button>
+    </div>
+    <p id="financeWorkflowStatus" class="status"></p>
+    ${submissionForms}
+    ${financeRecordsSection('Expense Requisitions', financeData.requisitions || [], 'requisition', capabilities)}
+    ${financeRecordsSection('Supplier Bills', financeData.bills || [], 'bill', capabilities)}
+  `;
+  bindFinanceWorkflowEvents();
+}
+
+function formPayload(form) {
+  return Object.fromEntries(new FormData(form).entries());
+}
+
+function bindSubmissionForm(formId, action, successText) {
+  const form = document.getElementById(formId);
+  if (!form) return;
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const button = form.querySelector('button[type="submit"]');
+    const status = form.querySelector('[data-form-status]');
+    setButtonLoading(button, true, 'Submitting...', button.dataset.normalText || button.textContent);
+    if (!button.dataset.normalText) button.dataset.normalText = action === 'submitBill' ? 'Submit Supplier Bill' : 'Submit Requisition';
+    setStatus(status, 'Saving to Firestore...');
+    try {
+      await financeRequest(action, formPayload(form));
+      form.reset();
+      setStatus(status, successText, 'ok');
+      await loadFinanceWorkflow();
+    } catch (error) {
+      setStatus(status, error.message || String(error), 'bad');
+    } finally {
+      setButtonLoading(button, false, 'Submitting...', button.dataset.normalText);
+    }
+  });
+}
+
+function bindFinanceWorkflowEvents() {
+  document.getElementById('refreshFinanceWorkflow')?.addEventListener('click', loadFinanceWorkflow);
+  bindSubmissionForm('requisitionForm', 'submitRequisition', 'Requisition submitted.');
+  bindSubmissionForm('supplierBillForm', 'submitBill', 'Supplier bill submitted.');
+  panelEl.querySelectorAll('[data-workflow-action]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const action = button.dataset.workflowAction;
+      const decision = button.dataset.decision || '';
+      const notes = window.prompt(`${decision || 'Accounts review'} notes (optional):`, '');
+      if (notes === null) return;
+      const normalText = button.textContent;
+      setButtonLoading(button, true, 'Saving...', normalText);
+      try {
+        const data = await financeRequest(action, {
+          recordType: button.dataset.recordType,
+          recordId: button.dataset.recordId,
+          decision,
+          notes
+        });
+        setStatus(document.getElementById('financeWorkflowStatus'), data.message, 'ok');
+        await loadFinanceWorkflow();
+      } catch (error) {
+        setStatus(document.getElementById('financeWorkflowStatus'), error.message || String(error), 'bad');
+      } finally {
+        setButtonLoading(button, false, 'Saving...', normalText);
+      }
+    });
+  });
+}
+
+async function loadFinanceWorkflow() {
+  if (activeSection !== 'financeRequests') return;
+  try {
+    financeData = await financeRequest('list');
+    renderFinanceWorkflow();
+  } catch (error) {
+    if (activeSection === 'financeRequests') panelEl.innerHTML = `<p class="status bad">${escapeHtml(error.message || String(error))}</p>`;
   }
 }
 
