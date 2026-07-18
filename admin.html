@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>School Staff Portal</title>
-  <link rel="stylesheet" href="css/style.css?v=20260718-finance-workflow">
+  <link rel="stylesheet" href="css/style.css?v=20260718-financial-app">
 </head>
 <body class="staff-page">
   <header class="staff-topbar">
@@ -35,22 +35,36 @@
     </section>
 
     <section id="staffDashboard" class="staff-dashboard" hidden>
-      <div class="staff-welcome">
-        <div>
-          <p class="eyebrow">Live Firestore overview</p>
-          <h1 id="staffWelcomeTitle">Dashboard</h1>
-          <p class="muted">The available sections are controlled by your assigned staff role.</p>
+      <div class="staff-app-layout">
+        <aside class="staff-sidebar">
+          <div class="staff-sidebar-heading">
+            <small>Workspace</small>
+            <strong>Financial Operations</strong>
+          </div>
+          <nav class="admin-tabs staff-tabs" id="adminTabs" aria-label="Staff dashboard sections"></nav>
+          <div class="staff-sidebar-note">
+            <span class="staff-live-dot"></span>
+            <div><strong>Firestore Live</strong><small>Desktop and web are synchronized</small></div>
+          </div>
+        </aside>
+        <div class="staff-main-content">
+          <div class="staff-welcome">
+            <div>
+              <p class="eyebrow">Operations overview</p>
+              <h1 id="staffWelcomeTitle">Dashboard</h1>
+              <p class="muted">Monitor records, requests and departmental activity.</p>
+            </div>
+            <button type="button" id="staffRefresh">Refresh Data</button>
+          </div>
+          <p id="staffDashboardStatus" class="status" role="status"></p>
+          <div id="adminSummary" class="metric-row staff-summary"></div>
+          <section id="adminPanel" class="panel full-panel staff-panel"></section>
         </div>
-        <button type="button" id="staffRefresh">Refresh Dashboard</button>
       </div>
-      <p id="staffDashboardStatus" class="status" role="status"></p>
-      <div id="adminSummary" class="metric-row staff-summary"></div>
-      <nav class="admin-tabs staff-tabs" id="adminTabs" aria-label="Staff dashboard sections"></nav>
-      <section id="adminPanel" class="panel full-panel staff-panel"></section>
     </section>
   </main>
 
   <script src="js/site-config.js"></script>
-  <script src="js/admin.js?v=20260718-finance-workflow"></script>
+  <script src="js/admin.js?v=20260718-financial-app"></script>
 </body>
 </html>

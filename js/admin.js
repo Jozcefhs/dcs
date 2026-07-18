@@ -330,12 +330,16 @@ function renderFinanceWorkflow() {
   if (!financeData || activeSection !== 'financeRequests') return;
   const capabilities = financeData.capabilities || {};
   const department = financeData.department || 'Unassigned';
-  const submissionForms = capabilities.canSubmit ? `
-    <section class="workflow-submit-section">
-      <div class="workflow-heading">
-        <div><h2>New Department Submission</h2><p class="muted">Submitting for: <strong>${escapeHtml(department)}</strong></p></div>
-      </div>
-      <div class="workflow-form-grid">
+  const requisitions = financeData.requisitions || [];
+  const bills = financeData.bills || [];
+  const allRecords = [...requisitions, ...bills];
+  const statusCount = (status) => allRecords.filter((record) => clean(record.Status).toLowerCase() === status).length;
+  const pendingValue = allRecords
+    .filter((record) => clean(record.Status).toLowerCase() === 'submitted')
+    .reduce((sum, record) => sum + Number(record.Amount || 0), 0);
+  const submissionDialogs = capabilities.canSubmit ? `
+      <dialog id="requisitionDialog" class="workflow-dialog">
+        <div class="workflow-dialog-header"><div><small>${escapeHtml(department)}</small><h2>New Expense Requisition</h2></div><button type="button" data-close-dialog aria-label="Close">×</button></div>
         <form id="requisitionForm" class="workflow-form">
           <h3>Expense Requisition</h3>
           <label>Description <span class="required">*</span><textarea name="description" rows="3" required></textarea></label>
@@ -348,6 +352,9 @@ function renderFinanceWorkflow() {
           <button type="submit">Submit Requisition</button>
           <p class="status" data-form-status></p>
         </form>
+      </dialog>
+      <dialog id="supplierBillDialog" class="workflow-dialog">
+        <div class="workflow-dialog-header"><div><small>${escapeHtml(department)}</small><h2>New Supplier Bill</h2></div><button type="button" data-close-dialog aria-label="Close">×</button></div>
         <form id="supplierBillForm" class="workflow-form">
           <h3>Supplier Bill</h3>
           <label>Supplier <span class="required">*</span><input name="vendorName" required></label>
@@ -361,19 +368,29 @@ function renderFinanceWorkflow() {
           <button type="submit">Submit Supplier Bill</button>
           <p class="status" data-form-status></p>
         </form>
-      </div>
-    </section>
-  ` : `<p class="status bad">A department must be assigned to your staff account before you can submit requests.</p>`;
+      </dialog>
+  ` : '';
 
   panelEl.innerHTML = `
     <div class="workflow-intro">
-      <div><p class="eyebrow">Department finance workflow</p><h2>Bills & Requisitions</h2></div>
-      <button type="button" id="refreshFinanceWorkflow">Refresh Requests</button>
+      <div><p class="eyebrow">Department finance</p><h2>Bills & Requisitions</h2><p class="muted">${escapeHtml(department)} workspace</p></div>
+      <div class="workflow-primary-actions">
+        ${capabilities.canSubmit ? '<button type="button" data-open-dialog="requisitionDialog">+ New Requisition</button><button type="button" class="workflow-secondary-action" data-open-dialog="supplierBillDialog">+ Supplier Bill</button>' : ''}
+        <button type="button" class="workflow-icon-action" id="refreshFinanceWorkflow" aria-label="Refresh requests">Refresh</button>
+      </div>
     </div>
     <p id="financeWorkflowStatus" class="status"></p>
-    ${submissionForms}
-    ${financeRecordsSection('Expense Requisitions', financeData.requisitions || [], 'requisition', capabilities)}
-    ${financeRecordsSection('Supplier Bills', financeData.bills || [], 'bill', capabilities)}
+    ${!capabilities.canSubmit ? '<p class="status bad">A department must be assigned to your staff account before you can submit requests.</p>' : ''}
+    <div class="workflow-kpis">
+      <div><small>Awaiting Approval</small><strong>${statusCount('submitted')}</strong><span>${escapeHtml(money(pendingValue))} pending</span></div>
+      <div><small>Approved</small><strong>${statusCount('approved')}</strong><span>Ready for Accounts</span></div>
+      <div><small>Rejected</small><strong>${statusCount('rejected')}</strong><span>Requires attention</span></div>
+      <div><small>Total Records</small><strong>${allRecords.length}</strong><span>Current view</span></div>
+    </div>
+    <div class="workflow-ledger-heading"><div><h2>Recent Transactions</h2><p class="muted">Requisitions and bills synchronized with desktop accounting</p></div></div>
+    ${financeRecordsSection('Expense Requisitions', requisitions, 'requisition', capabilities)}
+    ${financeRecordsSection('Supplier Bills', bills, 'bill', capabilities)}
+    ${submissionDialogs}
   `;
   bindFinanceWorkflowEvents();
 }
@@ -407,6 +424,12 @@ function bindSubmissionForm(formId, action, successText) {
 
 function bindFinanceWorkflowEvents() {
   document.getElementById('refreshFinanceWorkflow')?.addEventListener('click', loadFinanceWorkflow);
+  panelEl.querySelectorAll('[data-open-dialog]').forEach((button) => {
+    button.addEventListener('click', () => document.getElementById(button.dataset.openDialog)?.showModal());
+  });
+  panelEl.querySelectorAll('[data-close-dialog]').forEach((button) => {
+    button.addEventListener('click', () => button.closest('dialog')?.close());
+  });
   bindSubmissionForm('requisitionForm', 'submitRequisition', 'Requisition submitted.');
   bindSubmissionForm('supplierBillForm', 'submitBill', 'Supplier bill submitted.');
   panelEl.querySelectorAll('[data-workflow-action]').forEach((button) => {
