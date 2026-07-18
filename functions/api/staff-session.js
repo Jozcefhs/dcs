@@ -65,6 +65,8 @@ export async function onRequestPost(context) {
         displayName: String(existing.DisplayName || existing.Username || sessionUser.displayName).trim(),
         role: String(existing.Role || sessionUser.role || 'Front Desk').trim(),
         department: String(existing.Department || sessionUser.department || '').trim(),
+        branchId: String(existing.BranchId || sessionUser.branchId || '').trim(),
+        schoolSectionAccess: String(existing.SchoolSectionAccess || sessionUser.schoolSectionAccess || 'All').trim(),
         mustChangePassword: false
       };
       const refreshedToken = await createStaffSession(env, refreshedUser);

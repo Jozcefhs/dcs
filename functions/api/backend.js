@@ -4081,7 +4081,7 @@ async function saveStaffUserFromDesktop(env, body) {
     Active: active,
     Salt: clean(incoming.Salt),
     PasswordHash: clean(incoming.PasswordHash),
-    PasswordIterations: asMoneyNumber(incoming.PasswordIterations || 120000),
+    PasswordIterations: asMoneyNumber(incoming.PasswordIterations || 10000),
     MustChangePassword: incoming.MustChangePassword === undefined ? Boolean(existing?.MustChangePassword) : staffUserIsActive({ Active: incoming.MustChangePassword }),
     CreatedAt: existing?.CreatedAt || clean(incoming.CreatedAt) || nowIso(),
     UpdatedAt: nowIso(),

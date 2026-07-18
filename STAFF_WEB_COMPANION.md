@@ -18,6 +18,8 @@ The existing Firestore service-account variables are also required:
 
 Redeploy the Cloudflare Pages project after changing environment variables.
 
+If an older Firestore administrator has a `120000`-iteration password hash that the current web runtime cannot verify, deploy the current portal source and sign in with `ADMIN_WEB_USERNAME` / `ADMIN_WEB_PASSWORD`. For a matching Firestore Super Admin, this securely replaces the incompatible hash with the supported format and records a `PASSWORD RECOVERY` security-audit event. There is no universal default password.
+
 ## Firestore staff accounts
 
 The login API also supports documents in the `staffUsers` collection. Each document can contain:
@@ -29,7 +31,7 @@ The login API also supports documents in the `staffUsers` collection. Each docum
 - `Active`
 - `Salt`
 - `PasswordHash`
-- `PasswordIterations` — optional; defaults to `120000`.
+- `PasswordIterations` — optional; defaults to `10000`, the current web runtime's supported PBKDF2 limit.
 
 Passwords use PBKDF2-HMAC-SHA256 and are compatible with the current desktop application's password format. Passwords themselves must never be stored in Firestore.
 

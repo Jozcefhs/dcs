@@ -3,6 +3,7 @@ import { listCollection, upsertDocument } from './firestore.js';
 const encoder = new TextEncoder();
 const SESSION_COOKIE = 'school_staff_session';
 const SESSION_SECONDS = 4 * 60 * 60;
+const WEB_PASSWORD_ITERATIONS = 10000;
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -65,16 +66,21 @@ async function verifyDesktopPassword(user, password) {
   const expected = lower(user.PasswordHash || user.passwordHash);
   if (!salt || !expected || !password) return false;
   const material = await crypto.subtle.importKey('raw', encoder.encode(String(password)), 'PBKDF2', false, ['deriveBits']);
-  const bits = await crypto.subtle.deriveBits({
-    name: 'PBKDF2',
-    salt: encoder.encode(salt),
-    iterations: Number(user.PasswordIterations || user.passwordIterations || 120000),
-    hash: 'SHA-256'
-  }, material, 256);
-  return secureEqual(bytesToHex(bits), expected);
+  try {
+    const bits = await crypto.subtle.deriveBits({
+      name: 'PBKDF2',
+      salt: encoder.encode(salt),
+      iterations: Number(user.PasswordIterations || user.passwordIterations || 120000),
+      hash: 'SHA-256'
+    }, material, 256);
+    return secureEqual(bytesToHex(bits), expected);
+  } catch (error) {
+    if (/iteration counts above 10000|requested 120000|pbkdf2/i.test(String(error?.message || error))) return false;
+    throw error;
+  }
 }
 
-export async function hashStaffPassword(password, iterations = 120000) {
+export async function hashStaffPassword(password, iterations = WEB_PASSWORD_ITERATIONS) {
   if (String(password || '').length < 6) {
     const err = new Error('Password must be at least 6 characters.');
     err.status = 400;
@@ -146,28 +152,44 @@ export async function authenticateStaff(env, username, password) {
   const user = users.find((row) => lower(row.Username || row.username || row.__id) === wanted);
   if (user) {
     const active = user.Active === undefined ? true : !['no', 'false', '0', 'inactive', 'disabled'].includes(lower(user.Active));
-    if (!active || !(await verifyDesktopPassword(user, password))) return null;
-    const loginAt = new Date().toISOString();
-    const saved = { ...user, LastLoginAt: loginAt };
-    delete saved.__id;
-    delete saved.__name;
-    await upsertDocument(env, 'staffUsers', user.__id, saved);
-    const auditId = `LOGIN-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
-    await upsertDocument(env, 'staffSecurityAudit', auditId, {
-      Timestamp: loginAt, Action: 'LOGIN', Username: clean(user.Username || user.__id),
-      Role: clean(user.Role), Department: inferDepartment(user), SourcePlatform: 'Web'
-    });
-    return publicUser(saved);
+    if (active && await verifyDesktopPassword(user, password)) {
+      const loginAt = new Date().toISOString();
+      const saved = { ...user, LastLoginAt: loginAt };
+      delete saved.__id;
+      delete saved.__name;
+      await upsertDocument(env, 'staffUsers', user.__id, saved);
+      const auditId = `LOGIN-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+      await upsertDocument(env, 'staffSecurityAudit', auditId, {
+        Timestamp: loginAt, Action: 'LOGIN', Username: clean(user.Username || user.__id),
+        Role: clean(user.Role), Department: inferDepartment(user), SourcePlatform: 'Web'
+      });
+      return publicUser(saved);
+    }
   }
 
   const envUsername = lower(env.ADMIN_WEB_USERNAME || 'admin');
   const envPassword = clean(env.ADMIN_WEB_PASSWORD);
   if (wanted === envUsername && envPassword && secureEqual(password, envPassword)) {
+    let recoveredUser = null;
+    if (user && clean(user.Role) === 'Super Admin') {
+      const recoveredAt = new Date().toISOString();
+      recoveredUser = { ...user, ...(await hashStaffPassword(password)), MustChangePassword: false, PasswordChangedAt: recoveredAt,
+        UpdatedAt: recoveredAt, UpdatedBy: 'Cloudflare Admin Recovery', LastLoginAt: recoveredAt };
+      delete recoveredUser.__id; delete recoveredUser.__name;
+      await upsertDocument(env, 'staffUsers', user.__id, recoveredUser);
+      const recoveryAuditId = `RECOVERY-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+      await upsertDocument(env, 'staffSecurityAudit', recoveryAuditId, {
+        Timestamp: recoveredAt, Action: 'PASSWORD RECOVERY', Username: clean(user.Username || user.__id),
+        Role: 'Super Admin', Department: inferDepartment(user), SourcePlatform: 'Web Environment Admin'
+      });
+    }
     const envUser = {
       username: clean(env.ADMIN_WEB_USERNAME || 'admin'),
-      displayName: clean(env.ADMIN_WEB_DISPLAY_NAME || 'Super Admin'),
+      displayName: clean(recoveredUser?.DisplayName || env.ADMIN_WEB_DISPLAY_NAME || 'Super Admin'),
       role: 'Super Admin',
-      department: ''
+      department: inferDepartment(recoveredUser || {}),
+      branchId: clean(recoveredUser?.BranchId),
+      schoolSectionAccess: clean(recoveredUser?.SchoolSectionAccess) || 'All'
     };
     const auditId = `LOGIN-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
     await upsertDocument(env, 'staffSecurityAudit', auditId, {
