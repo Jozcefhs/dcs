@@ -568,21 +568,47 @@ function isYes(value) {
 }
 
 function schoolResultsAreVisible(profile = {}) {
-  return isYes(profile.ShowResultsOnline || profile.showResultsOnline || profile.ResultsOnline || profile.resultsOnline);
+  return isYes(profile.ShowResultsOnline || profile.showResultsOnline || profile.ResultsOnline ||
+    profile.resultsOnline || profile.EntranceResultsOnline || profile.entranceResultsOnline);
 }
 
 async function getSchoolProfile(env) {
   try {
     const rows = await listCollection(env, 'settings');
-    return rows.find((row) => row.__id === 'schoolProfile') || {};
+    const profile = rows.find((row) => row.__id === 'schoolProfile') ||
+      rows.find((row) => clean(row.SchoolName || row.schoolName));
+    if (profile) {
+      return {
+        ...profile,
+        ShowResultsOnline: pick(profile, [
+          'ShowResultsOnline', 'showResultsOnline', 'ResultsOnline', 'resultsOnline',
+          'EntranceResultsOnline', 'entranceResultsOnline'
+        ], clean(env.SHOW_RESULTS_ONLINE) || 'NO'),
+        ResultDisplayMode: pick(profile, ['ResultDisplayMode', 'resultDisplayMode'], clean(env.RESULT_DISPLAY_MODE) || 'subjects')
+      };
+    }
+    return {
+        ShowResultsOnline: clean(env.SHOW_RESULTS_ONLINE) || 'NO',
+        ResultDisplayMode: clean(env.RESULT_DISPLAY_MODE) || 'subjects'
+    };
   } catch (_err) {
-    return {};
+    return {
+      ShowResultsOnline: clean(env.SHOW_RESULTS_ONLINE) || 'NO',
+      ResultDisplayMode: clean(env.RESULT_DISPLAY_MODE) || 'subjects'
+    };
   }
 }
 
 function resultIsVisible(application, profile = {}) {
   if (!schoolResultsAreVisible(profile)) return false;
-  return isYes(pick(application, ['ResultReadyOnline', 'resultReadyOnline', 'ResultPublished', 'resultPublished', 'ShowResultOnPortal', 'showResultOnPortal']));
+  return isYes(pick(application, [
+    'ResultReadyOnline', 'resultReadyOnline',
+    'ResultPublished', 'resultPublished',
+    'ShowResultOnPortal', 'showResultOnPortal',
+    'PublishResult', 'publishResult',
+    'ResultSent', 'resultSent',
+    'EntranceResultSent', 'entranceResultSent'
+  ]));
 }
 
 function buildEntranceResult(application, profile = {}) {

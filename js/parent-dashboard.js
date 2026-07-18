@@ -17,9 +17,12 @@ const txnLimit = document.getElementById('txnLimit');
 const dailyLimit = document.getElementById('dailyLimit');
 const pinThreshold = document.getElementById('pinThreshold');
 const refreshDashboardBtn = document.getElementById('refreshDashboardBtn');
+const dashboardNav = document.getElementById('dashboardNav');
+const dashboardViewPanels = Array.from(document.querySelectorAll('[data-dashboard-view]'));
 
 let dashboard = null;
 let selectedAccountRef = '';
+let activeDashboardView = 'overview';
 const loadedPayables = new Set();
 const passportPhotoCache = new Map();
 
@@ -99,6 +102,18 @@ function authPayload() {
 
 function selectedChild() {
   return (dashboard?.children || []).find((child) => child.AccountRef === selectedAccountRef) || null;
+}
+
+function showDashboardView(view) {
+  activeDashboardView = view || 'overview';
+  dashboardViewPanels.forEach((panel) => {
+    panel.hidden = panel.dataset.dashboardView !== activeDashboardView;
+  });
+  dashboardNav?.querySelectorAll('[data-dashboard-target]').forEach((button) => {
+    const selected = button.dataset.dashboardTarget === activeDashboardView;
+    button.classList.toggle('selected', selected);
+    button.setAttribute('aria-selected', selected ? 'true' : 'false');
+  });
 }
 
 function renderChildren() {
@@ -710,12 +725,9 @@ function resultsOnlineEnabled() {
 
 function renderEntranceResults(child) {
   const records = dashboard.entranceResults?.[child.AccountRef] || [];
-  const resultsVisible = resultsOnlineEnabled() || records.length > 0;
-  if (entranceResultPanel) {
-    entranceResultPanel.hidden = !resultsVisible;
-  }
-  if (!resultsVisible) {
-    entranceResults.innerHTML = '';
+  if (!resultsOnlineEnabled() && records.length === 0) {
+    entranceResults.innerHTML = '<p class="muted">Entrance results are not currently enabled for online viewing.</p>';
+    if (entranceResultPanel) entranceResultPanel.hidden = activeDashboardView !== 'results';
     return;
   }
   entranceResults.innerHTML = records.length ? '' : '<p class="muted">Entrance result is not available yet.</p>';
@@ -746,6 +758,7 @@ function renderEntranceResults(child) {
     }
     entranceResults.appendChild(item);
   });
+  if (entranceResultPanel) entranceResultPanel.hidden = activeDashboardView !== 'results';
 }
 
 function renderDashboard() {
@@ -787,6 +800,7 @@ async function loadDashboard() {
   selectedAccountRef = data.children?.[0]?.AccountRef || '';
   dashboardContent.hidden = false;
   renderDashboard();
+  showDashboardView(activeDashboardView);
   await loadPayablesForSelected(true);
   setStatus('Dashboard loaded.', 'ok');
 }
@@ -842,6 +856,16 @@ if (refreshDashboardBtn) {
     } catch (error) {
       setStatus(error.message, 'bad');
     }
+  });
+}
+
+if (dashboardNav) {
+  dashboardNav.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-dashboard-target]');
+    if (!button) return;
+    showDashboardView(button.dataset.dashboardTarget);
+    const child = selectedChild();
+    if (child && button.dataset.dashboardTarget === 'results') renderEntranceResults(child);
   });
 }
 

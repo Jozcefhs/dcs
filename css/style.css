@@ -184,3 +184,17 @@ img{max-width:100%}
   .fee-option span{display:grid;gap:4px}
   .hero-copy h1{font-size:28px}
 }
+
+.dashboard-nav{position:sticky;top:0;z-index:20;display:flex;gap:8px;margin:0 0 14px;padding:8px;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,.96);box-shadow:0 5px 16px rgba(15,52,89,.08)}
+.dashboard-nav button{flex:1;margin:0;min-height:44px;padding:10px 12px;border:1px solid transparent;background:#edf2f7;color:var(--blue2)}
+.dashboard-nav button:hover{background:#dce8f5}
+.dashboard-nav button.selected{background:var(--blue);color:#fff;border-color:var(--blue2);box-shadow:inset 0 -3px 0 rgba(255,255,255,.3)}
+.dashboard-view-panel[hidden]{display:none!important}
+
+@media (max-width:680px){
+  body{padding-bottom:76px}
+  .dashboard-nav{position:fixed;left:0;right:0;bottom:0;top:auto;z-index:100;margin:0;padding:7px 5px calc(7px + env(safe-area-inset-bottom));gap:4px;border-width:1px 0 0;border-radius:0;box-shadow:0 -6px 18px rgba(15,52,89,.16)}
+  .dashboard-nav button{min-width:0;min-height:50px;padding:7px 3px;font-size:12px;line-height:1.15;border-radius:7px}
+  .dashboard-grid{display:block}
+  .dashboard-view-panel{margin-bottom:10px}
+}
