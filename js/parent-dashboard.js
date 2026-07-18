@@ -104,7 +104,7 @@ function selectedChild() {
   return (dashboard?.children || []).find((child) => child.AccountRef === selectedAccountRef) || null;
 }
 
-function showDashboardView(view) {
+function showDashboardView(view, scrollToContent = false) {
   activeDashboardView = view || 'overview';
   dashboardViewPanels.forEach((panel) => {
     panel.hidden = panel.dataset.dashboardView !== activeDashboardView;
@@ -114,6 +114,18 @@ function showDashboardView(view) {
     button.classList.toggle('selected', selected);
     button.setAttribute('aria-selected', selected ? 'true' : 'false');
   });
+  if (scrollToContent && window.matchMedia('(max-width: 680px)').matches) {
+    const targetPanel = dashboardViewPanels.find((panel) => panel.dataset.dashboardView === activeDashboardView);
+    if (targetPanel) {
+      window.requestAnimationFrame(() => {
+        const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        targetPanel.scrollIntoView({
+          behavior: reducedMotion ? 'auto' : 'smooth',
+          block: 'start'
+        });
+      });
+    }
+  }
 }
 
 function renderChildren() {
@@ -863,7 +875,7 @@ if (dashboardNav) {
   dashboardNav.addEventListener('click', (event) => {
     const button = event.target.closest('[data-dashboard-target]');
     if (!button) return;
-    showDashboardView(button.dataset.dashboardTarget);
+    showDashboardView(button.dataset.dashboardTarget, true);
     const child = selectedChild();
     if (child && button.dataset.dashboardTarget === 'results') renderEntranceResults(child);
   });
