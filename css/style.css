@@ -23,6 +23,7 @@ h2{margin:8px 0 0;color:var(--blue2);font-size:22px}
 fieldset{border:1px solid var(--line);border-radius:10px;margin:18px 0;padding:16px}legend{font-weight:bold;color:var(--blue);padding:0 8px}
 .grid{display:grid;gap:14px}.grid.two{grid-template-columns:repeat(2,minmax(0,1fr))}.full{grid-column:1/-1}
 label{display:block;font-weight:bold;margin:10px 0 6px}input,select,textarea{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;font:inherit;background:#fff}textarea{resize:vertical}
+.password-field{position:relative;width:100%}.password-field input{padding-right:66px}.password-toggle{position:absolute;top:50%;right:6px;transform:translateY(-50%);margin:0;padding:6px 8px;border-radius:6px;background:transparent;color:var(--blue);font-size:13px;line-height:1}.password-toggle:hover{background:#eaf2ff;color:var(--blue2)}.password-toggle:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 .required{color:var(--bad);font-weight:bold}
 button,.btn{display:inline-block;border:0;border-radius:8px;background:var(--blue);color:white;font-weight:bold;padding:12px 18px;text-decoration:none;cursor:pointer;margin-top:14px}button:hover,.btn:hover{background:var(--blue2)}button:disabled{opacity:.6;cursor:not-allowed}.btn.secondary{background:#56657a;margin-left:8px}.btn.secondary:hover{background:#3d4a5a}
 .status{font-weight:bold;margin-top:14px}.status.ok{color:var(--ok)}.status.bad{color:var(--bad)}
