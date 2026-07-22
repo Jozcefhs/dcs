@@ -131,16 +131,15 @@ export async function onRequestPost(context) {
     if (firestoreConfigured) {
       if (gatewayFee > 0) {
         const feeId = safeId(`PAYSTACK-FEE-${tx.reference}`);
-        await upsertDocument(env, 'accountingExpenses', feeId, {
-          ExpenseNo: feeId,
+        await upsertDocument(env, 'paymentGatewayCharges', feeId, {
+          ChargeId: feeId,
           Date: tx.paid_at || new Date().toISOString(),
           Description: `Paystack transaction charge - ${tx.reference}`,
           Amount: gatewayFee,
           GrossCollection: amount,
           NetSettlement: netAmount,
-          ExpenseAccount: 'Payment Processing Charges',
-          PaymentAccount: 'Paystack Settlement',
-          Status: 'Posted',
+          Treatment: 'DeductedBeforeStudentCredit',
+          Status: 'Recorded',
           Reference: tx.reference,
           Source: 'Paystack',
           CreatedAt: new Date().toISOString()
