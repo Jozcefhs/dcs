@@ -100,7 +100,7 @@ function validateProfilePayload(body, existing = {}) {
     Country: clean(body.Country || existing.Country || 'Nigeria'), Jurisdiction: clean(body.Jurisdiction || existing.Jurisdiction || 'FCT'),
     CalculationMethod: clean(body.CalculationMethod || existing.CalculationMethod || 'PROGRESSIVE_ANNUAL_PAYE'),
     AnnualizationMethod: clean(body.AnnualizationMethod || existing.AnnualizationMethod || 'MONTHLY_X_12'),
-    Active: yesNo(body.Active ?? existing.Active, 'NO'), IsDefault: yesNo(body.IsDefault ?? existing.IsDefault, 'NO'),
+    Active: yesNo(body.Active ?? existing.Active, 'NO'), Status: clean(body.Status || existing.Status || 'DRAFT').toUpperCase(), IsDefault: yesNo(body.IsDefault ?? existing.IsDefault, 'NO'),
     MinimumTaxEnabled: yesNo(body.MinimumTaxEnabled ?? existing.MinimumTaxEnabled, 'NO'),
     RoundingMethod: clean(body.RoundingMethod || existing.RoundingMethod || 'NEAREST').toUpperCase(), RoundingPrecision: Math.trunc(number(body.RoundingPrecision ?? existing.RoundingPrecision ?? 2)),
     CraEnabled: yesNo(body.CraEnabled ?? existing.CraEnabled, 'YES'), CraFixedRelief: Math.max(0, number(body.CraFixedRelief ?? existing.CraFixedRelief)),
@@ -109,6 +109,8 @@ function validateProfilePayload(body, existing = {}) {
   };
   delete payload.UsageCount;
   if (!payload.ProfileId || !payload.Name || !payload.Jurisdiction) throw configError('Profile ID, name, and jurisdiction are required.');
+  if (!['DRAFT', 'ACTIVE', 'RETIRED'].includes(payload.Status)) throw configError('Choose Draft, Active, or Retired profile status.');
+  if (payload.Active === 'YES' && payload.Status !== 'ACTIVE') throw configError('Set profile status to Active before activating the profile.');
   if (payload.AnnualizationMethod !== 'MONTHLY_X_12') throw configError('Phase 2 supports monthly annualization only.');
   if (!['NEAREST', 'UP', 'DOWN', 'NONE'].includes(payload.RoundingMethod) || payload.RoundingPrecision < 0 || payload.RoundingPrecision > 6) throw configError('Choose a valid rounding method and precision from 0 to 6.');
   if (payload.MinimumTaxEnabled === 'YES') validatePayrollFormula(clean(payload.MinimumTaxFormula), PAYROLL_FORMULA_VARIABLES);
@@ -120,6 +122,15 @@ export async function savePayrollTaxProfile(env, body, actor = '') {
   const existing = config.profiles.find((row) => clean(row.ProfileId || row.__id) === id) || {};
   if (existing.ProfileId && number(existing.UsageCount) > 0) throw configError('This tax-profile version is used by finalized payroll. Clone it to create a new version.', 409, 'TAX_PROFILE_IMMUTABLE');
   const payload = validateProfilePayload(body, existing); payload.UpdatedBy = actor; payload.CreatedBy = existing.CreatedBy || actor;
+  if (payload.Active === 'YES') {
+    if (!clean(payload.EffectiveFrom)) throw configError('An active tax profile requires an effective-from date.');
+    validateTaxBands(config.bands.filter((row) => clean(row.TaxProfileId) === payload.ProfileId));
+    if (payload.IsDefault === 'YES') {
+      const from = clean(payload.EffectiveFrom) || '0000-01-01'; const to = clean(payload.EffectiveTo) || '9999-12-31';
+      const conflict = config.profiles.find((row) => clean(row.ProfileId || row.__id) !== payload.ProfileId && yesNo(row.Active, 'NO') === 'YES' && yesNo(row.IsDefault, 'NO') === 'YES' && lower(row.Jurisdiction) === lower(payload.Jurisdiction) && (clean(row.EffectiveFrom) || '0000-01-01') <= to && (clean(row.EffectiveTo) || '9999-12-31') >= from);
+      if (conflict) throw configError(`Default profile dates overlap ${clean(conflict.ProfileId || conflict.__id)} for ${payload.Jurisdiction}.`, 409, 'OVERLAPPING_DEFAULT_TAX_PROFILE');
+    }
+  }
   await upsertDocument(env, PAYROLL_TAX_COLLECTIONS.profiles, payload.ProfileId, payload);
   return payload;
 }
@@ -191,6 +202,22 @@ export async function savePayrollTaxReliefRules(env, body, actor = '') {
   await commitChunks(env, normalized.map((row) => ({ collectionPath: PAYROLL_TAX_COLLECTIONS.reliefs, documentId: row.RuleId, data: row }))); return normalized;
 }
 
+export async function savePayrollLedgerMapping(env, body, actor = '') {
+  const type = clean(body.MappingType || body.Type).toUpperCase(); const componentCode = clean(body.ComponentCode).toUpperCase();
+  const allowed = ['GROSS_SALARY', 'PAYE', 'PENSION', 'NHF', 'OTHER_DEDUCTIONS', 'NET_SALARY', 'EMPLOYER_CONTRIBUTION', 'COMPONENT'];
+  if (!allowed.includes(type)) throw configError('Choose a valid payroll ledger mapping type.');
+  if (type === 'COMPONENT' && !componentCode) throw configError('A component code is required for a component-specific mapping.');
+  const debit = clean(body.DebitAccountId || body.DebitAccount); const credit = clean(body.CreditAccountId || body.CreditAccount);
+  if (!debit && !credit) throw configError('Enter at least one debit or credit ledger account.');
+  const id = clean(body.MappingId) || `MAP-${slug(type)}${componentCode ? `-${slug(componentCode)}` : ''}`;
+  const existing = (await listCollection(env, PAYROLL_TAX_COLLECTIONS.mappings).catch(() => [])).find((row) => clean(row.MappingId || row.__id) === id) || {};
+  const payload = { ...documentData(existing), ...documentData(body), MappingId: id, MappingType: type, ComponentCode: componentCode,
+    DebitAccountId: debit, CreditAccountId: credit, Description: clean(body.Description), EffectiveFrom: clean(body.EffectiveFrom), EffectiveTo: clean(body.EffectiveTo),
+    Active: yesNo(body.Active ?? existing.Active, 'YES'), UpdatedAt: now(), UpdatedBy: actor, CreatedAt: existing.CreatedAt || now(), CreatedBy: existing.CreatedBy || actor };
+  delete payload.UsageCount;
+  await upsertDocument(env, PAYROLL_TAX_COLLECTIONS.mappings, id, payload); return payload;
+}
+
 export function validatePayrollTaxConfigurationData(config) {
   const errors = []; const warnings = [];
   const profiles = (config.profiles || []).filter((row) => yesNo(row.Active, 'NO') === 'YES');
@@ -200,6 +227,11 @@ export function validatePayrollTaxConfigurationData(config) {
     try { validateTaxBands((config.bands || []).filter((row) => clean(row.TaxProfileId) === clean(profile.ProfileId))); } catch (error) { errors.push(`${profile.Name || profile.ProfileId}: ${error.message}`); }
   });
   const defaults = profiles.filter((row) => yesNo(row.IsDefault, 'NO') === 'YES'); if (defaults.length > 1) warnings.push('More than one active default tax profile exists; effective-date and jurisdiction selection must resolve the ambiguity.');
+  if (profiles.length) {
+    const mappingTypes = new Set((config.mappings || []).filter((row) => yesNo(row.Active, 'YES') === 'YES').map((row) => clean(row.MappingType).toUpperCase()));
+    const missingMappings = ['GROSS_SALARY', 'PAYE', 'PENSION', 'NHF', 'OTHER_DEDUCTIONS', 'NET_SALARY'].filter((type) => !mappingTypes.has(type));
+    if (missingMappings.length) warnings.push(`Payroll posting mappings still required: ${missingMappings.join(', ')}.`);
+  }
   return { ok: errors.length === 0, errors, warnings };
 }
 

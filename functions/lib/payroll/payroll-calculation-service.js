@@ -110,7 +110,9 @@ export function calculateConfigurablePayroll({ employee, configuration, payrollD
   }
   const calculatedPaye = money(taxResult?.PeriodPaye || 0); const hasOverride = approvedOverride && lower(approvedOverride.Status) === 'approved';
   const finalPaye = hasOverride ? money(approvedOverride.OverridePaye) : calculatedPaye;
-  const totalDeductionsRequested = money(configuredDeductions + pension + nhf + finalPaye); const totalDeductions = money(Math.min(context.Gross, totalDeductionsRequested));
+  const totalDeductionsRequested = money(configuredDeductions + pension + nhf + finalPaye);
+  if (totalDeductionsRequested > money(context.Gross)) throw payrollError('Configured deductions exceed gross pay. Correct the component values or approved override before generating payroll.', 'DEDUCTIONS_EXCEED_GROSS');
+  const totalDeductions = totalDeductionsRequested;
   const earnings = componentLines.filter((row) => row.ComponentType === 'earning'); const deductions = componentLines.filter((row) => row.ComponentType === 'deduction');
   const profileSnapshot = selectedProfile ? snapshotRow(selectedProfile) : null;
   const bandSnapshot = selectedProfile ? rows(configuration.bands).filter((row) => clean(row.TaxProfileId) === clean(selectedProfile.ProfileId || selectedProfile.__id)).map(snapshotRow) : [];
@@ -126,6 +128,6 @@ export function calculateConfigurablePayroll({ employee, configuration, payrollD
     ChargeableIncome: money(taxResult?.ChargeableIncome), QualifyingReliefs: taxResult?.QualifyingReliefs || qualifyingReliefs, PayeBandBreakdown: taxResult?.BandBreakdown || [],
     ComponentBreakdown: componentLines, CalculationTrace: taxResult || { TaxExempt: true, Reason: 'Employee tax status is exempt.' },
     ConfigurationSnapshot: { TaxProfile: profileSnapshot, TaxBands: bandSnapshot, ReliefRules: reliefRules.filter((row) => !selectedProfile || clean(row.TaxProfileId) === clean(selectedProfile.ProfileId || selectedProfile.__id)).map(snapshotRow), SalaryComponents: ordered.map(({ definition }) => snapshotRow(definition)) },
-    CalculationWarnings: totalDeductionsRequested > context.Gross ? ['Deductions were capped at gross pay.'] : []
+    CalculationWarnings: []
   };
 }

@@ -5,11 +5,12 @@ import { categoryApplies, ensureStoreCategories, resolveStoreCategory, saveStore
 import {
   clonePayrollTaxProfile, getPayrollTaxConfiguration, migratePayrollTaxPhase2,
   PAYROLL_TAX_COLLECTIONS, savePayrollSalaryComponent, savePayrollTaxBands,
-  savePayrollTaxProfile, savePayrollTaxReliefRules, seedTraditionalPayeConfiguration,
+  savePayrollTaxProfile, savePayrollTaxReliefRules, savePayrollLedgerMapping, seedTraditionalPayeConfiguration,
   validatePayrollTaxConfigurationData
 } from '../lib/payroll/tax-config-service.js';
 import { calculateConfigurablePayroll, calculateLegacyPayroll } from '../lib/payroll/payroll-calculation-service.js';
 import { assertPayrollCanRegenerate, buildFinalizedRunSnapshot, validatePayrollForSubmission } from '../lib/payroll/payroll-run-guards.js';
+import { buildPayrollJournalLines } from '../lib/payroll/payroll-ledger-service.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -4106,7 +4107,7 @@ async function getAccountingOverview(env, body = {}) {
   await seedAccountingApprovalLimits(env);
   const periodsForChecklist = await listCollection(env, 'accountingPeriods');
   for (const period of periodsForChecklist) await seedAccountingCloseChecklist(env, clean(period.PeriodId || period.__id));
-  const [chart, journals, expenses, budgets, banks, reconciliations, periods, audit, vendors, supplierBills, supplierPayments, assets, adjustments, approvalLimits, closeChecklist, bankStatementItems, invoices, payments, payrollProfiles, payrollRuns, payrollItems, payrollPayments, payrollAudit, payrollTaxProfiles, payrollTaxOverrides] = await Promise.all([
+  const [chart, journals, expenses, budgets, banks, reconciliations, periods, audit, vendors, supplierBills, supplierPayments, assets, adjustments, approvalLimits, closeChecklist, bankStatementItems, invoices, payments, payrollProfiles, payrollRuns, payrollItems, payrollPayments, payrollAudit, payrollTaxProfiles, payrollTaxOverrides, payrollSalaryComponents, payrollTaxBands, payrollTaxReliefs, payrollLedgerMappings] = await Promise.all([
     listCollection(env, 'chartOfAccounts'), listCollection(env, 'accountingJournals'), listCollection(env, 'accountingExpenses'),
     listCollection(env, 'accountingBudgets'), listCollection(env, 'accountingBanks'), listCollection(env, 'accountingReconciliations'),
     listCollection(env, 'accountingPeriods'), listCollection(env, 'accountingAudit'), listCollection(env, 'accountingVendors'),
@@ -4114,15 +4115,22 @@ async function getAccountingOverview(env, body = {}) {
     listCollection(env, 'accountingAdjustments'), listCollection(env, 'accountingApprovalLimits'), listCollection(env, 'accountingCloseChecklist'),
     listCollection(env, 'accountingBankStatementItems'), listCollection(env, 'invoices'), listCollection(env, 'payments'),
     listCollection(env, 'payrollProfiles'), listCollection(env, 'payrollRuns'), listCollection(env, 'payrollItems'),
-    listCollection(env, 'payrollPayments'), listCollection(env, 'payrollAudit'), listCollection(env, PAYROLL_TAX_COLLECTIONS.profiles).catch(() => []), listCollection(env, PAYROLL_TAX_COLLECTIONS.overrides).catch(() => [])
+    listCollection(env, 'payrollPayments'), listCollection(env, 'payrollAudit'), listCollection(env, PAYROLL_TAX_COLLECTIONS.profiles).catch(() => []), listCollection(env, PAYROLL_TAX_COLLECTIONS.overrides).catch(() => []),
+    listCollection(env, PAYROLL_TAX_COLLECTIONS.components).catch(() => []), listCollection(env, PAYROLL_TAX_COLLECTIONS.bands).catch(() => []),
+    listCollection(env, PAYROLL_TAX_COLLECTIONS.reliefs).catch(() => []), listCollection(env, PAYROLL_TAX_COLLECTIONS.mappings).catch(() => [])
   ]);
   const filter = accountingFilter(body);
+  const finalizedPayrollRunIds = new Set(payrollRuns.filter((row) => ['approved', 'posted', 'part paid', 'paid', 'finalized'].includes(lower(row.Status))).map((row) => lower(row.RunId)));
+  const taxProfileUsage = {};
+  payrollItems.filter((row) => finalizedPayrollRunIds.has(lower(row.RunId))).forEach((row) => { const id = clean(row.TaxProfileId || row.ConfigurationSnapshot?.TaxProfile?.ProfileId); if (id) taxProfileUsage[id] = (taxProfileUsage[id] || 0) + 1; });
+  const payrollTaxProfilesWithUsage = payrollTaxProfiles.map((row) => ({ ...row, UsageCount: taxProfileUsage[clean(row.ProfileId || row.__id)] || 0 }));
   const reports = buildAccountingReport(chart, journals, expenses, budgets, filter);
   reports.receivablesAgeing = buildReceivablesAgeing(invoices, payments, filter.DateTo || nowIso().slice(0, 10));
   reports.payablesAgeing = buildAgeing(supplierBills, filter.DateTo || nowIso().slice(0, 10), 'payable');
   return { ok: true, message: 'Finance and accounting records loaded.', synchronized, filter, chart, journals, expenses, budgets, banks, reconciliations, periods, audit,
     vendors, supplierBills, supplierPayments, assets, adjustments, approvalLimits, closeChecklist, bankStatementItems,
-    payrollProfiles, payrollRuns, payrollItems, payrollPayments, payrollAudit, payrollTaxProfiles, payrollTaxOverrides, reports };
+    payrollProfiles, payrollRuns, payrollItems, payrollPayments, payrollAudit, payrollTaxProfiles: payrollTaxProfilesWithUsage, payrollTaxOverrides,
+    payrollSalaryComponents, payrollTaxBands, payrollTaxReliefs, payrollLedgerMappings, reports };
 }
 
 function payrollComponents(value) {
@@ -4433,17 +4441,11 @@ async function savePayrollRunStatus(env, body) {
   if (target === 'rejected') { updated.RejectedAt = nowIso(); updated.RejectedBy = clean(body.RecordedBy); updated.RejectionReason = clean(body.Reason); }
   if (target === 'posted') {
     const date = clean(body.Date || run.PayDate) || nowIso().slice(0, 10);
-    const expenseByAccount = new Map();
-    for (const item of runItems) {
-      const code = clean(item.SalaryExpenseAccount) || '6000';
-      expenseByAccount.set(code, (expenseByAccount.get(code) || 0) + asMoneyNumber(item.GrossPay));
-    }
-    const lines = [...expenseByAccount.entries()].map(([AccountCode, Debit]) => ({ AccountCode, Debit, Credit: 0, Description: run.Description }));
-    if (asMoneyNumber(run.TotalDeductions) > 0) lines.push({ AccountCode: '2100', Debit: 0, Credit: asMoneyNumber(run.TotalDeductions), Description: 'Payroll deductions payable' });
-    lines.push({ AccountCode: '2300', Debit: 0, Credit: asMoneyNumber(run.TotalNet), Description: 'Net salaries payable' });
+    const mappings = await listCollection(env, PAYROLL_TAX_COLLECTIONS.mappings).catch(() => []);
+    const ledger = buildPayrollJournalLines(runItems, mappings, date, run.Description);
     const journal = await saveAccountingJournal(env, { JournalNo: `SYS-PR-${safeDocumentId(runId)}`, Date: date, Status: 'Posted',
-      Description: run.Description, Reference: runId, Source: 'Payroll', SourceId: runId, RecordedBy: clean(body.RecordedBy), Lines: lines }, true);
-    updated.JournalNo = journal.JournalNo; updated.PostedAt = nowIso(); updated.PostedBy = clean(body.RecordedBy);
+      Description: run.Description, Reference: runId, Source: 'Payroll', SourceId: runId, RecordedBy: clean(body.RecordedBy), Lines: ledger.lines }, true);
+    updated.JournalNo = journal.JournalNo; updated.PostedAt = nowIso(); updated.PostedBy = clean(body.RecordedBy); updated.LedgerMappingSnapshot = ledger.mappingSnapshot;
   }
   await upsertDocument(env, 'payrollRuns', safeDocumentId(runId), updated);
   await writePayrollAudit(env, target.toUpperCase(), 'Payroll Run', runId, body, clean(body.Reason || requested));
@@ -4699,6 +4701,12 @@ async function routeAction(env, action, body = {}) {
       const reliefs = await savePayrollTaxReliefRules(env, body, clean(body.RecordedBy));
       await writePayrollAudit(env, 'SAVE RELIEF RULES', 'Payroll Tax Profile', clean(body.TaxProfileId || body.ProfileId), body, `${reliefs.length} rule(s)`);
       return { ok: true, message: 'Payroll tax relief rules saved.', reliefs };
+    }
+    case 'savePayrollLedgerMapping': {
+      requireAccountingRole(body, ['Super Admin']);
+      const mapping = await savePayrollLedgerMapping(env, body, clean(body.RecordedBy));
+      await writePayrollAudit(env, 'SAVE LEDGER MAPPING', 'Payroll Ledger Mapping', mapping.MappingId, body, `${mapping.MappingType}: ${mapping.DebitAccountId || '-'} / ${mapping.CreditAccountId || '-'}`);
+      return { ok: true, message: 'Payroll ledger mapping saved.', mapping };
     }
     case 'validatePayrollTaxConfiguration': {
       requireAccountingRole(body, ['Super Admin', 'Accounts Officer']);

@@ -458,12 +458,27 @@ async function loadMyPayroll() {
       ${table('Payroll History', items, [
         { label: 'Month', value: (row) => row.Month },
         { label: 'Gross Pay', value: (row) => money(row.GrossPay) },
+        { label: 'Taxable', value: (row) => money(row.TaxableEarnings) },
+        { label: 'PAYE', value: (row) => money(row.FinalPaye) },
         { label: 'Deductions', value: (row) => money(row.TotalDeductions) },
         { label: 'Net Pay', value: (row) => money(row.NetPay) },
+        { label: 'YTD PAYE', value: (row) => money(row.YtdPaye) },
         { label: 'Paid', value: (row) => money(row.PaidAmount) },
         { label: 'Status', value: (row) => row.PaymentStatus },
+        { label: 'Tax details', render: (row) => row.TaxProfileId ? `<button type="button" class="secondary" data-tax-breakdown="${escapeHtml(row.ItemId)}">View breakdown</button>` : '<span class="muted">Legacy</span>' },
         { label: 'Payslip', render: (row) => `<a class="payslip-download" href="/api/staff-payroll?action=payslip&itemId=${encodeURIComponent(row.ItemId)}">Download PDF</a>` }
-      ])}`;
+      ])}
+      <dialog id="taxBreakdownDialog" class="workflow-dialog tax-breakdown-dialog"><div id="taxBreakdownContent"></div><form method="dialog" class="tax-breakdown-close"><button type="submit">Close</button></form></dialog>`;
+    const dialog = document.querySelector('#taxBreakdownDialog'); const content = document.querySelector('#taxBreakdownContent');
+    panelEl.querySelectorAll('[data-tax-breakdown]').forEach((button) => button.addEventListener('click', () => {
+      const item = items.find((row) => clean(row.ItemId) === clean(button.dataset.taxBreakdown)); if (!item || !dialog || !content) return;
+      const reliefs = item.QualifyingReliefs || []; const bands = item.PayeBandBreakdown || [];
+      content.innerHTML = `<h2>PAYE Breakdown — ${escapeHtml(item.Month)}</h2><p><strong>Profile:</strong> ${escapeHtml(item.TaxProfileId)} v${escapeHtml(item.TaxProfileVersion)}</p>
+        <div class="workflow-kpis"><div><small>Taxable earnings</small><strong>${money(item.TaxableEarnings)}</strong></div><div><small>CRA</small><strong>${money(item.CraAmount)}</strong></div><div><small>Chargeable income</small><strong>${money(item.ChargeableIncome)}</strong></div><div><small>Final PAYE</small><strong>${money(item.FinalPaye)}</strong></div></div>
+        ${table('Qualifying Reliefs', reliefs, [{ label: 'Relief', value: (row) => row.Name || row.Code }, { label: 'Annual Amount', value: (row) => money(row.AnnualAmount ?? row.Amount) }])}
+        ${table('Progressive Bands', bands, [{ label: 'Band', value: (row) => row.Sequence }, { label: 'Amount Taxed', value: (row) => money(row.TaxedAmount) }, { label: 'Rate', value: (row) => `${row.Rate}%` }, { label: 'Tax', value: (row) => money(row.Tax) }])}`;
+      dialog.showModal();
+    }));
   } catch (error) {
     panelEl.innerHTML = `<p class="status bad">${escapeHtml(error.message || String(error))}</p>`;
   }

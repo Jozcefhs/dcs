@@ -66,7 +66,6 @@ test('employee-specific approved annual relief reduces PAYE', () => {
   assert.equal(relieved.QualifyingReliefs.find((row) => row.Code === 'LIFE').AnnualAmount, 120000); assert.ok(relieved.FinalPaye < normal.FinalPaye);
 });
 
-test('deductions above gross are capped and explicitly warned', () => {
-  const result = calculate({ employee: { ComponentAssignments: [{ ComponentId: 'BASIC', Amount: 1000 }, { ComponentId: 'LOAN', Amount: 5000 }], PensionParticipating: 'NO', TaxStatus: 'EXEMPT' } });
-  assert.equal(result.TotalDeductions, 1000); assert.equal(result.NetPay, 0); assert.equal(result.CalculationWarnings.length, 1);
+test('configured deductions above gross stop payroll instead of creating an unbalanced journal', () => {
+  assert.throws(() => calculate({ employee: { ComponentAssignments: [{ ComponentId: 'BASIC', Amount: 1000 }, { ComponentId: 'LOAN', Amount: 5000 }], PensionParticipating: 'NO', TaxStatus: 'EXEMPT' } }), (error) => error.code === 'DEDUCTIONS_EXCEED_GROSS');
 });

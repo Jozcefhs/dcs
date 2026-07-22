@@ -2,6 +2,6 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test:payroll": "node --test tests/payroll/formula-engine.test.mjs tests/payroll/paye-engine.test.mjs tests/payroll/payroll-calculation.test.mjs tests/payroll/payroll-run-guards.test.mjs"
+    "test:payroll": "node --test tests/payroll/formula-engine.test.mjs tests/payroll/paye-engine.test.mjs tests/payroll/payroll-calculation.test.mjs tests/payroll/payroll-run-guards.test.mjs tests/payroll/payroll-ledger.test.mjs"
   }
 }
