@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:payroll": "node --test tests/payroll/formula-engine.test.mjs tests/payroll/paye-engine.test.mjs"
+  }
+}
