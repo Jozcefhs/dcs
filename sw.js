@@ -1,4 +1,4 @@
-const CACHE = 'school-portal-v1';
+const CACHE = 'school-portal-v2-checkout-auth';
 const SHELL = ['/', '/index.html', '/parent-dashboard.html', '/css/style.css', '/js/site-config.js', '/js/parent-dashboard.js', '/app-icon.svg'];
 self.addEventListener('install', (event) => event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)).catch(() => null)));
 self.addEventListener('activate', (event) => event.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))))));

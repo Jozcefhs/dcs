@@ -300,7 +300,15 @@ function normalizeStudent(row, profile = {}) {
 }
 
 function studentLoginCode(row) {
-  return clean(pick(row, ['VerificationCode', 'verificationCode', 'ParentLoginCode', 'parentLoginCode', 'LoginCode', 'loginCode'])).toUpperCase();
+  return clean(pick(row, ['ParentLoginCode', 'parentLoginCode', 'VerificationCode', 'verificationCode', 'LoginCode', 'loginCode'])).toUpperCase();
+}
+
+function studentLoginCodes(row) {
+  return [...new Set([
+    row && row.ParentLoginCode, row && row.parentLoginCode,
+    row && row.VerificationCode, row && row.verificationCode,
+    row && row.LoginCode, row && row.loginCode
+  ].map((value) => clean(value).toUpperCase()).filter(Boolean))];
 }
 
 function normalizeAccount(row) {
@@ -942,7 +950,7 @@ export async function getPayableFees(env, body = {}) {
   const students = [...firestoreStudents, ...sheetStudents].map(normalizeStudent);
   const sales = [...firestoreSales, ...sheetSales];
   const loginApp = applications.find((row) => lower(row.VerificationEmail || row.Email || row.ParentEmail) === email && clean(row.VerificationCode).toUpperCase() === code);
-  const loginStudent = students.find((row) => lower(row.ParentEmail || row.Email || row.VerificationEmail) === email && studentLoginCode(row) === code);
+  const loginStudent = students.find((row) => lower(row.ParentEmail || row.Email || row.VerificationEmail) === email && studentLoginCodes(row).includes(code));
   const saleMatch = sales.some((row) => {
     return lower(pick(row, ['Email', 'email'])) === email &&
       clean(pick(row, ['VerificationCode', 'verificationCode'])).toUpperCase() === code;

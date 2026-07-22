@@ -17,6 +17,7 @@ const schoolStores = document.getElementById('schoolStores');
 const storeOrders = document.getElementById('storeOrders');
 const storeCartEl = document.getElementById('storeCart');
 const checkoutStoreCartBtn = document.getElementById('checkoutStoreCartBtn');
+const storeCheckoutStatus = document.getElementById('storeCheckoutStatus');
 const restrictionForm = document.getElementById('restrictionForm');
 const walletStatus = document.getElementById('walletStatus');
 const txnLimit = document.getElementById('txnLimit');
@@ -929,15 +930,21 @@ function renderStoreCart(child) {
   checkoutStoreCartBtn.textContent = entries.length ? `Checkout ${money(total)}` : 'Checkout Cart';
   checkoutStoreCartBtn.onclick = async () => {
     checkoutStoreCartBtn.disabled = true;
+    if (storeCheckoutStatus) { storeCheckoutStatus.textContent = 'Connecting to Paystack...'; storeCheckoutStatus.className = 'status'; }
     try {
       const cart = entries.map(([, entry]) => ({ itemCode: entry.item.ItemCode, storeType: entry.item.StoreType, quantity: entry.quantity }));
       const response = await fetch('/api/init-payment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...authPayload(), accountRef: child.AccountRef, feeCode: 'STORE_CART', amount: total, storeCart: cart }) });
-      const data = await response.json();
+      const responseText = await response.text();
+      let data = {};
+      try { data = JSON.parse(responseText); } catch (_error) { throw new Error(`Checkout service returned an invalid response (HTTP ${response.status}). Please try again.`); }
       if (!response.ok || !data.ok) throw new Error(data.message || 'Could not start store checkout.');
       if (!data.authorizationUrl) throw new Error('Paystack did not return a checkout link. Please contact the school accounts office.');
+      if (storeCheckoutStatus) { storeCheckoutStatus.textContent = 'Opening Paystack secure checkout...'; storeCheckoutStatus.className = 'status ok'; }
       window.location.assign(data.authorizationUrl);
     } catch (error) {
-      setStatus(error.message || String(error), 'bad'); checkoutStoreCartBtn.disabled = false;
+      const message = String(error?.message || error || 'Could not start checkout.').replace(/^Error:\s*/, '');
+      if (storeCheckoutStatus) { storeCheckoutStatus.textContent = message; storeCheckoutStatus.className = 'status bad'; }
+      setStatus(message, 'bad'); checkoutStoreCartBtn.disabled = false;
     }
   };
 }
