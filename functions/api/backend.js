@@ -8,6 +8,8 @@ import {
   savePayrollTaxProfile, savePayrollTaxReliefRules, seedTraditionalPayeConfiguration,
   validatePayrollTaxConfigurationData
 } from '../lib/payroll/tax-config-service.js';
+import { calculateConfigurablePayroll, calculateLegacyPayroll } from '../lib/payroll/payroll-calculation-service.js';
+import { assertPayrollCanRegenerate, buildFinalizedRunSnapshot, validatePayrollForSubmission } from '../lib/payroll/payroll-run-guards.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -4104,7 +4106,7 @@ async function getAccountingOverview(env, body = {}) {
   await seedAccountingApprovalLimits(env);
   const periodsForChecklist = await listCollection(env, 'accountingPeriods');
   for (const period of periodsForChecklist) await seedAccountingCloseChecklist(env, clean(period.PeriodId || period.__id));
-  const [chart, journals, expenses, budgets, banks, reconciliations, periods, audit, vendors, supplierBills, supplierPayments, assets, adjustments, approvalLimits, closeChecklist, bankStatementItems, invoices, payments, payrollProfiles, payrollRuns, payrollItems, payrollPayments, payrollAudit] = await Promise.all([
+  const [chart, journals, expenses, budgets, banks, reconciliations, periods, audit, vendors, supplierBills, supplierPayments, assets, adjustments, approvalLimits, closeChecklist, bankStatementItems, invoices, payments, payrollProfiles, payrollRuns, payrollItems, payrollPayments, payrollAudit, payrollTaxProfiles, payrollTaxOverrides] = await Promise.all([
     listCollection(env, 'chartOfAccounts'), listCollection(env, 'accountingJournals'), listCollection(env, 'accountingExpenses'),
     listCollection(env, 'accountingBudgets'), listCollection(env, 'accountingBanks'), listCollection(env, 'accountingReconciliations'),
     listCollection(env, 'accountingPeriods'), listCollection(env, 'accountingAudit'), listCollection(env, 'accountingVendors'),
@@ -4112,7 +4114,7 @@ async function getAccountingOverview(env, body = {}) {
     listCollection(env, 'accountingAdjustments'), listCollection(env, 'accountingApprovalLimits'), listCollection(env, 'accountingCloseChecklist'),
     listCollection(env, 'accountingBankStatementItems'), listCollection(env, 'invoices'), listCollection(env, 'payments'),
     listCollection(env, 'payrollProfiles'), listCollection(env, 'payrollRuns'), listCollection(env, 'payrollItems'),
-    listCollection(env, 'payrollPayments'), listCollection(env, 'payrollAudit')
+    listCollection(env, 'payrollPayments'), listCollection(env, 'payrollAudit'), listCollection(env, PAYROLL_TAX_COLLECTIONS.profiles).catch(() => []), listCollection(env, PAYROLL_TAX_COLLECTIONS.overrides).catch(() => [])
   ]);
   const filter = accountingFilter(body);
   const reports = buildAccountingReport(chart, journals, expenses, budgets, filter);
@@ -4120,7 +4122,7 @@ async function getAccountingOverview(env, body = {}) {
   reports.payablesAgeing = buildAgeing(supplierBills, filter.DateTo || nowIso().slice(0, 10), 'payable');
   return { ok: true, message: 'Finance and accounting records loaded.', synchronized, filter, chart, journals, expenses, budgets, banks, reconciliations, periods, audit,
     vendors, supplierBills, supplierPayments, assets, adjustments, approvalLimits, closeChecklist, bankStatementItems,
-    payrollProfiles, payrollRuns, payrollItems, payrollPayments, payrollAudit, reports };
+    payrollProfiles, payrollRuns, payrollItems, payrollPayments, payrollAudit, payrollTaxProfiles, payrollTaxOverrides, reports };
 }
 
 function payrollComponents(value) {
@@ -4149,6 +4151,19 @@ function normalizedPayrollComponents(value) {
     Name: clean(row.Name || row.name || row.Label || row.label),
     Amount: asMoneyNumber(row.Amount || row.amount)
   })).filter((row) => row.Name && row.Amount > 0);
+}
+
+function normalizedComponentAssignments(value) {
+  let source = value;
+  if (typeof source === 'string' && clean(source)) {
+    try { source = JSON.parse(source); } catch (_err) { source = []; }
+  }
+  return (Array.isArray(source) ? source : []).map((row) => ({
+    ComponentId: clean(row.ComponentId || row.componentId), Code: clean(row.Code || row.code).toUpperCase(),
+    Amount: asMoneyNumber(row.Amount ?? row.amount), CalculationType: clean(row.CalculationType || row.calculationType),
+    PercentageRate: asMoneyNumber(row.PercentageRate ?? row.percentageRate), PercentageBase: clean(row.PercentageBase || row.percentageBase),
+    Formula: clean(row.Formula || row.formula)
+  })).filter((row) => row.ComponentId || row.Code);
 }
 
 function payrollTotal(value) {
@@ -4182,11 +4197,22 @@ async function savePayrollProfile(env, body) {
     Department: clean(body.Department), Position: clean(body.Position), EmploymentType: clean(body.EmploymentType) || 'Permanent',
     BasicSalary: basicSalary, Allowances: normalizedPayrollComponents(body.Allowances), Deductions: normalizedPayrollComponents(body.Deductions),
     PensionRate: Math.min(100, Math.max(0, asMoneyNumber(body.PensionRate))), TaxRate: Math.min(100, Math.max(0, asMoneyNumber(body.TaxRate))),
+    CalculationMode: clean(body.CalculationMode || existing.CalculationMode || 'LEGACY_FLAT_RATE').toUpperCase(),
+    ComponentAssignments: body.ComponentAssignments === undefined ? (existing.ComponentAssignments || []) : normalizedComponentAssignments(body.ComponentAssignments),
+    TaxStatus: clean(body.TaxStatus || existing.TaxStatus || 'TAXABLE').toUpperCase(), TaxJurisdiction: clean(body.TaxJurisdiction || existing.TaxJurisdiction || 'FCT'),
+    TaxProfileId: clean(body.TaxProfileId ?? existing.TaxProfileId), TIN: clean(body.TIN ?? existing.TIN),
+    PensionParticipating: yesNo(body.PensionParticipating ?? existing.PensionParticipating ?? (asMoneyNumber(body.PensionRate) > 0 ? 'YES' : 'NO')),
+    PensionRateOverride: Math.min(100, Math.max(0, asMoneyNumber(body.PensionRateOverride ?? existing.PensionRateOverride))), PensionScheme: clean(body.PensionScheme ?? existing.PensionScheme),
+    NhfParticipating: yesNo(body.NhfParticipating ?? existing.NhfParticipating ?? 'NO'), NhfRate: Math.min(100, Math.max(0, asMoneyNumber(body.NhfRate ?? existing.NhfRate))),
+    AdditionalReliefs: Array.isArray(body.AdditionalReliefs) ? body.AdditionalReliefs : (existing.AdditionalReliefs || []),
+    BeginningYearCumulative: body.BeginningYearCumulative && typeof body.BeginningYearCumulative === 'object' ? body.BeginningYearCumulative : (existing.BeginningYearCumulative || {}),
     BankName: clean(body.BankName), AccountName: clean(body.AccountName), AccountNumber: clean(body.AccountNumber),
     SalaryExpenseAccount: clean(body.SalaryExpenseAccount) || '6000', Active: yesNo(body.Active ?? 'YES') || 'YES',
     Notes: clean(body.Notes), CreatedAt: existing.CreatedAt || nowIso(), CreatedBy: existing.CreatedBy || clean(body.RecordedBy),
     UpdatedAt: nowIso(), UpdatedBy: clean(body.RecordedBy)
   };
+  if (!['LEGACY_FLAT_RATE', 'CONFIGURABLE_PAYE'].includes(payload.CalculationMode)) { const err = new Error('Choose Legacy Flat Rate or Configurable PAYE calculation mode.'); err.status = 400; throw err; }
+  if (!['TAXABLE', 'EXEMPT', 'TAX_EXEMPT'].includes(payload.TaxStatus)) { const err = new Error('Choose a valid employee tax status.'); err.status = 400; throw err; }
   delete payload.__id; delete payload.__name;
   await upsertDocument(env, 'payrollProfiles', safeDocumentId(employeeId), payload);
   await writePayrollAudit(env, existing.EmployeeId ? 'UPDATE' : 'CREATE', 'Payroll Profile', employeeId, body, displayName);
@@ -4284,6 +4310,46 @@ async function importPayrollProfiles(env, body) {
   };
 }
 
+async function requestPayrollTaxOverride(env, body) {
+  requireAccountingRole(body, ['Super Admin', 'Accounts Officer']);
+  const runId = clean(body.RunId); const employeeId = clean(body.EmployeeId); const reason = clean(body.Reason); const overridePaye = asMoneyNumber(body.OverridePaye);
+  if (!runId || !employeeId || !reason || overridePaye < 0) { const err = new Error('Run, employee, non-negative override PAYE, and a reason are required.'); err.status = 400; throw err; }
+  const [runs, items, overrides] = await Promise.all([listCollection(env, 'payrollRuns'), listCollection(env, 'payrollItems'), listCollection(env, PAYROLL_TAX_COLLECTIONS.overrides).catch(() => [])]);
+  const run = runs.find((row) => sameText(row.RunId, runId));
+  if (!run || !['draft', 'rejected'].includes(lower(run.Status))) { const err = new Error('Tax overrides can only be requested for Draft or Rejected payroll.'); err.status = 409; throw err; }
+  const item = items.find((row) => sameText(row.RunId, runId) && sameText(row.EmployeeId, employeeId));
+  if (!item || clean(item.CalculationMode).toUpperCase() !== 'CONFIGURABLE_PAYE') { const err = new Error('Generate configurable payroll for this employee before requesting an override.'); err.status = 409; throw err; }
+  const overrideId = clean(body.OverrideId) || `TAXOVR-${safeDocumentId(runId)}-${safeDocumentId(employeeId)}`;
+  const existing = overrides.find((row) => sameText(row.OverrideId || row.__id, overrideId)) || {};
+  if (lower(existing.Status) === 'approved') { const err = new Error('An approved override is immutable. Request a supervised reversal before replacing it.'); err.status = 409; throw err; }
+  const payload = { ...existing, OverrideId: overrideId, RunId: runId, EmployeeId: employeeId, ItemId: clean(item.ItemId), CalculatedPaye: asMoneyNumber(item.CalculatedPaye ?? item.TaxAmount),
+    OverridePaye: overridePaye, Difference: overridePaye - asMoneyNumber(item.CalculatedPaye ?? item.TaxAmount), Reason: reason, Status: 'Pending',
+    RequestedAt: nowIso(), RequestedBy: clean(body.RecordedBy), RequestedByRole: clean(body.UserRole), UpdatedAt: nowIso() };
+  delete payload.__id; delete payload.__name;
+  await upsertDocument(env, PAYROLL_TAX_COLLECTIONS.overrides, safeDocumentId(overrideId), payload);
+  await writePayrollAudit(env, 'REQUEST TAX OVERRIDE', 'Payroll Tax Override', overrideId, body, `${employeeId}: ${payload.CalculatedPaye} -> ${overridePaye}; ${reason}`);
+  return { ok: true, message: 'PAYE override submitted for independent approval.', override: payload };
+}
+
+async function approvePayrollTaxOverride(env, body) {
+  requireAccountingRole(body, ['Super Admin', 'Management']);
+  const overrideId = clean(body.OverrideId); const decision = clean(body.Decision || body.Status).toLowerCase();
+  if (!overrideId || !['approved', 'rejected'].includes(decision)) { const err = new Error('Override ID and an Approved or Rejected decision are required.'); err.status = 400; throw err; }
+  const overrides = await listCollection(env, PAYROLL_TAX_COLLECTIONS.overrides); const existing = overrides.find((row) => sameText(row.OverrideId || row.__id, overrideId));
+  if (!existing) { const err = new Error('Tax override request was not found.'); err.status = 404; throw err; }
+  if (lower(existing.Status) !== 'pending') { const err = new Error('Only a pending tax override can be decided.'); err.status = 409; throw err; }
+  if (decision === 'approved' && sameText(existing.RequestedBy, body.RecordedBy)) { const err = new Error('The override requester cannot approve the same request.'); err.status = 403; throw err; }
+  const runs = await listCollection(env, 'payrollRuns'); const run = runs.find((row) => sameText(row.RunId, existing.RunId));
+  if (!run || !['draft', 'rejected'].includes(lower(run.Status))) { const err = new Error('The payroll is no longer editable, so this override cannot be decided.'); err.status = 409; throw err; }
+  const updated = { ...existing, Status: decision === 'approved' ? 'Approved' : 'Rejected', DecisionReason: clean(body.DecisionReason || body.Reason),
+    DecidedAt: nowIso(), DecidedBy: clean(body.RecordedBy), DecidedByRole: clean(body.UserRole), UpdatedAt: nowIso() };
+  delete updated.__id; delete updated.__name;
+  await upsertDocument(env, PAYROLL_TAX_COLLECTIONS.overrides, safeDocumentId(overrideId), updated);
+  if (decision === 'approved') await upsertDocument(env, 'payrollRuns', run.__id || safeDocumentId(run.RunId), { ...run, RequiresRecalculation: 'YES', UpdatedAt: nowIso(), UpdatedBy: clean(body.RecordedBy) });
+  await writePayrollAudit(env, `${decision.toUpperCase()} TAX OVERRIDE`, 'Payroll Tax Override', overrideId, body, clean(updated.DecisionReason || `${existing.EmployeeId}: ${existing.OverridePaye}`));
+  return { ok: true, message: decision === 'approved' ? 'PAYE override approved. Recalculate the draft payroll before submission.' : 'PAYE override rejected.', override: updated };
+}
+
 async function generatePayrollRun(env, body) {
   requireAccountingRole(body, ['Super Admin', 'Accounts Officer']);
   const month = clean(body.Month || body.month);
@@ -4291,46 +4357,51 @@ async function generatePayrollRun(env, body) {
   const runId = clean(body.RunId) || `PAY-${month.replace('-', '')}`;
   const runs = await listCollection(env, 'payrollRuns');
   const existing = runs.find((row) => sameText(row.RunId, runId) || sameText(row.__id, safeDocumentId(runId))) || {};
-  if (['approved', 'posted', 'part paid', 'paid'].includes(lower(existing.Status))) {
-    const err = new Error('Approved or posted payroll cannot be regenerated.'); err.status = 409; throw err;
-  }
+  assertPayrollCanRegenerate(existing);
   const profiles = (await listCollection(env, 'payrollProfiles')).filter((row) => yesNo(row.Active ?? 'YES') === 'YES');
   if (!profiles.length) { const err = new Error('Create at least one active payroll profile first.'); err.status = 400; throw err; }
   const existingItems = (await listCollection(env, 'payrollItems')).filter((row) => sameText(row.RunId, runId));
-  for (const item of existingItems) await deleteDocument(env, 'payrollItems', item.__id || safeDocumentId(item.ItemId));
-  let totalBasic = 0; let totalAllowances = 0; let totalGross = 0; let totalDeductions = 0; let totalNet = 0;
+  const usesConfigurablePaye = profiles.some((row) => clean(row.CalculationMode).toUpperCase() === 'CONFIGURABLE_PAYE');
+  const configuration = usesConfigurablePaye ? await getPayrollTaxConfiguration(env) : null;
+  const payrollDate = clean(body.PayDate) || `${month}-28`; const calculatedItems = []; const errors = [];
+  let totalBasic = 0; let totalAllowances = 0; let totalGross = 0; let totalTaxable = 0; let totalPension = 0; let totalNhf = 0; let totalPaye = 0; let totalDeductions = 0; let totalNet = 0;
   for (const profile of profiles) {
-    const basic = asMoneyNumber(profile.BasicSalary);
-    const allowances = payrollTotal(profile.Allowances);
-    const gross = basic + allowances;
-    const pension = gross * Math.max(0, asMoneyNumber(profile.PensionRate)) / 100;
-    const tax = gross * Math.max(0, asMoneyNumber(profile.TaxRate)) / 100;
-    const otherDeductions = payrollTotal(profile.Deductions);
-    const deductions = Math.min(gross, pension + tax + otherDeductions);
-    const net = Math.max(0, gross - deductions);
-    const itemId = `${runId}-${clean(profile.EmployeeId)}`;
-    const item = {
-      ItemId: itemId, RunId: runId, Month: month, EmployeeId: clean(profile.EmployeeId), Username: clean(profile.Username),
-      DisplayName: clean(profile.DisplayName), Department: clean(profile.Department), Position: clean(profile.Position),
-      BasicSalary: basic, Allowances: normalizedPayrollComponents(profile.Allowances), AllowanceTotal: allowances, GrossPay: gross,
-      PensionRate: asMoneyNumber(profile.PensionRate), PensionAmount: pension, TaxRate: asMoneyNumber(profile.TaxRate), TaxAmount: tax,
-      OtherDeductions: normalizedPayrollComponents(profile.Deductions), OtherDeductionTotal: otherDeductions,
-      TotalDeductions: deductions, NetPay: net, PaidAmount: 0, OutstandingAmount: net, PaymentStatus: 'Unpaid',
-      BankName: clean(profile.BankName), AccountName: clean(profile.AccountName), AccountNumber: clean(profile.AccountNumber),
-      SalaryExpenseAccount: clean(profile.SalaryExpenseAccount) || '6000', GeneratedAt: nowIso(), GeneratedBy: clean(body.RecordedBy)
-    };
-    await upsertDocument(env, 'payrollItems', safeDocumentId(itemId), item);
-    totalBasic += basic; totalAllowances += allowances; totalGross += gross; totalDeductions += deductions; totalNet += net;
+    try {
+      const configurable = clean(profile.CalculationMode).toUpperCase() === 'CONFIGURABLE_PAYE';
+      const approvedOverride = configurable ? (configuration.overrides || []).find((row) => sameText(row.RunId, runId) && sameText(row.EmployeeId, profile.EmployeeId) && lower(row.Status) === 'approved') : null;
+      const calculation = configurable ? calculateConfigurablePayroll({ employee: profile, configuration, payrollDate, approvedOverride }) : calculateLegacyPayroll(profile);
+      const itemId = `${runId}-${clean(profile.EmployeeId)}`;
+      const item = {
+        ItemId: itemId, RunId: runId, Month: month, EmployeeId: clean(profile.EmployeeId), Username: clean(profile.Username),
+        DisplayName: clean(profile.DisplayName), Department: clean(profile.Department), Position: clean(profile.Position), ...calculation,
+        PaidAmount: 0, OutstandingAmount: calculation.NetPay, PaymentStatus: 'Unpaid', BankName: clean(profile.BankName),
+        AccountName: clean(profile.AccountName), AccountNumber: clean(profile.AccountNumber), SalaryExpenseAccount: clean(profile.SalaryExpenseAccount) || '6000',
+        GeneratedAt: nowIso(), GeneratedBy: clean(body.RecordedBy), RecalculatedFromDraft: existing.RunId ? 'YES' : 'NO'
+      };
+      calculatedItems.push(item); totalBasic += asMoneyNumber(item.BasicSalary); totalAllowances += asMoneyNumber(item.AllowanceTotal);
+      totalGross += asMoneyNumber(item.GrossPay); totalTaxable += asMoneyNumber(item.TaxableEarnings ?? item.GrossPay); totalPension += asMoneyNumber(item.PensionAmount);
+      totalNhf += asMoneyNumber(item.NhfAmount); totalPaye += asMoneyNumber(item.FinalPaye ?? item.TaxAmount); totalDeductions += asMoneyNumber(item.TotalDeductions); totalNet += asMoneyNumber(item.NetPay);
+    } catch (error) { errors.push(`${clean(profile.DisplayName || profile.EmployeeId)}: ${error.message || error}`); }
   }
+  if (errors.length) { const err = new Error(`Payroll calculation stopped. ${errors.join(' | ')}`); err.status = 400; err.code = 'PAYROLL_VALIDATION_FAILED'; throw err; }
+  const currentIds = new Set(calculatedItems.map((item) => lower(item.ItemId)));
+  for (const item of calculatedItems) await upsertDocument(env, 'payrollItems', safeDocumentId(item.ItemId), item);
+  for (const item of existingItems) if (!currentIds.has(lower(item.ItemId))) await deleteDocument(env, 'payrollItems', item.__id || safeDocumentId(item.ItemId));
+  const versions = [...new Set(calculatedItems.map((item) => clean(item.CalculationVersion)))];
+  const taxProfileIds = [...new Set(calculatedItems.map((item) => clean(item.TaxProfileId)).filter(Boolean))];
+  const warnings = calculatedItems.flatMap((item) => (item.CalculationWarnings || []).map((warning) => `${item.DisplayName}: ${warning}`));
   const run = {
-    ...existing, RunId: runId, Month: month, PayDate: clean(body.PayDate) || `${month}-28`, Description: clean(body.Description) || `Payroll for ${month}`,
+    ...existing, RunId: runId, Month: month, PayDate: payrollDate, Description: clean(body.Description) || `Payroll for ${month}`,
     Status: 'Draft', EmployeeCount: profiles.length, TotalBasic: totalBasic, TotalAllowances: totalAllowances, TotalGross: totalGross,
+    TotalTaxableEarnings: totalTaxable, TotalPension: totalPension, TotalNhf: totalNhf, TotalPaye: totalPaye,
     TotalDeductions: totalDeductions, TotalNet: totalNet, PaidAmount: 0, OutstandingAmount: totalNet,
+    CalculationVersion: versions.length === 1 ? versions[0] : 'MIXED_LEGACY_AND_CONFIGURABLE_V1', TaxProfileIds: taxProfileIds,
+    CalculationStatus: 'VALID', ValidationWarnings: warnings, RequiresRecalculation: 'NO', ConfigurationSnapshotVersion: 1,
     CreatedAt: existing.CreatedAt || nowIso(), CreatedBy: existing.CreatedBy || clean(body.RecordedBy), UpdatedAt: nowIso(), UpdatedBy: clean(body.RecordedBy)
   };
   await upsertDocument(env, 'payrollRuns', safeDocumentId(runId), run);
   await writePayrollAudit(env, existing.RunId ? 'REGENERATE' : 'GENERATE', 'Payroll Run', runId, body, `${profiles.length} staff; net ${totalNet}`);
-  return { ok: true, message: `Payroll generated for ${profiles.length} staff.`, run };
+  return { ok: true, message: `Payroll calculated for ${profiles.length} staff${usesConfigurablePaye ? ' using the configured PAYE engine where enabled' : ' using the legacy-compatible engine'}.`, run, warnings };
 }
 
 async function savePayrollRunStatus(env, body) {
@@ -4350,15 +4421,20 @@ async function savePayrollRunStatus(env, body) {
   const roles = allowed[current] && allowed[current][target];
   if (!roles) { const err = new Error(`Payroll cannot move from ${run.Status} to ${requested}.`); err.status = 409; throw err; }
   requireAccountingRole(body, roles);
+  const runItems = (await listCollection(env, 'payrollItems')).filter((row) => sameText(row.RunId, runId));
+  if (target === 'submitted') validatePayrollForSubmission(run, runItems);
   const updated = { ...run, Status: requested, UpdatedAt: nowIso(), UpdatedBy: clean(body.RecordedBy) };
   if (target === 'submitted') { updated.SubmittedAt = nowIso(); updated.SubmittedBy = clean(body.RecordedBy); }
-  if (target === 'approved') { updated.ApprovedAt = nowIso(); updated.ApprovedBy = clean(body.RecordedBy); }
+  if (target === 'approved') {
+    const finalizedAt = nowIso(); updated.ApprovedAt = finalizedAt; updated.ApprovedBy = clean(body.RecordedBy); updated.FinalizedAt = finalizedAt; updated.FinalizedBy = clean(body.RecordedBy);
+    updated.ConfigurationSnapshot = buildFinalizedRunSnapshot(run, runItems, clean(body.RecordedBy), finalizedAt);
+    for (const item of runItems) await upsertDocument(env, 'payrollItems', item.__id || safeDocumentId(item.ItemId), { ...item, LockedAt: nowIso(), LockedBy: clean(body.RecordedBy), FinalizedSnapshot: item.ConfigurationSnapshot || null });
+  }
   if (target === 'rejected') { updated.RejectedAt = nowIso(); updated.RejectedBy = clean(body.RecordedBy); updated.RejectionReason = clean(body.Reason); }
   if (target === 'posted') {
     const date = clean(body.Date || run.PayDate) || nowIso().slice(0, 10);
-    const items = (await listCollection(env, 'payrollItems')).filter((row) => sameText(row.RunId, runId));
     const expenseByAccount = new Map();
-    for (const item of items) {
+    for (const item of runItems) {
       const code = clean(item.SalaryExpenseAccount) || '6000';
       expenseByAccount.set(code, (expenseByAccount.get(code) || 0) + asMoneyNumber(item.GrossPay));
     }
@@ -4643,6 +4719,10 @@ async function routeAction(env, action, body = {}) {
       return importPayrollProfiles(env, body);
     case 'generatePayrollRun':
       return generatePayrollRun(env, body);
+    case 'requestPayrollTaxOverride':
+      return requestPayrollTaxOverride(env, body);
+    case 'approvePayrollTaxOverride':
+      return approvePayrollTaxOverride(env, body);
     case 'savePayrollRunStatus':
       return savePayrollRunStatus(env, body);
     case 'payPayrollItem':

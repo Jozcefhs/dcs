@@ -70,7 +70,7 @@ export function calculateMonthlyPaye(input) {
   const cra = craEnabled ? Math.max(fixedRelief, annualGross * comparisonRate / 100) + annualGross * additionalRate / 100 : 0;
   const qualifyingReliefs = (input.qualifyingReliefs || []).map((row) => ({
     Code: clean(row.Code || row.Name || 'RELIEF'), Name: clean(row.Name || row.Code || 'Relief'),
-    Amount: Math.max(0, number(row.AnnualAmount ?? row.Amount)), Category: clean(row.Category || 'Other')
+    Amount: Math.max(0, number(row.AnnualAmount ?? row.Amount)), AnnualAmount: Math.max(0, number(row.AnnualAmount ?? row.Amount)), Category: clean(row.Category || 'Other')
   })).filter((row) => row.Amount > 0);
   const reliefTotal = qualifyingReliefs.reduce((sum, row) => sum + row.Amount, 0);
   const chargeableIncome = Math.max(0, annualTaxable - cra - reliefTotal);
