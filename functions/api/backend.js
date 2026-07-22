@@ -11,6 +11,7 @@ import {
 import { calculateConfigurablePayroll, calculateLegacyPayroll } from '../lib/payroll/payroll-calculation-service.js';
 import { assertPayrollCanRegenerate, buildFinalizedRunSnapshot, validatePayrollForSubmission } from '../lib/payroll/payroll-run-guards.js';
 import { buildPayrollJournalLines } from '../lib/payroll/payroll-ledger-service.js';
+import { applyAuthoritativeActor, resolveAuthoritativeDesktopActor, secureTextEqual } from '../lib/backend-security.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -476,11 +477,30 @@ function requireBackendSecret(env, body) {
   const expected = clean(env.BACKEND_SHARED_SECRET || env.GOOGLE_APPS_SCRIPT_SECRET);
   if (!expected) return;
   const supplied = clean(body.Secret || body.secret);
-  if (supplied !== expected) {
+  if (!secureTextEqual(supplied, expected)) {
     const err = new Error('Unauthorized.');
     err.status = 401;
     throw err;
   }
+}
+
+const VERIFIED_ACTOR_ACTIONS = new Set([
+  'exportBackup', 'getAccountingOverview', 'getPayrollTaxConfiguration',
+  'seedTraditionalPayeConfiguration', 'savePayrollSalaryComponent', 'savePayrollTaxProfile',
+  'clonePayrollTaxProfile', 'savePayrollTaxBands', 'savePayrollTaxReliefRules',
+  'savePayrollLedgerMapping', 'validatePayrollTaxConfiguration', 'migratePayrollTaxPhase2',
+  'savePayrollProfile', 'createPayrollProfilesFromStaff', 'importPayrollProfiles',
+  'generatePayrollRun', 'requestPayrollTaxOverride', 'approvePayrollTaxOverride',
+  'savePayrollRunStatus', 'payPayrollItem'
+]);
+
+async function verifyDesktopActor(env, action, body) {
+  if (!VERIFIED_ACTOR_ACTIONS.has(action)) return body;
+  const users = await listCollection(env, 'staffUsers').catch((error) => {
+    error.status = error.status || 503;
+    throw error;
+  });
+  return applyAuthoritativeActor(body, resolveAuthoritativeDesktopActor(body, users, env));
 }
 
 function normalizeMatchText(value) {
@@ -4578,6 +4598,7 @@ async function routeAction(env, action, body = {}) {
         projectId: env.FIREBASE_PROJECT_ID
       };
     case 'exportBackup': {
+      requireAccountingRole(body, ['Super Admin']);
       const rootCollections = [
         'accounts', 'payments', 'invoices', 'ledger', 'feeItems', 'billingCategories',
         'settings', 'formSales', 'staffUsers', 'staffSecurityAudit',
@@ -4861,19 +4882,23 @@ export async function onRequestPost(context) {
   try {
     const { request, env } = context;
     requireFirestoreEnv(env);
-    const body = await request.json().catch(() => ({}));
+    let body = await request.json().catch(() => ({}));
     requireBackendSecret(env, body);
     const action = clean(body.Action || body.action);
     if (!action) {
       return Response.json({ ok: false, message: 'Action is required.' }, { status: 400 });
     }
+    body = await verifyDesktopActor(env, action, body);
     const data = await routeAction(env, action, body);
     return Response.json(data);
   } catch (err) {
+    const status = err.status || 500;
+    if (status >= 500) console.error('Firestore backend failure', err);
     return Response.json({
       ok: false,
-      message: String(err && err.message ? err.message : err)
-    }, { status: err.status || 500 });
+      message: status >= 500 ? 'The backend could not complete this operation.' : String(err && err.message ? err.message : err),
+      ...(err && err.code && status < 500 ? { code: err.code } : {})
+    }, { status });
   }
 }
 
@@ -4883,13 +4908,7 @@ export async function onRequestGet(context) {
     requireFirestoreEnv(env);
     const url = new URL(request.url);
     const action = clean(url.searchParams.get('action') || url.searchParams.get('Action'));
-    if (action) {
-      requireBackendSecret(env, {
-        Secret: url.searchParams.get('secret') || url.searchParams.get('Secret')
-      });
-      const data = await routeAction(env, action, {});
-      return Response.json(data);
-    }
+    if (action && action !== 'ping') return Response.json({ ok: false, message: 'Backend actions require POST; credentials must not be placed in a URL.' }, { status: 405, headers: { Allow: 'POST' } });
     return Response.json({
       ok: true,
       message: 'Firestore backend is reachable.',
@@ -4897,9 +4916,10 @@ export async function onRequestGet(context) {
       projectId: env.FIREBASE_PROJECT_ID
     });
   } catch (err) {
+    console.error('Firestore backend health-check failure', err);
     return Response.json({
       ok: false,
-      message: String(err && err.message ? err.message : err)
+      message: 'The backend health check failed.'
     }, { status: 500 });
   }
 }

@@ -240,13 +240,11 @@ function legacyComponentDefinition(name, type) {
   return { ComponentId: `COMP-${code}`, Name: clean(name), Code: code, ComponentType: earning ? 'earning' : 'deduction', CalculationType: 'fixed_amount', Formula: '', PercentageRate: 0, PercentageBase: '', IsTaxable: earning ? 'YES' : 'NO', IsPensionable: earning ? 'YES' : 'NO', IsNhfApplicable: 'NO', ReducesTaxableIncome: 'NO', IsPreTax: 'NO', IsPostTax: earning ? 'NO' : 'YES', IsRecurring: 'YES', Active: 'YES', EffectiveFrom: '', EffectiveTo: '', DisplayOrder: 100, MigrationInferred: 'YES', CreatedAt: now(), UpdatedAt: now() };
 }
 
-export async function migratePayrollTaxPhase2(env, body = {}) {
+export function buildPayrollTaxPhase2MigrationPlan(input = {}, body = {}) {
   const migrationId = 'PAYE-PHASE2-V1'; const apply = yesNo(body.Apply ?? body.apply, 'NO') === 'YES';
-  const [markers, profiles, runs, items, existingComponents, existingTaxProfiles] = await Promise.all([
-    listCollection(env, PAYROLL_TAX_COLLECTIONS.migrations).catch(() => []), listCollection(env, 'payrollProfiles').catch(() => []),
-    listCollection(env, 'payrollRuns').catch(() => []), listCollection(env, 'payrollItems').catch(() => []),
-    listCollection(env, PAYROLL_TAX_COLLECTIONS.components).catch(() => []), listCollection(env, PAYROLL_TAX_COLLECTIONS.profiles).catch(() => [])
-  ]);
+  const markers = input.markers || []; const profiles = input.profiles || []; const runs = input.runs || [];
+  const items = input.items || []; const existingComponents = input.existingComponents || [];
+  const existingTaxProfiles = input.existingTaxProfiles || [];
   const marker = markers.find((row) => clean(row.MigrationId || row.__id) === migrationId);
   const definitions = new Map(existingComponents.map((row) => [clean(row.ComponentId || row.__id), documentData(row)]));
   const basic = { ...legacyComponentDefinition('Basic Salary', 'earning'), ComponentId: 'COMP-BASIC', Code: 'BASIC', DisplayOrder: 10 }; definitions.set(basic.ComponentId, basic);
@@ -257,8 +255,8 @@ export async function migratePayrollTaxPhase2(env, body = {}) {
   const warnings = [];
   if (profiles.some((row) => !clean(row.Username))) warnings.push('Some payroll profiles have no staff username and require manual review.');
   const report = { MigrationId: migrationId, Apply: apply, AlreadyApplied: Boolean(marker), PayrollProfiles: profiles.length, PayrollRuns: runs.length, PayrollItems: items.length, ComponentDefinitions: definitions.size, ExistingTaxProfiles: existingTaxProfiles.length, LegacyItemsToMark: items.filter((row) => !row.CalculationVersion).length, Warnings: warnings };
-  if (!apply || marker) return { ok: true, message: marker ? 'PAYE Phase 2 migration was already applied; no documents were changed.' : 'PAYE Phase 2 migration dry run completed; no documents were changed.', report, marker };
-  const backupReference = clean(body.BackupReference); if (!backupReference) throw configError('A verified backup reference is required before applying payroll migration.', 409, 'PAYROLL_BACKUP_REQUIRED');
+  if (marker) return { report, marker, writes: [], alreadyApplied: true };
+  const backupReference = clean(body.BackupReference); if (apply && !backupReference) throw configError('A verified backup reference is required before applying payroll migration.', 409, 'PAYROLL_BACKUP_REQUIRED');
   const writes = [];
   definitions.forEach((data, id) => writes.push({ collectionPath: PAYROLL_TAX_COLLECTIONS.components, documentId: id, data }));
   profiles.forEach((profile) => {
@@ -276,5 +274,20 @@ export async function migratePayrollTaxPhase2(env, body = {}) {
   }
   const markerData = { MigrationId: migrationId, Status: 'APPLIED', AppliedAt: now(), AppliedBy: clean(body.RecordedBy), BackupReference: backupReference, Report: report };
   writes.push({ collectionPath: PAYROLL_TAX_COLLECTIONS.migrations, documentId: migrationId, data: markerData });
-  report.DocumentsWritten = await commitChunks(env, writes); return { ok: true, message: 'PAYE Phase 2 additive migration applied. Existing payroll amounts were preserved and marked legacy.', report, marker: markerData };
+  report.DocumentsPlanned = writes.length;
+  return { report, marker: markerData, writes, alreadyApplied: false };
+}
+
+export async function migratePayrollTaxPhase2(env, body = {}) {
+  const [markers, profiles, runs, items, existingComponents, existingTaxProfiles] = await Promise.all([
+    listCollection(env, PAYROLL_TAX_COLLECTIONS.migrations).catch(() => []), listCollection(env, 'payrollProfiles').catch(() => []),
+    listCollection(env, 'payrollRuns').catch(() => []), listCollection(env, 'payrollItems').catch(() => []),
+    listCollection(env, PAYROLL_TAX_COLLECTIONS.components).catch(() => []), listCollection(env, PAYROLL_TAX_COLLECTIONS.profiles).catch(() => [])
+  ]);
+  const plan = buildPayrollTaxPhase2MigrationPlan({ markers, profiles, runs, items, existingComponents, existingTaxProfiles }, body);
+  const apply = yesNo(body.Apply ?? body.apply, 'NO') === 'YES';
+  if (plan.alreadyApplied) return { ok: true, message: 'PAYE Phase 2 migration was already applied; no documents were changed.', report: plan.report, marker: plan.marker };
+  if (!apply) return { ok: true, message: 'PAYE Phase 2 migration dry run completed; no documents were changed.', report: plan.report, marker: null };
+  plan.report.DocumentsWritten = await commitChunks(env, plan.writes);
+  return { ok: true, message: 'PAYE Phase 2 additive migration applied. Existing payroll amounts were preserved and marked legacy.', report: plan.report, marker: plan.marker };
 }
