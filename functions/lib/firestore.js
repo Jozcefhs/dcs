@@ -199,6 +199,9 @@ export async function batchUpsertDocuments(env, writes) {
   if (items.length > 500) throw new Error('A Firestore batch may contain at most 500 writes.');
   const token = await getFirestoreAccessToken(env);
   const base = firestoreBaseUrl(env);
+  // Firestore commit write names are resource names (projects/.../documents/...),
+  // not REST URLs. Supplying the full https URL triggers "lacks projects at index 0".
+  const resourceBase = base.replace(/^https:\/\/firestore\.googleapis\.com\/v1\//, '');
   const body = {
     writes: items.map((item) => {
       const collection = String(item.collectionPath || '').replace(/^\/+|\/+$/g, '');
@@ -206,7 +209,7 @@ export async function batchUpsertDocuments(env, writes) {
       if (!collection || !id) throw new Error('Every batch write requires a collection path and document ID.');
       return {
         update: {
-          name: `${base}/${collection}/${id}`,
+          name: `${resourceBase}/${collection}/${id}`,
           fields: objectToFirestoreFields(item.data || {})
         }
       };

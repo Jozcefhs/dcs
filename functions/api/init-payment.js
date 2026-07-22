@@ -122,6 +122,7 @@ export async function onRequestPost(context) {
     if (!feeData.ok) {
       return Response.json(feeData, { status: 400 });
     }
+    const payableAccount = feeData.account || {};
 
     let storeCart = [];
     let fee = (feeData.fees || []).find((item) => String(item.FeeCode || '').trim() === feeCode);
@@ -129,11 +130,12 @@ export async function onRequestPost(context) {
       const requestedCart = Array.isArray(body.storeCart) ? body.storeCart.slice(0, 25) : [];
       const catalog = await listCollection(env, 'storeItems');
       storeCart = requestedCart.map((entry) => {
-        const item = catalog.find((row) => String(row.ItemCode || '').trim() === String(entry.itemCode || '').trim() && String(row.StoreType || '').trim() === String(entry.storeType || '').trim());
+        const accountSection = String(payableAccount.SchoolSection || (/creche|nursery|primary|grade\s*[1-6]/i.test(payableAccount.ClassName || payableAccount.ClassAdmitted || '') ? 'Primary' : 'Secondary')).toLowerCase();
+        const item = catalog.find((row) => String(row.ItemCode || '').trim() === String(entry.itemCode || '').trim() && String(row.StoreType || '').trim() === String(entry.storeType || '').trim() && String(row.SchoolSection || 'Secondary').trim().toLowerCase() === accountSection && (!row.BranchId || !payableAccount.BranchId || String(row.BranchId).trim().toLowerCase() === String(payableAccount.BranchId).trim().toLowerCase()));
         if (!item || !isYes(item.Active === undefined ? 'YES' : item.Active)) throw new Error('A selected store item is no longer available.');
         const quantity = Math.max(1, Math.floor(toAmount(entry.quantity || 1)));
         if (quantity > toAmount(item.Quantity)) throw new Error(`${item.ItemName} does not have enough stock.`);
-        return { ItemCode: item.ItemCode, ItemName: item.ItemName, StoreType: item.StoreType, Size: item.Size || '', Gender: item.Gender || 'All', Quantity: quantity, UnitPrice: toAmount(item.Price), Amount: toAmount(item.Price) * quantity };
+        return { ItemCode: item.ItemCode, ItemName: item.ItemName, StoreType: item.StoreType, Size: item.Size || '', Gender: item.Gender || 'All', BranchId: item.BranchId || 'main', SchoolSection: item.SchoolSection || '', Quantity: quantity, UnitPrice: toAmount(item.Price), Amount: toAmount(item.Price) * quantity };
       });
       if (!storeCart.length) throw new Error('Choose at least one store item.');
       const cartTotal = storeCart.reduce((sum, item) => sum + item.Amount, 0);
@@ -232,7 +234,7 @@ export async function onRequestPost(context) {
       ? allocateSchoolFeePayment(fee.Components || [], amount)
       : undefined;
 
-    const account = feeData.account || {};
+    const account = payableAccount;
     const origin = new URL(request.url).origin;
     const schoolCode = await getSchoolCode(env);
     const reference = cleanReference(`${schoolCode}-${feeCode}-${account.ApplicationReference || account.AccountRef}-${Date.now()}`);

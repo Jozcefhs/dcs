@@ -75,9 +75,16 @@ function publicRows(rows) {
 }
 
 function scopedRows(rows, user, access) {
-  if (access.canViewAll) return rows;
+  const wantedSection = lower(user.schoolSectionAccess || 'All');
+  const wantedBranch = lower(user.branchId || '');
+  const schoolRows = rows.filter((row) => {
+    const rowSection = lower(row.SchoolSection || 'Secondary');
+    const rowBranch = lower(row.BranchId || 'main');
+    return (wantedSection === 'all' || rowSection === wantedSection) && (!wantedBranch || rowBranch === wantedBranch);
+  });
+  if (access.canViewAll) return schoolRows;
   const department = userDepartment(user);
-  return rows.filter((row) => same(row.Department, department));
+  return schoolRows.filter((row) => same(row.Department, department));
 }
 
 async function writeAudit(env, user, action, recordType, recordId, details = '') {
@@ -92,6 +99,8 @@ async function writeAudit(env, user, action, recordType, recordId, details = '')
     User: actor(user),
     UserRole: user.role,
     Department: userDepartment(user),
+    BranchId: clean(user.branchId) || 'main',
+    SchoolSection: clean(user.schoolSectionAccess) === 'All' ? 'Secondary' : clean(user.schoolSectionAccess || 'Secondary'),
     SourcePlatform: 'Web'
   });
 }
@@ -153,6 +162,8 @@ async function submitRequisition(env, user, body) {
     CreatedAt: nowIso(),
     UpdatedAt: nowIso(),
     SourcePlatform: 'Web'
+    ,BranchId: clean(user.branchId) || 'main'
+    ,SchoolSection: clean(user.schoolSectionAccess) === 'All' ? 'Secondary' : clean(user.schoolSectionAccess || 'Secondary')
   };
   await upsertDocument(env, 'accountingExpenses', safeId(expenseNo), payload);
   await writeAudit(env, user, 'CREATE', 'Expense Requisition', expenseNo, `${department}: ${description}`);
@@ -193,6 +204,8 @@ async function submitBill(env, user, body) {
     CreatedBy: actor(user),
     UpdatedAt: nowIso(),
     SourcePlatform: 'Web'
+    ,BranchId: clean(user.branchId) || 'main'
+    ,SchoolSection: clean(user.schoolSectionAccess) === 'All' ? 'Secondary' : clean(user.schoolSectionAccess || 'Secondary')
   };
   await upsertDocument(env, 'accountingSupplierBills', safeId(billNo), payload);
   await writeAudit(env, user, 'CREATE', 'Supplier Bill', billNo, `${department}: ${description}`);

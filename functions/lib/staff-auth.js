@@ -116,6 +116,9 @@ function publicUser(user) {
     approvalAccounts: Array.isArray(user.ApprovalAccounts || user.approvalAccounts)
       ? (user.ApprovalAccounts || user.approvalAccounts).map(clean).filter(Boolean)
       : clean(user.ApprovalAccounts || user.approvalAccounts).split(',').map(clean).filter(Boolean),
+    tabAccess: Array.isArray(user.TabAccess || user.tabAccess)
+      ? (user.TabAccess || user.tabAccess).map(clean).filter(Boolean)
+      : clean(user.TabAccess || user.tabAccess).split(',').map(clean).filter(Boolean),
     mustChangePassword: user.MustChangePassword === undefined && user.mustChangePassword === undefined
       ? false
       : !['no', 'false', '0'].includes(lower(user.MustChangePassword ?? user.mustChangePassword))
@@ -125,11 +128,13 @@ function publicUser(user) {
 export function allowedSectionsFor(user = {}) {
   const role = clean(user.role || user.Role);
   const department = lower(user.department || user.Department);
+  const custom = Array.isArray(user.tabAccess || user.TabAccess) ? (user.tabAccess || user.TabAccess).map(clean).filter(Boolean) : [];
+  if (custom.length) return [...new Set(role === 'Super Admin' ? [...custom, 'staffUsers'] : custom)];
   const roleSections = {
-    'Super Admin': ['admissions', 'formPurchases', 'students', 'accounts', 'financeRequests', 'payroll', 'clinic', 'kitchen', 'tuckShop', 'staffUsers'],
+    'Super Admin': ['admissions', 'formPurchases', 'students', 'accounts', 'financeRequests', 'payroll', 'clinic', 'kitchen', 'tuckShop', 'bookstore', 'uniformStore', 'staffUsers'],
     'Admissions Officer': ['admissions', 'formPurchases', 'students', 'financeRequests', 'payroll'],
-    'Accounts Officer': ['students', 'accounts', 'financeRequests', 'payroll', 'clinic', 'kitchen', 'tuckShop'],
-    Management: ['admissions', 'formPurchases', 'students', 'accounts', 'financeRequests', 'payroll', 'clinic', 'kitchen', 'tuckShop'],
+    'Accounts Officer': ['students', 'accounts', 'financeRequests', 'payroll', 'clinic', 'kitchen', 'tuckShop', 'bookstore', 'uniformStore'],
+    Management: ['admissions', 'formPurchases', 'students', 'accounts', 'financeRequests', 'payroll', 'clinic', 'kitchen', 'tuckShop', 'bookstore', 'uniformStore'],
     'Tuck Shop User': ['tuckShop', 'financeRequests', 'payroll'],
     'Clinic User': ['clinic', 'financeRequests', 'payroll'],
     'Kitchen User': ['kitchen', 'financeRequests', 'payroll'],

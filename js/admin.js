@@ -40,6 +40,8 @@ const tabConfig = [
   ['clinic', 'Clinic'],
   ['kitchen', 'Kitchen'],
   ['tuckShop', 'Tuck Shop'],
+  ['bookstore', 'Bookstore'],
+  ['uniformStore', 'Uniform Store'],
   ['staffUsers', 'Staff & Permissions']
 ];
 
@@ -272,6 +274,45 @@ function inventoryColumns() {
   ];
 }
 
+function renderStaffStore(section, store) {
+  const label = section === 'bookstore' ? 'Bookstore' : 'Uniform Store';
+  panelEl.innerHTML = `
+    <div class="workflow-intro"><div><p class="eyebrow">School store</p><h2>${label}</h2><p class="muted">List items and prices, monitor paid orders, and record collection.</p></div></div>
+    <form id="staffStoreItemForm" class="workflow-form workflow-form-grid">
+      <label>Item code<input name="ItemCode" required></label><label>Item name<input name="ItemName" required></label>
+      <label>Category<input name="Category"></label><label>Size<input name="Size"></label>
+      <label>Gender<select name="Gender"><option>All</option><option>Male</option><option>Female</option></select></label><label>Class<input name="ClassName" value="All"></label>
+      <label>Price<input name="Price" type="number" min="0" step="0.01" required></label><label>Stock quantity<input name="Quantity" type="number" min="0" step="1" required></label>
+      <label class="check-row"><input name="Active" type="checkbox" checked> Available to parents</label><button type="submit">Save Item</button><p class="status" data-store-status></p>
+    </form>
+    ${table(`${label} Items`, store.items || [], [
+      { label: 'Code', value: (row) => pick(row, ['ItemCode', '__id']) }, { label: 'Item', value: (row) => pick(row, ['ItemName']) },
+      { label: 'Category / Size', value: (row) => [pick(row, ['Category']), pick(row, ['Size'])].filter(Boolean).join(' / ') },
+      { label: 'Price', value: (row) => money(pick(row, ['Price'])) }, { label: 'Stock', value: (row) => pick(row, ['Quantity']) }
+    ])}
+    <h2>Paid Orders & Collection</h2><div class="workflow-record-list">${(store.orders || []).length ? (store.orders || []).map((order) => `
+      <article class="workflow-record"><div class="workflow-record-heading"><div><strong>${escapeHtml(order.DisplayName || order.AccountRef)}</strong><small>${escapeHtml(order.OrderNo)}</small></div><span class="workflow-status">${escapeHtml(order.Status || 'Paid - Awaiting Collection')}</span></div>
+      <p>${money(order.Amount)} â€¢ ${escapeHtml(order.PaidAt || order.CreatedAt || '')}</p>
+      <div class="workflow-actions"><button type="button" data-store-order="${escapeHtml(order.OrderNo)}" data-store-status="Ready for Collection">Ready for Collection</button><button type="button" data-store-order="${escapeHtml(order.OrderNo)}" data-store-status="Collected">Mark Collected</button></div></article>
+    `).join('') : '<p class="muted">No paid orders yet.</p>'}</div>`;
+  document.getElementById('staffStoreItemForm')?.addEventListener('submit', async (event) => {
+    event.preventDefault(); const form = event.currentTarget; const status = form.querySelector('[data-store-status]');
+    const payload = Object.fromEntries(new FormData(form).entries()); payload.Active = form.elements.Active.checked;
+    try {
+      const response = await fetch('/api/staff-stores', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'saveItem', section, ...payload }) });
+      const data = await response.json(); if (!response.ok || !data.ok) throw new Error(data.message || 'Could not save store item.');
+      setStatus(status, data.message, 'ok'); await loadDashboard();
+    } catch (error) { setStatus(status, error.message || String(error), 'bad'); }
+  });
+  panelEl.querySelectorAll('[data-store-order]').forEach((button) => button.addEventListener('click', async () => {
+    button.disabled = true;
+    try {
+      const response = await fetch('/api/staff-stores', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'updateOrder', section, OrderNo: button.dataset.storeOrder, Status: button.dataset.storeStatus }) });
+      const data = await response.json(); if (!response.ok || !data.ok) throw new Error(data.message || 'Could not update order.'); await loadDashboard();
+    } catch (error) { setStatus(dashboardStatus, error.message || String(error), 'bad'); button.disabled = false; }
+  }));
+}
+
 function renderSection(active) {
   if (!dashboardData) return;
   const departments = dashboardData.departments || {};
@@ -309,6 +350,9 @@ function renderSection(active) {
       { label: 'Type', value: (row) => pick(row, ['StudentType']) },
       { label: 'Status', value: (row) => pick(row, ['Status']) }
     ]);
+  } else if (active === 'bookstore' || active === 'uniformStore') {
+    const store = departments[active] || {};
+    renderStaffStore(active, store);
   } else if (active === 'accounts') {
     const accounts = departments.accounts || {};
     panelEl.innerHTML = table('Payments', accounts.payments || [], [
@@ -673,6 +717,7 @@ function renderStaffUsers() {
         <label class="check-row"><input name="ApprovalEnabled" type="checkbox"> Administrator grants finance approval right</label>
         <label>Maximum approval amount<input name="ApprovalMaxAmount" type="number" min="0" step="0.01" value="0"><small>Zero blocks approval. Super Admin is unrestricted.</small></label>
         <fieldset class="approval-account-list"><legend>Accounts this user may approve directly from</legend>${staffApprovalAccounts.length ? staffApprovalAccounts.map((account) => `<label class="check-row"><input type="checkbox" name="ApprovalAccountOption" value="${escapeHtml(account.Code)}"> ${escapeHtml(account.Code)} - ${escapeHtml(account.Name || '')}</label>`).join('') : '<small>Create active Chart of Accounts entries in the desktop Finance tab first.</small>'}</fieldset>
+        <fieldset class="approval-account-list"><legend>Web companion tabs (leave all clear to use role defaults)</legend>${tabConfig.map(([key, label]) => `<label class="check-row"><input type="checkbox" name="TabAccessOption" value="${escapeHtml(key)}"> ${escapeHtml(label)}</label>`).join('')}</fieldset>
         <label>New or reset password<input name="Password" type="password" minlength="6" autocomplete="new-password"><small>Required for a new account. Leave blank when editing unless resetting it.</small></label>
         <label class="check-row"><input name="Active" type="checkbox" checked> Account active</label>
         <label class="check-row"><input name="MustChangePassword" type="checkbox" checked> Require password change at next sign-in</label>
@@ -702,6 +747,8 @@ function openStaffUserDialog(username = '') {
     form.elements.ApprovalMaxAmount.value = user.ApprovalMaxAmount || 0;
     const allowedAccounts = new Set(user.ApprovalAccounts || []);
     form.querySelectorAll('[name="ApprovalAccountOption"]').forEach((input) => { input.checked = allowedAccounts.has(input.value); });
+    const allowedTabs = new Set(user.TabAccess || []);
+    form.querySelectorAll('[name="TabAccessOption"]').forEach((input) => { input.checked = allowedTabs.has(input.value); });
     form.elements.Active.checked = yes(user.Active);
     form.elements.MustChangePassword.checked = yes(user.MustChangePassword);
   } else {
@@ -744,6 +791,7 @@ function bindStaffUserEvents() {
     payload.MustChangePassword = form.elements.MustChangePassword.checked;
     payload.ApprovalEnabled = form.elements.ApprovalEnabled.checked;
     payload.ApprovalAccounts = Array.from(form.querySelectorAll('[name="ApprovalAccountOption"]:checked')).map((input) => input.value);
+    payload.TabAccess = Array.from(form.querySelectorAll('[name="TabAccessOption"]:checked')).map((input) => input.value);
     setButtonLoading(button, true, 'Saving...', 'Save Staff Account');
     try {
       const data = await staffUserRequest('save', payload);
@@ -776,7 +824,7 @@ function parseCsv(text) {
 }
 
 function downloadStaffCsvTemplate() {
-  const content = 'Username,DisplayName,Role,Department,BranchId,SchoolSectionAccess,Password,Active,MustChangePassword,ApprovalEnabled,ApprovalMaxAmount,ApprovalAccounts\nexample.user,Example User,Front Desk,Administration,main,All,ChangeMe123,YES,YES,NO,0,"6010,6090"\n';
+  const content = 'Username,DisplayName,Role,Department,BranchId,SchoolSectionAccess,Password,Active,MustChangePassword,ApprovalEnabled,ApprovalMaxAmount,ApprovalAccounts,TabAccess\nexample.user,Example User,Front Desk,Administration,main,All,ChangeMe123,YES,YES,NO,0,"6010,6090","admissions,students"\n';
   const url = URL.createObjectURL(new Blob([content], { type: 'text/csv' }));
   const link = document.createElement('a'); link.href = url; link.download = 'staff_upload_template.csv'; link.click(); URL.revokeObjectURL(url);
 }

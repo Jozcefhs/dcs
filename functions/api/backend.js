@@ -195,6 +195,25 @@ async function saveStudent(env, student) {
   return normalizeStudent(saved);
 }
 
+async function updateStudentProfile(env, body) {
+  const accountRef = clean(body.AccountRef || body.AdmissionNo || body.accountRef);
+  const existing = await findStudentByAccountRef(env, accountRef);
+  if (!existing) throw applicationNotFound(accountRef);
+  const editableFields = [
+    'DisplayName', 'Gender', 'DateOfBirth', 'ClassName', 'ClassArm', 'StudentType',
+    'BillingCategory', 'EnrollmentCategory', 'AcademicProgress', 'AcademicSession',
+    'Term', 'ParentName', 'ParentPhone', 'ParentEmail', 'Status'
+  ];
+  const updated = { ...existing };
+  editableFields.forEach((field) => {
+    if (body[field] !== undefined) updated[field] = clean(body[field]);
+  });
+  updated.UpdatedAt = nowIso();
+  updated.UpdatedBy = clean(body.UpdatedBy || body.RecordedBy) || 'Student Register';
+  const student = await saveStudent(env, updated);
+  return { ok: true, message: 'Student profile updated.', student };
+}
+
 function normalizeApplication(row, profile = {}) {
   const parent = row.parent && typeof row.parent === 'object' ? row.parent : {};
   const applicantName = formatPersonName(row, profile, pick(row, ['applicantName', 'ApplicantName', 'displayName', 'DisplayName']));
@@ -547,8 +566,13 @@ function feeMatchesApplication(fee, app) {
     feeFieldMatches(fee.Gender || 'All', appGender) &&
     feeFieldMatches(fee.EnrollmentCategory || 'All', enrollmentCategory, true) &&
     feeFieldMatches(fee.AcademicProgress || 'All', academicProgress, true) &&
-    feeFieldMatches(fee.AcademicSession, appSession, true) &&
-    feeFieldMatches(fee.Term, appTerm, true);
+    feeFieldMatches(fee.AcademicSession, appSession) &&
+    feeFieldMatches(fee.Term, appTerm);
+}
+
+function isNewIntakeApplication(app = {}) {
+  const value = normalizeMatchText(app.EnrollmentCategory || app.IntakeCategory || '');
+  return ['new intake', 'new', 'newly admitted', 'new admission'].includes(value);
 }
 
 function termRank(value) {
@@ -573,13 +597,10 @@ function feeMatchesAccountPeriod(fee, app) {
   if (!feeFieldMatches(fee.Gender || 'All', app.Gender || '')) return false;
   if (!feeFieldMatches(fee.EnrollmentCategory || 'All', app.EnrollmentCategory || 'Returning', true)) return false;
   if (!feeFieldMatches(fee.AcademicProgress || 'All', app.AcademicProgress || 'Promoted', true)) return false;
-  if (!feeFieldMatches(fee.AcademicSession, appSession, true)) return false;
+  if (!feeFieldMatches(fee.AcademicSession, appSession)) return false;
   const feeTerm = normalizeMatchText(fee.Term || 'All');
   if (!feeTerm || feeTerm === 'all' || feeTerm === '*') return true;
-  const feeTermRank = termRank(fee.Term);
-  const appTermRank = termRank(appTerm);
-  if (feeTermRank && appTermRank) return feeTermRank <= appTermRank;
-  return feeFieldMatches(fee.Term, appTerm, true);
+  return feeFieldMatches(fee.Term, appTerm);
 }
 
 function feeBillingSpecificity(fee, app) {
@@ -973,9 +994,16 @@ export async function getPayableFees(env, body = {}) {
     if (student.Term) billingApp.Term = student.Term;
     if (student.StudentType) billingApp.StudentType = student.StudentType;
     if (student.BillingCategory) billingApp.BillingCategory = student.BillingCategory;
+    if (student.Gender) billingApp.Gender = student.Gender;
+    if (student.EnrollmentCategory) billingApp.EnrollmentCategory = student.EnrollmentCategory;
+    if (student.AcademicProgress) billingApp.AcademicProgress = student.AcademicProgress;
     if (student.AdmissionNo) billingApp.AdmissionNo = student.AdmissionNo;
     if (student.DisplayName || student.ApplicantName) billingApp.ApplicantName = student.DisplayName || student.ApplicantName;
   }
+  const profileResult = await getSchoolProfile(env).catch(() => ({ profile: {} }));
+  const activeProfile = profileResult.profile || {};
+  if (!clean(billingApp.AcademicSession)) billingApp.AcademicSession = clean(activeProfile.CurrentAcademicSession);
+  if (!clean(billingApp.Term)) billingApp.Term = clean(activeProfile.CurrentTerm) || 'First Term';
 
   const accountRefs = new Set([
     accountRef,
@@ -1054,7 +1082,7 @@ export async function getPayableFees(env, body = {}) {
     if (!feeMatchesApplication(fee, billingApp)) return false;
     if (isAcceptanceFee) {
       if (acceptanceAlreadyPaid) return false;
-      return admittedForPreEnrollment && yesNo(app.OfferSent) === 'YES';
+      return admittedForPreEnrollment && isNewIntakeApplication(billingApp);
     }
     if (!enrolledForBilling) {
       if (!admittedForPreEnrollment || yesNo(app.OfferSent) !== 'YES') return false;
@@ -1328,8 +1356,8 @@ export async function getAccountsOverview(env) {
       Gender: clean(existing.Gender || normalized.Gender),
       EnrollmentCategory: clean(existing.EnrollmentCategory || normalized.EnrollmentCategory) || 'Returning',
       AcademicProgress: clean(existing.AcademicProgress || normalized.AcademicProgress) || 'Promoted',
-      AcademicSession: clean(existing.AcademicSession || normalized.AcademicSession),
-      Term: clean(existing.Term || normalized.Term),
+      AcademicSession: clean(existing.AcademicSession || normalized.AcademicSession || schoolProfile.CurrentAcademicSession),
+      Term: clean(existing.Term || normalized.Term || schoolProfile.CurrentTerm) || 'First Term',
       Status: clean(existing.Status || normalized.Status),
       ResultStatus: clean(existing.ResultStatus || normalized.ResultStatus),
       OfferSent: clean(existing.OfferSent || normalized.OfferSent),
@@ -1372,6 +1400,9 @@ export async function getAccountsOverview(env) {
     ClassName: app.ClassApplyingFor || app.ClassAdmitted,
     StudentType: app.StudentType,
     BillingCategory: app.BillingCategory || 'Regular',
+    Gender: app.Gender,
+    EnrollmentCategory: app.EnrollmentCategory,
+    AcademicProgress: app.AcademicProgress,
     AcademicSession: app.AcademicSession,
     Term: app.Term,
     Status: app.Status,
@@ -1398,8 +1429,11 @@ export async function getAccountsOverview(env) {
       AccountRef: row.AccountRef,
       Date: row.Date,
       EntryType: 'Invoice',
+      FeeCode: row.FeeCode,
       FeeCategory: row.FeeCategory,
       Description: row.FeeName,
+      AcademicSession: row.AcademicSession,
+      Term: row.Term,
       Debit: row.Debit,
       Credit: 0,
       Reference: row.InvoiceId,
@@ -1428,6 +1462,8 @@ export async function getAccountsOverview(env) {
         .filter(Boolean)
         .sort((a, b) => b - a)[0] || 0;
       if (accountCreatedAt && timestampMs(row.RawDate || row.Date) && timestampMs(row.RawDate || row.Date) < accountCreatedAt) return;
+      if (clean(row.AcademicSession) && clean(account.AcademicSession) && !feeFieldMatches(row.AcademicSession, account.AcademicSession)) return;
+      if (clean(row.Term) && clean(account.Term) && !feeFieldMatches(row.Term, account.Term)) return;
       const debit = asMoneyNumber(row.Debit);
       const credit = asMoneyNumber(row.Credit);
       if (isWalletLedger(row)) {
@@ -1457,8 +1493,8 @@ export async function getAccountsOverview(env) {
     const resultStatus = normalizeMatchText(account.ResultStatus || '');
     const isEnrolled = yesNo(account.Enrolled) === 'YES' || accountStatus === 'enrolled';
     const isAdmitted = resultStatus === 'admitted' || ['admitted', 'accepted', 'admission letter sent'].includes(accountStatus);
-    const offerSent = yesNo(account.OfferSent) === 'YES';
-    if (isEnrolled || (isAdmitted && offerSent)) {
+    const newIntake = isNewIntakeApplication(account);
+    if (isEnrolled || (isAdmitted && newIntake)) {
       const matchingExpectedFees = normalizedFeeItems
         .filter((fee) => yesNo(fee.Active) === 'YES')
         .filter((fee) => yesNo(fee.PayableOnline || 'YES') === 'YES')
@@ -1470,7 +1506,7 @@ export async function getAccountsOverview(env) {
           if (isEnrolled) {
             return !isAcceptanceFeeLike(fee);
           }
-          return category === 'admission' || requiredForEnrollment;
+          return newIntake && (category === 'admission' || requiredForEnrollment);
         })
         .filter((fee) => feeMatchesAccountPeriod(fee, account));
       const expectedFeeDebit = asMoneyNumber(matchingExpectedFees.reduce((sum, fee) => sum + asMoneyNumber(fee.Amount), 0));
@@ -1478,7 +1514,9 @@ export async function getAccountsOverview(env) {
         totalDebit = expectedFeeDebit;
       }
     }
-    const netBalance = asMoneyNumber(totalDebit + accountCreditDebit - totalCredit);
+    // Account-credit allocation rows are already included in totalDebit above.
+    // Adding accountCreditDebit again doubled balances on the dashboard.
+    const netBalance = asMoneyNumber(totalDebit - totalCredit);
     return {
       ...account,
       TotalDebit: totalDebit,
@@ -1505,10 +1543,21 @@ export async function getAccountsOverview(env) {
 
 async function saveBillingCategory(env, body) {
   const name = clean(body.Name || body.BillingCategory || body.name);
+  const originalName = clean(body.OriginalName || body.originalName);
   if (!name || sameText(name, 'All')) { const err = new Error('Enter a billing category name other than All.'); err.status = 400; throw err; }
   const payload = { Name: name, Active: yesNo(body.Active ?? 'YES') || 'YES', UpdatedAt: nowIso() };
   await upsertDocument(env, 'billingCategories', safeDocumentId(name), payload);
-  return { ok: true, message: 'Billing category saved.', category: payload };
+  if (originalName && !sameText(originalName, name)) {
+    await deleteDocument(env, 'billingCategories', safeDocumentId(originalName));
+  }
+  return { ok: true, message: originalName && !sameText(originalName, name) ? 'Billing category renamed.' : 'Billing category saved.', category: payload };
+}
+
+async function deleteBillingCategory(env, body) {
+  const name = clean(body.Name || body.BillingCategory || body.name);
+  if (!name || sameText(name, 'All')) { const err = new Error('Select a billing category to delete.'); err.status = 400; throw err; }
+  await deleteDocument(env, 'billingCategories', safeDocumentId(name));
+  return { ok: true, message: 'Billing category deleted.' };
 }
 
 async function getStoreOverview(env, body) {
@@ -1630,6 +1679,9 @@ async function saveSchoolProfile(env, body) {
     PortalHeadline: clean(body.PortalHeadline || body.portalHeadline) || 'Admissions and parent services in one place',
     PortalSubheading: clean(body.PortalSubheading || body.portalSubheading) || 'Buy forms, complete applications, upload documents, pay fees, and monitor student activity from a secure school portal.',
     PortalNotice: clean(body.PortalNotice || body.portalNotice),
+    CurrentAcademicSession: clean(body.CurrentAcademicSession || body.currentAcademicSession),
+    CurrentTerm: clean(body.CurrentTerm || body.currentTerm) || 'First Term',
+    DeclarationStatement: clean(body.DeclarationStatement || body.declarationStatement) || 'I declare that the information supplied in this application is complete and correct.',
     ResultDisplayMode: clean(body.ResultDisplayMode || body.resultDisplayMode) || 'subjects',
     ShowResultsOnline: yesNo(body.ShowResultsOnline ?? body.showResultsOnline ?? 'NO') || 'NO',
     UpdatedAt: nowIso(),
@@ -1683,6 +1735,9 @@ async function getSchoolProfile(env) {
       PortalHeadline: 'Admissions and parent services in one place',
       PortalSubheading: 'Buy forms, complete applications, upload documents, pay fees, and monitor student activity from a secure school portal.',
       PortalNotice: '',
+      CurrentAcademicSession: '',
+      CurrentTerm: 'First Term',
+      DeclarationStatement: 'I declare that the information supplied in this application is complete and correct.',
       ResultDisplayMode: 'subjects',
       ShowResultsOnline: 'NO'
     }),
@@ -2372,6 +2427,9 @@ export async function recordManualPayment(env, body) {
     FeeName: clean(body.FeeName || fee.FeeName || feeCode),
     FeeCategory: clean(body.FeeCategory || fee.FeeCategory),
     Amount: amount,
+    GrossAmount: asMoneyNumber(body.GrossAmount || amount),
+    GatewayFee: asMoneyNumber(body.GatewayFee),
+    NetAmount: asMoneyNumber(body.NetAmount || amount),
     Currency: clean(body.Currency || fee.Currency) || 'NGN',
     Method: clean(body.Method) || 'Manual',
     Gateway: clean(body.Gateway) || 'Manual',
@@ -2451,12 +2509,14 @@ async function generateSchoolFeeInvoices(env, body) {
   }
   const student = await findStudentByAccountRef(env, accountRef);
   if (!student) throw applicationNotFound(accountRef);
+  const profileResult = await getSchoolProfile(env).catch(() => ({ profile: {} }));
+  const activeProfile = profileResult.profile || {};
   const billingApp = {
     ...student,
     ClassApplyingFor: student.ClassName,
     ClassAdmitted: student.ClassName,
-    AcademicSession: student.AcademicSession,
-    Term: student.Term,
+    AcademicSession: student.AcademicSession || activeProfile.CurrentAcademicSession,
+    Term: student.Term || activeProfile.CurrentTerm || 'First Term',
     BillingCategory: student.BillingCategory || 'Regular'
   };
   const fees = applyBillingCategoryOverrides((await listCollection(env, 'feeItems')).map(normalizeFeeItem).filter((fee) => {
@@ -4374,6 +4434,8 @@ async function routeAction(env, action, body = {}) {
         message: 'Students loaded from Firestore.',
         students: (await listSchoolCollection(env, 'students')).map(normalizeStudent)
       };
+    case 'updateStudentProfile':
+      return updateStudentProfile(env, body);
     case 'getAdmissionClasses':
       return getAdmissionClasses(env);
     case 'saveAdmissionClasses':
@@ -4386,6 +4448,8 @@ async function routeAction(env, action, body = {}) {
       return saveFeeItem(env, body);
     case 'saveBillingCategory':
       return saveBillingCategory(env, body);
+    case 'deleteBillingCategory':
+      return deleteBillingCategory(env, body);
     case 'getStoreOverview':
       return getStoreOverview(env, body);
     case 'saveStoreItem':

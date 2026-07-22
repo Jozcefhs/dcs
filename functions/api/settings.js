@@ -46,6 +46,9 @@ function defaultProfile(env) {
     WebLogoConfigured: false,
     ResultDisplayMode: clean(env.RESULT_DISPLAY_MODE) || 'subjects',
     ShowResultsOnline: clean(env.SHOW_RESULTS_ONLINE) || 'NO',
+    CurrentAcademicSession: clean(env.CURRENT_ACADEMIC_SESSION) || '',
+    CurrentTerm: clean(env.CURRENT_TERM) || 'First Term',
+    DeclarationStatement: clean(env.DECLARATION_STATEMENT) || 'I declare that the information supplied in this application is complete and correct.',
     ProductKeyMode: clean(env.PRODUCT_KEY_MODE) || 'off',
     UpdatedAt: ''
   };
@@ -112,6 +115,9 @@ export async function onRequestPost(context) {
       PortalNotice: clean(incoming.PortalNotice),
       ResultDisplayMode: ['subjects', 'percentage'].includes(clean(incoming.ResultDisplayMode)) ? clean(incoming.ResultDisplayMode) : 'subjects',
       ShowResultsOnline: ['YES', 'NO'].includes(clean(incoming.ShowResultsOnline).toUpperCase()) ? clean(incoming.ShowResultsOnline).toUpperCase() : 'NO',
+      CurrentAcademicSession: clean(incoming.CurrentAcademicSession),
+      CurrentTerm: clean(incoming.CurrentTerm) || 'First Term',
+      DeclarationStatement: clean(incoming.DeclarationStatement) || 'I declare that the information supplied in this application is complete and correct.',
       ProductKeyMode: ['off', 'required'].includes(clean(incoming.ProductKeyMode)) ? clean(incoming.ProductKeyMode) : 'off',
       UpdatedAt: new Date().toISOString()
     };

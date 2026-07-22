@@ -1,7 +1,7 @@
 import { getAccountsOverview } from './backend.js';
 import { listCollection, requireFirestoreEnv } from '../lib/firestore.js';
 import { requireStaffSession } from '../lib/staff-auth.js';
-import { listSchoolCollection } from '../lib/school-scope.js';
+import { listSchoolCollection, schoolSectionFor } from '../lib/school-scope.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -89,6 +89,8 @@ export async function onRequestPost(context) {
       kitchenInventory,
       clinicMovements,
       kitchenMovements
+      ,storeItems
+      ,storeOrders
     ] = await Promise.all([
       allowed.has('admissions') ? listSchoolCollection(env, 'applications') : Promise.resolve([]),
       allowed.has('students') ? listSchoolCollection(env, 'students') : Promise.resolve([]),
@@ -100,7 +102,9 @@ export async function onRequestPost(context) {
       allowed.has('clinic') ? listCollection(env, 'clinicInventory') : Promise.resolve([]),
       allowed.has('kitchen') ? listCollection(env, 'kitchenInventory') : Promise.resolve([]),
       allowed.has('clinic') ? listCollection(env, 'clinicMovements') : Promise.resolve([]),
-      allowed.has('kitchen') ? listCollection(env, 'kitchenMovements') : Promise.resolve([])
+      allowed.has('kitchen') ? listCollection(env, 'kitchenMovements') : Promise.resolve([]),
+      (allowed.has('bookstore') || allowed.has('uniformStore')) ? listCollection(env, 'storeItems') : Promise.resolve([]),
+      (allowed.has('bookstore') || allowed.has('uniformStore')) ? listCollection(env, 'storeOrders') : Promise.resolve([])
     ]);
 
     let accountOverview = null;
@@ -113,39 +117,62 @@ export async function onRequestPost(context) {
     }
     const displayInvoices = reconcileInvoiceDisplay(invoices, accountOverview && accountOverview.ok ? accountOverview.accounts : []);
     const staffScope = (rows) => rows.filter((row) => {
-      const branchAllowed = !clean(user.branchId) || !clean(row.BranchId) || clean(row.BranchId).toLowerCase() === clean(user.branchId).toLowerCase();
+      const rowBranch = clean(row.BranchId || 'main').toLowerCase();
+      const branchAllowed = !clean(user.branchId) || rowBranch === clean(user.branchId).toLowerCase();
       const sectionAccess = clean(user.schoolSectionAccess || 'All').toLowerCase();
-      const sectionAllowed = sectionAccess === 'all' || !clean(row.SchoolSection) || clean(row.SchoolSection).toLowerCase() === sectionAccess;
-      return user.role === 'Super Admin' || (branchAllowed && sectionAllowed);
+      // Legacy untagged records are inferred from class; records with no class are
+      // treated as Secondary so switching to Primary presents a separate school.
+      const rowSection = schoolSectionFor(row);
+      const sectionAllowed = sectionAccess === 'all' || rowSection === sectionAccess;
+      return branchAllowed && sectionAllowed;
     });
     const visibleApplications = staffScope(applications);
     const visibleStudents = staffScope(students);
-    const walletPurchases = ledger.filter((row) => clean(row.EntryType).toLowerCase() === 'wallet purchase');
-    const lowClinic = clinicInventory.filter((row) => toNumber(row.ReorderLevel) > 0 && toNumber(row.Quantity) <= toNumber(row.ReorderLevel));
-    const lowKitchen = kitchenInventory.filter((row) => toNumber(row.ReorderLevel) > 0 && toNumber(row.Quantity) <= toNumber(row.ReorderLevel));
+    const visibleFormSales = staffScope(formSales);
+    const visibleClinicRecords = staffScope(clinicRecords);
+    const visibleClinicMovements = staffScope(clinicMovements);
+    const visibleKitchenMovements = staffScope(kitchenMovements);
+    const visiblePayments = staffScope(payments);
+    const visibleInvoices = staffScope(displayInvoices);
+    const visibleLedger = staffScope(ledger);
+    const visibleStoreItems = staffScope(storeItems);
+    const visibleStoreOrders = staffScope(storeOrders);
+    const visibleClinicInventory = staffScope(clinicInventory);
+    const visibleKitchenInventory = staffScope(kitchenInventory);
+    const walletPurchases = visibleLedger.filter((row) => clean(row.EntryType).toLowerCase() === 'wallet purchase');
+    const lowClinic = visibleClinicInventory.filter((row) => toNumber(row.ReorderLevel) > 0 && toNumber(row.Quantity) <= toNumber(row.ReorderLevel));
+    const lowKitchen = visibleKitchenInventory.filter((row) => toNumber(row.ReorderLevel) > 0 && toNumber(row.Quantity) <= toNumber(row.ReorderLevel));
 
     const allDepartments = {
       admissions: publicRows(sortRecent(visibleApplications, ['SubmittedAt', 'UpdatedAt', 'Timestamp']), 80),
       students: publicRows(sortRecent(visibleStudents, ['UpdatedAt', 'EnrolledAt', 'CreatedAt']), 80),
-      formPurchases: publicRows(sortRecent(formSales, ['PaymentDate', 'UpdatedAt', 'CreatedAt']), 80),
+      formPurchases: publicRows(sortRecent(visibleFormSales, ['PaymentDate', 'UpdatedAt', 'CreatedAt']), 80),
       accounts: {
-        payments: publicRows(sortRecent(payments, ['PaidAt', 'Date', 'RecordedAt']), 80),
-        invoices: publicRows(sortRecent(displayInvoices, ['Date', 'CreatedAt', 'DueDate']), 80),
-        ledger: publicRows(sortRecent(ledger, ['Date', 'CreatedAt']), 100)
+        payments: publicRows(sortRecent(visiblePayments, ['PaidAt', 'Date', 'RecordedAt']), 80),
+        invoices: publicRows(sortRecent(visibleInvoices, ['Date', 'CreatedAt', 'DueDate']), 80),
+        ledger: publicRows(sortRecent(visibleLedger, ['Date', 'CreatedAt']), 100)
       },
       clinic: {
-        records: publicRows(sortRecent(clinicRecords, ['Date', 'CreatedAt']), 80),
-        inventory: publicRows(sortRecent(clinicInventory, ['LastUpdated', 'UpdatedAt']), 80),
+        records: publicRows(sortRecent(visibleClinicRecords, ['Date', 'CreatedAt']), 80),
+        inventory: publicRows(sortRecent(visibleClinicInventory, ['LastUpdated', 'UpdatedAt']), 80),
         lowStock: publicRows(lowClinic, 80),
-        movements: publicRows(sortRecent(clinicMovements, ['Date', 'CreatedAt']), 80)
+        movements: publicRows(sortRecent(visibleClinicMovements, ['Date', 'CreatedAt']), 80)
       },
       kitchen: {
-        inventory: publicRows(sortRecent(kitchenInventory, ['LastUpdated', 'UpdatedAt']), 80),
+        inventory: publicRows(sortRecent(visibleKitchenInventory, ['LastUpdated', 'UpdatedAt']), 80),
         lowStock: publicRows(lowKitchen, 80),
-        movements: publicRows(sortRecent(kitchenMovements, ['Date', 'CreatedAt']), 80)
+        movements: publicRows(sortRecent(visibleKitchenMovements, ['Date', 'CreatedAt']), 80)
       },
       tuckShop: {
         purchases: publicRows(sortRecent(walletPurchases, ['Date', 'CreatedAt']), 100)
+      },
+      bookstore: {
+        items: publicRows(visibleStoreItems.filter((row) => clean(row.StoreType) === 'Bookstore'), 200),
+        orders: publicRows(sortRecent(visibleStoreOrders.filter((row) => clean(row.StoreType) === 'Bookstore'), ['PaidAt', 'CreatedAt']), 200)
+      },
+      uniformStore: {
+        items: publicRows(visibleStoreItems.filter((row) => clean(row.StoreType) === 'Uniform Store'), 200),
+        orders: publicRows(sortRecent(visibleStoreOrders.filter((row) => clean(row.StoreType) === 'Uniform Store'), ['PaidAt', 'CreatedAt']), 200)
       }
     };
     const departments = Object.fromEntries(Object.entries(allDepartments).filter(([key]) => allowed.has(key)));
@@ -156,18 +183,18 @@ export async function onRequestPost(context) {
       summary.boardingStudents = visibleStudents.filter(isBoardingStudent).length;
       summary.dayStudents = visibleStudents.length - summary.boardingStudents;
     }
-    if (allowed.has('formPurchases')) summary.formPurchases = formSales.length;
+    if (allowed.has('formPurchases')) summary.formPurchases = visibleFormSales.length;
     if (allowed.has('accounts')) {
-      summary.payments = payments.length;
-      summary.invoices = invoices.length;
+      summary.payments = visiblePayments.length;
+      summary.invoices = visibleInvoices.length;
     }
     if (allowed.has('clinic')) {
-      summary.clinicRecords = clinicRecords.length;
-      summary.clinicInventory = clinicInventory.length;
+      summary.clinicRecords = visibleClinicRecords.length;
+      summary.clinicInventory = visibleClinicInventory.length;
       summary.lowClinicStock = lowClinic.length;
     }
     if (allowed.has('kitchen')) {
-      summary.kitchenInventory = kitchenInventory.length;
+      summary.kitchenInventory = visibleKitchenInventory.length;
       summary.lowKitchenStock = lowKitchen.length;
     }
     if (allowed.has('tuckShop')) summary.tuckShopPurchases = walletPurchases.length;
@@ -175,7 +202,7 @@ export async function onRequestPost(context) {
     const countBy = (rows, getter) => Object.entries(rows.reduce((out, row) => {
       const key = clean(getter(row)) || 'Unspecified'; out[key] = (out[key] || 0) + 1; return out;
     }, {})).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
-    const accountRows = accountOverview && accountOverview.ok ? accountOverview.accounts || [] : [];
+    const accountRows = accountOverview && accountOverview.ok ? staffScope(accountOverview.accounts || []) : [];
     const classBalances = Object.entries(accountRows.reduce((out, row) => {
       const key = clean(row.ClassName) || 'Unspecified'; out[key] = (out[key] || 0) + Math.max(0, toNumber(row.OutstandingBalance ?? row.Balance)); return out;
     }, {})).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);

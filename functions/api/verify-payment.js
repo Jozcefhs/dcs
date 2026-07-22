@@ -56,6 +56,8 @@ export async function onRequestPost(context) {
     const tx = paystackData.data;
     const meta = extractMetadata(tx);
     const amount = Number(tx.amount || 0) / 100;
+    const gatewayFee = Math.max(0, Number(tx.fees || 0) / 100);
+    const netAmount = Math.max(0, amount - gatewayFee);
     const paymentPayload = {
       Secret: env.GOOGLE_APPS_SCRIPT_SECRET,
       Action: 'recordOnlinePayment',
@@ -73,6 +75,9 @@ export async function onRequestPost(context) {
       PaymentType: meta.paymentType || '',
       FeeItems: meta.feeItems ? JSON.stringify(meta.feeItems) : '',
       Amount: amount,
+      GrossAmount: amount,
+      GatewayFee: gatewayFee,
+      NetAmount: netAmount,
       Currency: tx.currency || 'NGN',
       Gateway: 'Paystack',
       Method: 'Online',
@@ -124,6 +129,23 @@ export async function onRequestPost(context) {
     }
 
     if (firestoreConfigured) {
+      if (gatewayFee > 0) {
+        const feeId = safeId(`PAYSTACK-FEE-${tx.reference}`);
+        await upsertDocument(env, 'accountingExpenses', feeId, {
+          ExpenseNo: feeId,
+          Date: tx.paid_at || new Date().toISOString(),
+          Description: `Paystack transaction charge - ${tx.reference}`,
+          Amount: gatewayFee,
+          GrossCollection: amount,
+          NetSettlement: netAmount,
+          ExpenseAccount: 'Payment Processing Charges',
+          PaymentAccount: 'Paystack Settlement',
+          Status: 'Posted',
+          Reference: tx.reference,
+          Source: 'Paystack',
+          CreatedAt: new Date().toISOString()
+        });
+      }
       const paidItems = Array.isArray(meta.storeCart) ? meta.storeCart : [];
       const feeCandidates = Array.isArray(meta.feeItems) && meta.feeItems.length ? meta.feeItems : [{ FeeCode: meta.feeCode, FeeName: meta.feeName, FeeCategory: meta.feeCategory, Amount: amount }];
       const includedItems = !paidItems.length
@@ -141,6 +163,7 @@ export async function onRequestPost(context) {
           await upsertDocument(env, 'storeOrders', documentId, {
             OrderNo: orderNo, StoreType: storeType, AccountRef: meta.accountRef || meta.admissionNo,
             AdmissionNo: meta.admissionNo || '', DisplayName: meta.displayName || '', ClassName: meta.className || '',
+            BranchId: items[0]?.BranchId || 'main', SchoolSection: items[0]?.SchoolSection || '',
             ParentEmail: meta.verificationEmail || '', Items: items, Amount: items.reduce((sum, item) => sum + Number(item.Amount || 0), 0),
             PaymentReference: tx.reference, PaidAt: tx.paid_at || new Date().toISOString(), Status: 'Paid - Awaiting Collection', CreatedAt: new Date().toISOString()
           });
@@ -149,7 +172,7 @@ export async function onRequestPost(context) {
             if (!stock) continue;
             const payload = { ...stock, Quantity: Math.max(0, Number(stock.Quantity || 0) - Number(item.Quantity || 1)), UpdatedAt: new Date().toISOString() };
             delete payload.__id; delete payload.__name;
-            await upsertDocument(env, 'storeItems', safeId(`${storeType}-${item.ItemCode}`), payload);
+            await upsertDocument(env, 'storeItems', stock.__id || safeId(`${storeType}-${item.ItemCode}`), payload);
           }
         }
       }
@@ -161,6 +184,9 @@ export async function onRequestPost(context) {
       payment: recordData.payment || {},
       reference: tx.reference,
       amount,
+      grossAmount: amount,
+      gatewayFee,
+      netAmount,
       currency: tx.currency || 'NGN',
       feeName: meta.feeName || 'Online Payment'
     });

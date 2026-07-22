@@ -15,6 +15,8 @@ const entranceResults = document.getElementById('entranceResults');
 const clinicRecords = document.getElementById('clinicRecords');
 const schoolStores = document.getElementById('schoolStores');
 const storeOrders = document.getElementById('storeOrders');
+const storeCartEl = document.getElementById('storeCart');
+const checkoutStoreCartBtn = document.getElementById('checkoutStoreCartBtn');
 const restrictionForm = document.getElementById('restrictionForm');
 const walletStatus = document.getElementById('walletStatus');
 const txnLimit = document.getElementById('txnLimit');
@@ -30,6 +32,7 @@ let selectedAccountRef = '';
 let activeDashboardView = 'overview';
 const loadedPayables = new Set();
 const passportPhotoCache = new Map();
+const storeCart = new Map();
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -163,6 +166,7 @@ function renderChildren() {
       </span>
     `;
     button.addEventListener('click', () => {
+      if (selectedAccountRef !== child.AccountRef) storeCart.clear();
       selectedAccountRef = child.AccountRef;
       renderDashboard();
       loadPayablesForSelected(true);
@@ -774,8 +778,57 @@ function renderEntranceResults(child) {
       `;
     }
     entranceResults.appendChild(item);
+    const documentFlow = document.createElement('div');
+    documentFlow.className = 'admission-document-flow';
+    const documents = [
+      { type: 'result', label: 'Entrance Result', sent: isYes(record.ResultSent), enabled: true },
+      { type: 'offer', label: 'Offer of Admission', sent: isYes(record.OfferSent), enabled: String(record.ResultStatus || '').toLowerCase() === 'admitted' && isYes(record.ResultSent) },
+      { type: 'admission', label: 'Admission Letter', sent: isYes(record.AdmissionLetterSent), enabled: isYes(record.OfferSent) && isYes(record.AcceptanceFeePaid) }
+    ];
+    documents.forEach((documentInfo) => {
+      const card = document.createElement('div'); card.className = 'activity-item';
+      card.innerHTML = `<strong>${escapeHtml(documentInfo.label)}</strong><span>${documentInfo.sent ? 'Sent / opened by parent' : 'Not opened'}</span>`;
+      ['view', 'download'].forEach((mode) => {
+        const button = document.createElement('button'); button.type = 'button'; button.textContent = mode === 'view' ? 'Open' : 'Download';
+        button.disabled = !documentInfo.enabled;
+        button.addEventListener('click', () => openAdmissionDocument(child, documentInfo.type, mode, button));
+        card.appendChild(button);
+      });
+      if (!documentInfo.enabled) {
+        const note = document.createElement('small');
+        note.textContent = documentInfo.type === 'offer' ? 'Open the entrance result first.' : 'Open the offer and complete acceptance payment first.';
+        card.appendChild(note);
+      }
+      documentFlow.appendChild(card);
+    });
+    entranceResults.appendChild(documentFlow);
   });
   if (entranceResultPanel) entranceResultPanel.hidden = activeDashboardView !== 'results';
+}
+
+async function openAdmissionDocument(child, documentType, mode, button) {
+  const previewWindow = mode === 'view' ? window.open('', '_blank') : null;
+  button.disabled = true;
+  try {
+    const response = await fetch('/api/parent-dashboard', {
+      method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
+      body: freshBody({ action: 'getAdmissionDocument', ...authPayload(), accountRef: child.AccountRef, documentType })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.message || 'Could not open that document.');
+    const url = URL.createObjectURL(new Blob([data.html], { type: 'text/html' }));
+    if (mode === 'view') {
+      if (previewWindow) previewWindow.location.href = url;
+      else window.open(url, '_blank');
+    } else {
+      const link = document.createElement('a'); link.href = url; link.download = data.fileName || 'admission-document.html'; link.click();
+    }
+    window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+    await loadDashboard();
+  } catch (error) {
+    if (previewWindow) previewWindow.close();
+    setStatus(error.message || String(error), 'bad'); button.disabled = false;
+  }
 }
 
 function renderDashboard() {
@@ -799,7 +852,10 @@ function renderDashboard() {
 function storeItemMatchesChild(item, child) {
   const all = (value) => !value || ['all', '*'].includes(String(value).trim().toLowerCase());
   const same = (left, right) => String(left || '').trim().toLowerCase() === String(right || '').trim().toLowerCase();
-  return (all(item.Gender) || same(item.Gender, child.Gender)) &&
+  const childSection = String(child.SchoolSection || (/creche|nursery|primary|grade\s*[1-6]/i.test(child.ClassName || child.ClassAdmitted || '') ? 'Primary' : 'Secondary'));
+  const itemSection = String(item.SchoolSection || 'Secondary');
+  const branchMatches = !item.BranchId || !child.BranchId || same(item.BranchId, child.BranchId);
+  return branchMatches && same(itemSection, childSection) && (all(item.Gender) || same(item.Gender, child.Gender)) &&
     (all(item.ClassName) || same(item.ClassName, child.ClassName || child.ClassAdmitted));
 }
 
@@ -819,21 +875,19 @@ function renderStores(child) {
       row.className = 'activity-item store-item-row';
       row.innerHTML = `<strong>${escapeHtml(item.ItemName)}</strong><span>${escapeHtml([item.Category, item.Size, item.Gender].filter(Boolean).join(' | '))}</span><small>${money(item.Price)} | ${escapeHtml(item.Quantity)} available</small>`;
       const qty = document.createElement('input'); qty.type = 'number'; qty.min = '1'; qty.max = String(item.Quantity || 1); qty.value = '1'; qty.className = 'store-quantity';
-      const buy = document.createElement('button'); buy.type = 'button'; buy.textContent = 'Buy Now';
-      buy.addEventListener('click', async () => {
+      const buy = document.createElement('button'); buy.type = 'button'; buy.textContent = 'Add to Cart';
+      buy.addEventListener('click', () => {
         const quantity = Math.max(1, Math.min(Number(item.Quantity || 1), Number(qty.value || 1)));
-        buy.disabled = true;
-        try {
-          const response = await fetch('/api/init-payment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...authPayload(), accountRef: child.AccountRef, feeCode: 'STORE_CART', amount: Number(item.Price) * quantity, storeCart: [{ itemCode: item.ItemCode, storeType: item.StoreType, quantity }] }) });
-          const data = await response.json();
-          if (!response.ok || !data.ok) throw new Error(data.message || 'Could not start store payment.');
-          window.location.href = data.authorizationUrl;
-        } catch (error) { setStatus(error.message || String(error), 'bad'); buy.disabled = false; }
+        const key = `${item.StoreType}|${item.ItemCode}`;
+        const existing = storeCart.get(key);
+        storeCart.set(key, { item, quantity: Math.min(Number(item.Quantity || 1), quantity + (existing?.quantity || 0)) });
+        renderStoreCart(child);
       });
       row.append(qty, buy); section.appendChild(row);
     });
     schoolStores.appendChild(section);
   });
+  renderStoreCart(child);
   const orders = (dashboard.storeOrders || []).filter((order) => String(order.AccountRef || order.AdmissionNo).toLowerCase() === String(child.AccountRef).toLowerCase());
   storeOrders.innerHTML = orders.length ? '' : '<p class="muted">No store orders recorded for this student.</p>';
   orders.forEach((order) => {
@@ -843,7 +897,37 @@ function renderStores(child) {
   });
 }
 
+function renderStoreCart(child) {
+  if (!storeCartEl || !checkoutStoreCartBtn) return;
+  const entries = [...storeCart.entries()];
+  storeCartEl.innerHTML = entries.length ? '' : '<p class="muted">Your cart is empty.</p>';
+  let total = 0;
+  entries.forEach(([key, entry]) => {
+    total += Number(entry.item.Price || 0) * entry.quantity;
+    const row = document.createElement('div'); row.className = 'activity-item store-item-row';
+    row.innerHTML = `<strong>${escapeHtml(entry.item.ItemName)}</strong><span>${escapeHtml(entry.item.StoreType)} × ${entry.quantity}</span><small>${money(Number(entry.item.Price || 0) * entry.quantity)}</small>`;
+    const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Remove';
+    remove.addEventListener('click', () => { storeCart.delete(key); renderStoreCart(child); });
+    row.appendChild(remove); storeCartEl.appendChild(row);
+  });
+  checkoutStoreCartBtn.disabled = !entries.length;
+  checkoutStoreCartBtn.textContent = entries.length ? `Checkout ${money(total)}` : 'Checkout Cart';
+  checkoutStoreCartBtn.onclick = async () => {
+    checkoutStoreCartBtn.disabled = true;
+    try {
+      const cart = entries.map(([, entry]) => ({ itemCode: entry.item.ItemCode, storeType: entry.item.StoreType, quantity: entry.quantity }));
+      const response = await fetch('/api/init-payment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...authPayload(), accountRef: child.AccountRef, feeCode: 'STORE_CART', amount: total, storeCart: cart }) });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.message || 'Could not start store checkout.');
+      window.location.href = data.authorizationUrl;
+    } catch (error) {
+      setStatus(error.message || String(error), 'bad'); checkoutStoreCartBtn.disabled = false;
+    }
+  };
+}
+
 async function loadDashboard() {
+  const previousAccountRef = selectedAccountRef;
   const payload = authPayload();
   if (!payload.email || !payload.code) {
     setStatus('Email and verification code are required.', 'bad');
@@ -862,7 +946,9 @@ async function loadDashboard() {
   }
   dashboard = data;
   loadedPayables.clear();
-  selectedAccountRef = data.children?.[0]?.AccountRef || '';
+  selectedAccountRef = data.children?.some((child) => child.AccountRef === previousAccountRef)
+    ? previousAccountRef
+    : (data.children?.[0]?.AccountRef || '');
   dashboardContent.hidden = false;
   loginForm.hidden = true;
   renderDashboard();
@@ -936,6 +1022,7 @@ if (signOutDashboardBtn) {
     loadedPayables.clear();
     dashboard = null;
     selectedAccountRef = '';
+    storeCart.clear();
     activeDashboardView = 'overview';
     dashboardContent.hidden = true;
     loginForm.hidden = false;

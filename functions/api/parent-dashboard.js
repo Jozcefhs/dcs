@@ -613,7 +613,7 @@ function resultIsVisible(application, profile = {}) {
     'PublishResult', 'publishResult',
     'ResultSent', 'resultSent',
     'EntranceResultSent', 'entranceResultSent'
-  ]));
+  ])) || Boolean(clean(pick(application, ['ResultStatus', 'resultStatus', 'TotalScore', 'totalScore', 'ResultPercentage', 'resultPercentage'])));
 }
 
 function buildEntranceResult(application, profile = {}) {
@@ -631,7 +631,57 @@ function buildEntranceResult(application, profile = {}) {
     ResultNextStep: pick(application, ['ResultNextStep', 'resultNextStep', 'NextStep', 'nextStep']),
     ResultUpdatedAt: toDisplayDate(pick(application, ['ResultUpdatedAt', 'resultUpdatedAt', 'UpdatedAt', 'updatedAt'])),
     ResultSentAt: toDisplayDate(pick(application, ['ResultSentAt', 'resultSentAt', 'EntranceResultSentAt', 'entranceResultSentAt']))
+    ,ResultSent: pick(application, ['ResultSent', 'resultSent'], 'NO')
+    ,OfferSent: pick(application, ['OfferSent', 'offerSent'], 'NO')
+    ,AdmissionLetterSent: pick(application, ['AdmissionLetterSent', 'admissionLetterSent'], 'NO')
+    ,AcceptanceFeePaid: pick(application, ['AcceptanceFeePaid', 'acceptanceFeePaid'], 'NO')
   };
+}
+
+function htmlEscape(value) {
+  return clean(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+async function getParentAdmissionDocument(env, body) {
+  const email = lower(body.email || body.ParentEmail || body.Email);
+  const code = clean(body.code || body.VerificationCode).toUpperCase();
+  const accountRef = clean(body.accountRef || body.AccountRef || body.ApplicationReference);
+  const documentType = lower(body.documentType || body.DocumentType);
+  const sources = await loadParentSources(env, 'full');
+  const profile = await getSchoolProfile(env);
+  const { applications, matchingApplications } = await assertParentAccess(sources, email, code);
+  const application = applications.find((row) => {
+    if (!matchingApplications.includes(row)) return false;
+    const refs = [pick(row, ['ApplicationReference', 'ApplicationID', '__id']), pick(row, ['AdmissionNo'])];
+    return refs.some((ref) => sameText(ref, accountRef) || referencesMatch(ref, accountRef));
+  });
+  if (!application) { const err = new Error('That admission record is not linked to this parent.'); err.status = 404; throw err; }
+  const resultStatus = lower(pick(application, ['ResultStatus', 'Status']));
+  const admitted = resultStatus === 'admitted' || resultStatus === 'accepted';
+  const now = new Date().toISOString();
+  let flag; let title; let bodyHtml;
+  if (documentType === 'result') {
+    if (!resultIsVisible(application, profile)) { const err = new Error('Entrance result is not available yet.'); err.status = 409; throw err; }
+    flag = 'ResultSent'; title = 'Entrance Result';
+    bodyHtml = `<h2>${htmlEscape(resultStatus || 'Result')}</h2><p>English: <b>${htmlEscape(pick(application, ['EnglishScore'])) || '-'}</b></p><p>Mathematics: <b>${htmlEscape(pick(application, ['MathematicsScore'])) || '-'}</b></p><p>Interview / General: <b>${htmlEscape(pick(application, ['InterviewScore'])) || '-'}</b></p><p>Total: <b>${htmlEscape(pick(application, ['TotalScore'])) || '-'}</b></p><p>${htmlEscape(pick(application, ['ResultNotes', 'ResultNextStep']))}</p>`;
+  } else if (documentType === 'offer') {
+    if (!admitted || !isYes(application.ResultSent)) { const err = new Error('Open the entrance result before the offer of admission.'); err.status = 409; throw err; }
+    flag = 'OfferSent'; title = 'Offer of Admission';
+    bodyHtml = `<p>We are pleased to offer <b>${htmlEscape(pick(application, ['ApplicantName', 'DisplayName']))}</b> admission into <b>${htmlEscape(pick(application, ['ClassAdmitted', 'ClassApplyingFor']))}</b>.</p><p>Please complete the acceptance requirements within the stated period.</p>`;
+  } else if (documentType === 'admission') {
+    if (!isYes(application.OfferSent) || !isYes(application.AcceptanceFeePaid)) { const err = new Error('The offer must be opened and acceptance fee confirmed before the admission letter.'); err.status = 409; throw err; }
+    flag = 'AdmissionLetterSent'; title = 'Admission Letter';
+    bodyHtml = `<p>Following completion of the admission requirements, <b>${htmlEscape(pick(application, ['ApplicantName', 'DisplayName']))}</b> is admitted into <b>${htmlEscape(pick(application, ['ClassAdmitted', 'ClassApplyingFor']))}</b> for ${htmlEscape(pick(application, ['AcademicSession']))} ${htmlEscape(pick(application, ['Term']))}.</p>`;
+  } else { const err = new Error('Unknown admission document.'); err.status = 400; throw err; }
+  const documentId = application.__id || safeDocumentId(pick(application, ['ApplicationReference', 'ApplicationID']));
+  const updatedApplication = { ...application, [flag]: 'YES', [`${flag}At`]: now, [`${flag}OpenedByParent`]: 'YES', UpdatedAt: now };
+  await upsertSchoolDocument(env, 'applications', documentId, updatedApplication);
+  const student = (sources.students || []).find((row) => applicationMatchesChild(application, normalizeStudent(row, profile)));
+  if (student) await upsertSchoolDocument(env, 'students', student.__id || safeDocumentId(pick(student, ['AdmissionNo', 'AccountRef'])), { ...student, [flag]: 'YES', [`${flag}At`]: now, UpdatedAt: now });
+  const schoolName = htmlEscape(profile.SchoolName || 'School');
+  const applicantName = htmlEscape(pick(application, ['ApplicantName', 'DisplayName']));
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${htmlEscape(title)}</title><style>body{font:16px Arial;max-width:760px;margin:48px auto;line-height:1.6;color:#17233c}header{text-align:center;border-bottom:2px solid #17395c;margin-bottom:28px}h1{font-size:24px}</style></head><body><header><h1>${schoolName}</h1><h2>${htmlEscape(title)}</h2></header><p><b>Student:</b> ${applicantName}</p>${bodyHtml}<p>Generated from the parent portal on ${htmlEscape(now.slice(0, 10))}.</p></body></html>`;
+  return { ok: true, message: `${title} opened and marked as sent.`, html, fileName: `${safeDocumentId(applicantName || accountRef)}-${safeDocumentId(title)}.html`, flag };
 }
 
 function schoolFeeTotalItem(breakdown) {
@@ -819,12 +869,16 @@ function dueStatus(dueDate) {
   return `Due ${text}`;
 }
 
-function invoiceDueNotifications(invoices, keys, accountSummary = null) {
+function invoiceDueNotifications(invoices, keys, accountSummary = null, child = {}) {
   if (accountSummary && asMoneyNumber(accountSummary.OutstandingBalance) <= 0) return [];
   return (invoices || [])
     .filter((invoice) => anyKeyMatches(invoice.AccountRef, keys))
     .filter((invoice) => {
       if (isSchoolFee(invoice)) return false;
+      const enrollmentCategory = lower(child.EnrollmentCategory || child.IntakeCategory || 'Returning');
+      if (/acceptance/.test(lower(`${invoice.FeeCode} ${invoice.FeeName}`)) && enrollmentCategory !== 'new intake') return false;
+      if (clean(child.AcademicSession) && clean(invoice.AcademicSession) && !['all', '*'].includes(lower(invoice.AcademicSession)) && !sameText(child.AcademicSession, invoice.AcademicSession)) return false;
+      if (clean(child.Term) && clean(invoice.Term) && !['all', '*'].includes(lower(invoice.Term)) && !sameText(child.Term, invoice.Term)) return false;
       const status = lower(invoice.Status);
       const balance = invoice.Balance !== undefined && invoice.Balance !== ''
         ? asMoneyNumber(invoice.Balance)
@@ -911,7 +965,7 @@ async function getDashboard(env, body) {
     walletActivity[child.AccountRef] = walletEntries;
     paymentRecords[child.AccountRef] = paymentHistoryForChild(child, payments, ledger);
     payableItems[child.AccountRef] = [];
-    dueNotifications[child.AccountRef] = invoiceDueNotifications(invoices, keys, accountSummary);
+    dueNotifications[child.AccountRef] = invoiceDueNotifications(invoices, keys, accountSummary, child);
     clinicVisits[child.AccountRef] = clinic.filter((record) => {
       return anyKeyMatches(record.AdmissionNo, keys);
     }).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
@@ -994,7 +1048,7 @@ async function getChildActivity(env, body) {
     walletBalance: walletBalance(walletEntries),
     accountSummary,
     paymentRecords: paymentHistoryForChild(child, payments, ledger),
-    dueNotifications: invoiceDueNotifications(invoices, keys, accountSummary),
+    dueNotifications: invoiceDueNotifications(invoices, keys, accountSummary, child),
     clinicVisits: clinic.filter((record) => anyKeyMatches(record.AdmissionNo, keys)).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date))),
     showResultsOnline: schoolResultsAreVisible(schoolProfile),
     entranceResults: result ? [result] : []
@@ -1046,7 +1100,7 @@ async function getChildPayable(env, body) {
   const accountSummary = accountOverview && accountOverview.ok
     ? accountSummaryForKeys(accountOverview.accounts || [], [body.accountRef || body.AccountRef || body.AdmissionNo], [])
     : null;
-  const invoiceNotices = invoiceDueNotifications((sources.invoices || []).map(normalizeInvoice), [body.accountRef || body.AccountRef || body.AdmissionNo], accountSummary);
+  const invoiceNotices = invoiceDueNotifications((sources.invoices || []).map(normalizeInvoice), [body.accountRef || body.AccountRef || body.AdmissionNo], accountSummary, payable.account || {});
   const itemNotices = items
     .filter((item) => clean(item.DueDate))
     .map((item) => ({
@@ -1088,6 +1142,8 @@ export async function onRequestPost(context) {
       data = await getChildActivity(env, body);
     } else if (action === 'getChildPayable') {
       data = await getChildPayable(env, body);
+    } else if (action === 'getAdmissionDocument') {
+      data = await getParentAdmissionDocument(env, body);
     } else {
       data = await getDashboard(env, body);
     }

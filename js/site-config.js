@@ -7,7 +7,8 @@ async function loadSiteProfile() {
     PortalNotice: '',
     NameFormat: 'Surname, first name, middle name',
     ResultDisplayMode: 'subjects',
-    ShowResultsOnline: 'NO'
+    ShowResultsOnline: 'NO',
+    DeclarationStatement: 'I declare that the information supplied in this application is complete and correct.'
   };
   try {
     const response = await fetch('/api/settings');
@@ -36,6 +37,9 @@ function applySiteProfile(profile) {
   document.querySelectorAll('[data-portal-notice]').forEach((node) => {
     node.textContent = profile.PortalNotice || '';
     node.hidden = !profile.PortalNotice;
+  });
+  document.querySelectorAll('[data-declaration-statement]').forEach((node) => {
+    node.textContent = profile.DeclarationStatement || 'I declare that the information supplied in this application is complete and correct.';
   });
   if (profile.WebLogoUrl) {
     document.querySelectorAll('img.logo, img.nav-logo').forEach((node) => {
