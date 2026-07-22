@@ -40,8 +40,8 @@ const tabConfig = [
   ['clinic', 'Clinic'],
   ['kitchen', 'Kitchen'],
   ['tuckShop', 'Tuck Shop'],
-  ['bookstore', 'Bookstore'],
-  ['uniformStore', 'Uniform Store'],
+  ['bookstore', 'Books & Supplies'],
+  ['uniformStore', 'Clothing & Supplies'],
   ['staffUsers', 'Staff & Permissions']
 ];
 
@@ -293,7 +293,7 @@ function renderStaffStore(section, store) {
     <h2>Paid Orders & Collection</h2><div class="workflow-record-list">${(store.orders || []).length ? (store.orders || []).map((order) => `
       <article class="workflow-record"><div class="workflow-record-heading"><div><strong>${escapeHtml(order.DisplayName || order.AccountRef)}</strong><small>${escapeHtml(order.OrderNo)}</small></div><span class="workflow-status">${escapeHtml(order.Status || 'Paid - Awaiting Collection')}</span></div>
       <p>${money(order.Amount)} â€¢ ${escapeHtml(order.PaidAt || order.CreatedAt || '')}</p>
-      <div class="workflow-actions"><button type="button" data-store-order="${escapeHtml(order.OrderNo)}" data-store-status="Ready for Collection">Ready for Collection</button><button type="button" data-store-order="${escapeHtml(order.OrderNo)}" data-store-status="Collected">Mark Collected</button></div></article>
+      <div class="workflow-actions"><button type="button" data-store-order="${escapeHtml(order.OrderNo)}" data-store-status="Ready for Collection">Ready for Collection</button><button type="button" data-store-order="${escapeHtml(order.OrderNo)}" data-store-status="Collected">Verify & Mark Collected</button></div></article>
     `).join('') : '<p class="muted">No paid orders yet.</p>'}</div>`;
   document.getElementById('staffStoreItemForm')?.addEventListener('submit', async (event) => {
     event.preventDefault(); const form = event.currentTarget; const status = form.querySelector('[data-store-status]');
@@ -305,9 +305,13 @@ function renderStaffStore(section, store) {
     } catch (error) { setStatus(status, error.message || String(error), 'bad'); }
   });
   panelEl.querySelectorAll('[data-store-order]').forEach((button) => button.addEventListener('click', async () => {
+    const collectionReference = button.dataset.storeStatus === 'Collected'
+      ? window.prompt("Scan or enter the student's card ID, admission number, or parent verification code.")
+      : '';
+    if (button.dataset.storeStatus === 'Collected' && !clean(collectionReference)) return;
     button.disabled = true;
     try {
-      const response = await fetch('/api/staff-stores', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'updateOrder', section, OrderNo: button.dataset.storeOrder, Status: button.dataset.storeStatus }) });
+      const response = await fetch('/api/staff-stores', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'updateOrder', section, OrderNo: button.dataset.storeOrder, Status: button.dataset.storeStatus, CollectionReference: collectionReference }) });
       const data = await response.json(); if (!response.ok || !data.ok) throw new Error(data.message || 'Could not update order.'); await loadDashboard();
     } catch (error) { setStatus(dashboardStatus, error.message || String(error), 'bad'); button.disabled = false; }
   }));
@@ -315,6 +319,7 @@ function renderStaffStore(section, store) {
 
 function renderSection(active) {
   if (!dashboardData) return;
+  panelEl.classList.toggle('school-store-panel', active === 'bookstore' || active === 'uniformStore');
   const departments = dashboardData.departments || {};
   if (active === 'staffUsers') {
     panelEl.innerHTML = '<p class="muted">Loading staff accounts...</p>';

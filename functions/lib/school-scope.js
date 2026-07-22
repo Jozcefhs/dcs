@@ -1,4 +1,5 @@
 import { deleteDocument, getDocument, listCollection, upsertDocument } from './firestore.js';
+import { normalizeClassKey } from './class-names.js';
 
 function clean(value) { return String(value ?? '').trim(); }
 
@@ -10,6 +11,9 @@ export function schoolSectionFor(row = {}) {
   const explicit = clean(row.SchoolSection || row.schoolSection).toLowerCase();
   if (['primary', 'nursery', 'early years', 'early-years'].includes(explicit)) return 'primary';
   if (['secondary', 'junior secondary', 'senior secondary'].includes(explicit)) return 'secondary';
+  const normalizedClass = normalizeClassKey(row.ClassApplyingFor || row.ClassName || row.Class || row.CurrentClass);
+  if (/^(creche|prenursery|nursery[1-3]|primary[1-6])$/.test(normalizedClass)) return 'primary';
+  if (/^(jss[1-3]|ss[1-3])$/.test(normalizedClass)) return 'secondary';
   const className = clean(row.ClassApplyingFor || row.ClassName || row.Class || row.CurrentClass).toLowerCase();
   return /(creche|crèche|pre[ -]?nursery|nursery|primary|grade\s*[1-6]\b)/i.test(className) ? 'primary' : 'secondary';
 }

@@ -1,5 +1,6 @@
 import { deleteDocument, listCollection, requireFirestoreEnv, upsertDocument } from '../lib/firestore.js';
 import { deleteSchoolDocument, getSchoolStructure, listSchoolCollection, safeScopeId, upsertSchoolDocument } from '../lib/school-scope.js';
+import { canonicalConfiguredClass, classNamesMatch } from '../lib/class-names.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -109,6 +110,15 @@ function sameText(a, b) {
   return clean(a).toLowerCase() === clean(b).toLowerCase();
 }
 
+async function configuredClassNames(env) {
+  try {
+    const result = await getSchoolClasses(env);
+    return result.classes || [];
+  } catch (_err) {
+    return [];
+  }
+}
+
 async function sha256Hex(value) {
   const bytes = new TextEncoder().encode(String(value || ''));
   const digest = await crypto.subtle.digest('SHA-256', bytes);
@@ -152,25 +162,17 @@ async function findStudentByAccountRef(env, accountRef) {
   const wanted = clean(accountRef);
   if (!wanted) return null;
   const rows = await listSchoolCollection(env, 'students');
-  return rows.map(normalizeStudent).find((row) => {
-    return referencesMatch(row.AdmissionNo, wanted) ||
-      referencesMatch(row.ApplicationReference, wanted) ||
-      sameText(row.AdmissionNo, wanted) ||
-      sameText(row.ApplicationReference, wanted) ||
-      sameText(row.AccountRef, wanted);
-  }) || null;
+  const normalized = rows.map(normalizeStudent);
+  return normalized.find((row) => sameReferenceIdentity(row.AdmissionNo || row.AccountRef, wanted)) ||
+    normalized.find((row) => sameReferenceIdentity(row.ApplicationReference, wanted)) || null;
 }
 
 function findStudentByAccountRefInRows(rows, accountRef) {
   const wanted = clean(accountRef);
   if (!wanted) return null;
-  return (rows || []).map(normalizeStudent).find((row) => {
-    return referencesMatch(row.AdmissionNo, wanted) ||
-      referencesMatch(row.ApplicationReference, wanted) ||
-      sameText(row.AdmissionNo, wanted) ||
-      sameText(row.ApplicationReference, wanted) ||
-      sameText(row.AccountRef, wanted);
-  }) || null;
+  const normalized = (rows || []).map(normalizeStudent);
+  return normalized.find((row) => sameReferenceIdentity(row.AdmissionNo || row.AccountRef, wanted)) ||
+    normalized.find((row) => sameReferenceIdentity(row.ApplicationReference, wanted)) || null;
 }
 
 async function saveApplication(env, application) {
@@ -208,6 +210,10 @@ async function updateStudentProfile(env, body) {
   editableFields.forEach((field) => {
     if (body[field] !== undefined) updated[field] = clean(body[field]);
   });
+  if (body.ClassName !== undefined) {
+    updated.ClassName = canonicalConfiguredClass(body.ClassName, await configuredClassNames(env));
+    updated.ClassAdmitted = updated.ClassName;
+  }
   updated.UpdatedAt = nowIso();
   updated.UpdatedBy = clean(body.UpdatedBy || body.RecordedBy) || 'Student Register';
   const student = await saveStudent(env, updated);
@@ -494,9 +500,11 @@ function isAcceptanceFeeLike(row) {
     row && row.EntryType,
     row && row.Description
   ].map((value) => normalizeMatchText(value)).join(' ');
+  const compact = parts.replace(/[^a-z0-9]+/g, ' ');
   return parts.includes('acceptance_fee') ||
     parts.includes('acceptance fee') ||
-    (parts.includes('acceptance') && parts.includes('admission'));
+    (parts.includes('acceptance') && parts.includes('admission')) ||
+    (/\baccept(?:ance)?\b/.test(compact) && /\b(fee|admission|day|board)/.test(compact));
 }
 
 function accountRefsFrom(row) {
@@ -513,6 +521,26 @@ function referencesAny(left, refs) {
   const wanted = clean(left);
   if (!wanted) return false;
   return (refs || []).some((ref) => sameText(wanted, ref) || referencesMatch(wanted, ref));
+}
+
+function referenceIdentityKey(value) {
+  return clean(value).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
+    .map((part) => /^\d+$/.test(part) ? String(Number(part)) : part).join('|');
+}
+
+function sameReferenceIdentity(left, right) {
+  const a = referenceIdentityKey(left);
+  const b = referenceIdentityKey(right);
+  return Boolean(a && b && a === b);
+}
+
+function financialRowMatchesAccount(row, account) {
+  const rowPrimary = clean(row && (row.AccountRef || row.AdmissionNo));
+  const accountPrimary = [account && account.AccountRef, account && account.AdmissionNo].map(clean).filter(Boolean);
+  if (rowPrimary) return accountPrimary.some((ref) => sameReferenceIdentity(rowPrimary, ref));
+  const rowApplication = clean(row && (row.ApplicationReference || row.ApplicationID));
+  const accountApplications = [account && account.ApplicationReference, account && account.ApplicationID].map(clean).filter(Boolean);
+  return Boolean(rowApplication && accountApplications.some((ref) => sameReferenceIdentity(rowApplication, ref)));
 }
 
 function displayNameFromApplication(app) {
@@ -560,7 +588,7 @@ function feeMatchesApplication(fee, app) {
   const enrollmentCategory = app.EnrollmentCategory || app.IntakeCategory || 'Returning';
   const academicProgress = app.AcademicProgress || app.ProgressCategory || 'Promoted';
   if (normalizeMatchText(academicProgress) === 'repeating' && /book|uniform|school wear/.test(normalizeMatchText(`${fee.FeeCategory || ''} ${fee.FeeName || ''}`))) return false;
-  return feeFieldMatches(fee.ClassName, appClass) &&
+  return (!clean(fee.ClassName) || ['all', '*'].includes(normalizeMatchText(fee.ClassName)) || classNamesMatch(fee.ClassName, appClass)) &&
     feeFieldMatches(fee.StudentType, appType) &&
     feeFieldMatches(fee.BillingCategory || 'All', appBillingCategory, true) &&
     feeFieldMatches(fee.Gender || 'All', appGender) &&
@@ -591,7 +619,7 @@ function feeMatchesAccountPeriod(fee, app) {
   const appSession = app.AcademicSession || '';
   const appTerm = app.Term || '';
   if (normalizeMatchText(app.AcademicProgress || 'Promoted') === 'repeating' && /book|uniform|school wear/.test(normalizeMatchText(`${fee.FeeCategory || ''} ${fee.FeeName || ''}`))) return false;
-  if (!feeFieldMatches(fee.ClassName, appClass)) return false;
+  if (clean(fee.ClassName) && !['all', '*'].includes(normalizeMatchText(fee.ClassName)) && !classNamesMatch(fee.ClassName, appClass)) return false;
   if (!feeFieldMatches(fee.StudentType, appType)) return false;
   if (!feeFieldMatches(fee.BillingCategory || 'All', appBillingCategory, true)) return false;
   if (!feeFieldMatches(fee.Gender || 'All', app.Gender || '')) return false;
@@ -675,6 +703,12 @@ function isWalletLedger(row) {
     normalizeMatchText(row && row.EntryType).includes('wallet');
 }
 
+function isStorePurchase(row) {
+  return normalizeMatchText(row && row.FeeCategory) === 'store' ||
+    clean(row && row.FeeCode).toUpperCase() === 'STORE_CART' ||
+    normalizeMatchText(row && row.EntryType).includes('store');
+}
+
 function periodKey(key, session, term) {
   const cleanKey = clean(key);
   if (!cleanKey) return '';
@@ -703,7 +737,7 @@ function feeMatchesAccountBase(fee, app) {
   const appBillingCategory = app.BillingCategory || 'Regular';
   const appSession = app.AcademicSession || '';
   if (normalizeMatchText(app.AcademicProgress || 'Promoted') === 'repeating' && /book|uniform|school wear/.test(normalizeMatchText(`${fee.FeeCategory || ''} ${fee.FeeName || ''}`))) return false;
-  return feeFieldMatches(fee.ClassName, appClass) &&
+  return (!clean(fee.ClassName) || ['all', '*'].includes(normalizeMatchText(fee.ClassName)) || classNamesMatch(fee.ClassName, appClass)) &&
     feeFieldMatches(fee.StudentType, appType) &&
     feeFieldMatches(fee.BillingCategory || 'All', appBillingCategory, true) &&
     feeFieldMatches(fee.Gender || 'All', app.Gender || '') &&
@@ -1017,14 +1051,10 @@ export async function getPayableFees(env, body = {}) {
     billingApp.AdmissionNumber
   ].map(clean).filter(Boolean));
   const rowMatchesAccount = (row) => {
-    return [...accountRefs].some((ref) => {
-      return sameText(row.AccountRef, ref) ||
-        sameText(row.ApplicationReference, ref) ||
-        sameText(row.AdmissionNo, ref) ||
-        referencesMatch(row.AccountRef, ref) ||
-        referencesMatch(row.ApplicationReference, ref) ||
-        referencesMatch(row.AdmissionNo, ref);
-    });
+    const primary = clean(row.AccountRef || row.AdmissionNo);
+    if (primary) return [accountRef, billingApp.AdmissionNo, app.AdmissionNo].map(clean).filter(Boolean).some((ref) => sameReferenceIdentity(primary, ref));
+    const applicationRef = clean(row.ApplicationReference || row.ApplicationID);
+    return Boolean(applicationRef && [app.ApplicationReference, app.ApplicationID, billingApp.ApplicationReference].map(clean).filter(Boolean).some((ref) => sameReferenceIdentity(applicationRef, ref)));
   };
 
   let [feeRows, paymentRows, invoiceRows, ledgerRows] = await Promise.all([
@@ -1076,7 +1106,7 @@ export async function getPayableFees(env, body = {}) {
     const amount = asMoneyNumber(fee.Amount);
     const category = normalizeMatchText(fee.FeeCategory || '');
     const requiredForEnrollment = yesNo(fee.RequiredForEnrollment) === 'YES';
-    const isAcceptanceFee = clean(fee.FeeCode).toUpperCase() === 'ACCEPTANCE_FEE' || normalizeMatchText(fee.FeeName) === 'acceptance fee';
+    const isAcceptanceFee = isAcceptanceFeeLike(fee);
     if (!isWalletFee(fee) && amount <= 0) return false;
     if (yesNo(fee.PayableOnline || 'YES') !== 'YES') return false;
     if (!feeMatchesApplication(fee, billingApp)) return false;
@@ -1324,11 +1354,11 @@ export async function getAccountsOverview(env) {
   const accountMap = new Map();
   const accountAliasMap = new Map();
   const accountKeyForRefs = (refs, fallback) => {
-    for (const ref of refs) {
-      const alias = accountAliasMap.get(safeDocumentId(ref).toLowerCase());
-      if (alias) return alias;
-    }
-    return safeDocumentId(fallback || refs[0]).toLowerCase();
+    // Admission/account reference is the primary identity. Do not merge two
+    // students merely because a bad import reused an application reference.
+    const primary = clean(refs[0] || fallback);
+    const alias = primary ? accountAliasMap.get(safeDocumentId(primary).toLowerCase()) : '';
+    return alias || safeDocumentId(primary || fallback).toLowerCase();
   };
   const registerAccountAliases = (key, refs) => {
     refs.forEach((ref) => {
@@ -1375,7 +1405,6 @@ export async function getAccountsOverview(env) {
       if (key && createdAt) applicationCreatedMap.set(key, createdAt);
     });
   });
-  accounts.map(normalizeAccount).forEach(putAccount);
   students.map((row) => normalizeStudent(row, schoolProfile)).forEach((student) => putAccount({
     AccountRef: student.AdmissionNo || student.ApplicationReference,
     ApplicationReference: student.ApplicationReference,
@@ -1392,6 +1421,9 @@ export async function getAccountsOverview(env) {
     Status: student.Status || 'Active',
     Enrolled: 'YES'
   }));
+  // Student register identity and eligibility fields are authoritative. Legacy
+  // account rows may still say New Intake after a CSV import, so merge them second.
+  accounts.map(normalizeAccount).forEach(putAccount);
   applications.map((row) => normalizeApplication(row, schoolProfile)).forEach((app) => putAccount({
     AccountRef: app.AdmissionNo || app.AdmissionNumber || app.ApplicationReference || app.ApplicationID,
     ApplicationReference: app.ApplicationReference || app.ApplicationID,
@@ -1446,13 +1478,13 @@ export async function getAccountsOverview(env) {
     const refs = accountRefsFrom(account);
     let totalDebit = 0;
     let totalCredit = 0;
+    let totalReceipts = 0;
     let accountCreditDebit = 0;
     let walletBalance = asMoneyNumber(account.WalletBalance);
     let lastPaymentAt = clean(account.LastPaymentAt);
     const countedLedgerKeys = new Set();
     ledgerRows.forEach((row) => {
-      const rowRefs = accountRefsFrom(row);
-      const matched = rowRefs.some((ref) => referencesAny(ref, refs));
+      const matched = financialRowMatchesAccount(row, account);
       if (!matched) return;
       const ledgerKey = clean(row.LedgerNo || row.Reference || `${row.Date}|${row.AccountRef}|${row.FeeCode}|${row.Debit}|${row.Credit}`);
       if (ledgerKey && countedLedgerKeys.has(ledgerKey)) return;
@@ -1466,11 +1498,13 @@ export async function getAccountsOverview(env) {
       if (clean(row.Term) && clean(account.Term) && !feeFieldMatches(row.Term, account.Term)) return;
       const debit = asMoneyNumber(row.Debit);
       const credit = asMoneyNumber(row.Credit);
+      if (debit > 0 && isAcceptanceFeeLike(row) && !isNewIntakeApplication(account)) return;
       if (isWalletLedger(row)) {
         walletBalance += credit - debit;
         return;
       }
-      if (isOptionalSubscriptionFee(row)) {
+      if (isOptionalSubscriptionFee(row) || isStorePurchase(row)) {
+        if (credit > 0) totalReceipts += credit;
         if (credit > 0 && row.Date && (!lastPaymentAt || String(row.Date) > String(lastPaymentAt))) {
           lastPaymentAt = row.Date;
         }
@@ -1484,6 +1518,7 @@ export async function getAccountsOverview(env) {
       }
       if (credit > 0) {
         totalCredit += credit;
+        totalReceipts += credit;
       }
       if (credit > 0 && row.Date && (!lastPaymentAt || String(row.Date) > String(lastPaymentAt))) {
         lastPaymentAt = row.Date;
@@ -1521,6 +1556,7 @@ export async function getAccountsOverview(env) {
       ...account,
       TotalDebit: totalDebit,
       TotalCredit: totalCredit,
+      TotalReceipts: totalReceipts,
       AccountCreditDebits: accountCreditDebit,
       Balance: netBalance,
       OutstandingBalance: Math.max(0, netBalance),
@@ -1529,13 +1565,23 @@ export async function getAccountsOverview(env) {
       LastPaymentAt: lastPaymentAt
     };
   }).sort((a, b) => clean(a.DisplayName || a.AccountRef).localeCompare(clean(b.DisplayName || b.AccountRef)));
+  const visibleInvoices = normalizedInvoices.filter((invoice) => {
+    if (!isAcceptanceFeeLike(invoice)) return true;
+    const owner = accountRows.find((account) => financialRowMatchesAccount(invoice, account));
+    return !owner || isNewIntakeApplication(owner);
+  });
+  const visibleLedger = ledger.filter((row) => {
+    if (!isAcceptanceFeeLike(row) || asMoneyNumber(row.Debit) <= 0) return true;
+    const owner = accountRows.find((account) => financialRowMatchesAccount(row, account));
+    return !owner || isNewIntakeApplication(owner);
+  });
   return {
     ok: true,
     message: 'Accounts loaded from Firestore.',
     accounts: accountRows,
     payments: normalizedPayments,
-    invoices: normalizedInvoices,
-    ledger,
+    invoices: visibleInvoices,
+    ledger: visibleLedger,
     feeItems: feeItems.map(normalizeFeeItem),
     billingCategories: billingCategories.map((row) => clean(row.Name || row.BillingCategory || row.__id)).filter(Boolean).sort()
   };
@@ -1579,9 +1625,10 @@ async function saveStoreItem(env, body) {
     const err = new Error('Store type, item code and item name are required.'); err.status = 400; throw err;
   }
   const existing = (await listCollection(env, 'storeItems')).find((row) => sameText(row.StoreType, storeType) && sameText(row.ItemCode, itemCode)) || {};
+  const className = canonicalConfiguredClass(clean(body.ClassName) || 'All', await configuredClassNames(env));
   const payload = {
     ...existing, StoreType: storeType, ItemCode: itemCode, ItemName: itemName,
-    Category: clean(body.Category), Gender: clean(body.Gender) || 'All', ClassName: clean(body.ClassName) || 'All',
+    Category: clean(body.Category), Gender: clean(body.Gender) || 'All', ClassName: className,
     Size: clean(body.Size), Price: asMoneyNumber(body.Price), Quantity: Math.max(0, asMoneyNumber(body.Quantity)),
     Active: yesNo(body.Active ?? 'YES') || 'YES', UpdatedAt: nowIso(), CreatedAt: existing.CreatedAt || nowIso()
   };
@@ -1596,9 +1643,23 @@ async function updateStoreOrderStatus(env, body) {
   const existing = orders.find((row) => sameText(row.OrderNo, orderNo) || sameText(row.__id, safeDocumentId(orderNo)));
   if (!existing) { const err = new Error('Store order was not found.'); err.status = 404; throw err; }
   const status = clean(body.Status || body.status) || 'Ready for Collection';
+  let verifiedReference = '';
+  if (sameText(status, 'Collected')) {
+    verifiedReference = clean(body.CollectionReference || body.collectionReference);
+    if (!verifiedReference) { const err = new Error('Scan or enter the student card ID, admission number, or parent verification code before collection.'); err.status = 400; throw err; }
+    const student = await findStudentByAccountRef(env, existing.AccountRef || existing.AdmissionNo);
+    const allowedReferences = [
+      existing.AccountRef, existing.AdmissionNo,
+      student && student.AccountRef, student && student.AdmissionNo,
+      student && student.WalletCardId, student && student.VerificationCode, student && student.ParentLoginCode
+    ].map(clean).filter(Boolean);
+    if (!allowedReferences.some((value) => sameReferenceIdentity(value, verifiedReference) || sameText(value, verifiedReference))) {
+      const err = new Error('The collection reference does not match the student on this order. Nothing was marked collected.'); err.status = 409; throw err;
+    }
+  }
   const payload = { ...existing, Status: status, UpdatedAt: nowIso(), UpdatedBy: clean(body.RecordedBy) || 'Store Keeper' };
   delete payload.__id; delete payload.__name;
-  if (sameText(status, 'Collected')) { payload.CollectedAt = nowIso(); payload.CollectedBy = clean(body.RecordedBy) || 'Store Keeper'; }
+  if (sameText(status, 'Collected')) { payload.CollectedAt = nowIso(); payload.CollectedBy = clean(body.RecordedBy) || 'Store Keeper'; payload.CollectionReferenceVerified = verifiedReference; }
   await upsertDocument(env, 'storeOrders', safeDocumentId(orderNo), payload);
   return { ok: true, message: `Order marked ${status}.`, order: payload };
 }
@@ -1866,6 +1927,10 @@ async function updateApplicationDetails(env, body) {
   Object.entries(body || {}).forEach(([key, value]) => {
     if (!ignored.has(key)) updates[key] = value;
   });
+  const classNames = await configuredClassNames(env);
+  for (const key of ['ClassApplyingFor', 'ClassAppliedFor', 'ClassAdmitted', 'ClassName']) {
+    if (updates[key] !== undefined) updates[key] = canonicalConfiguredClass(updates[key], classNames);
+  }
   const saved = await saveApplication(env, { ...existing, ...updates });
   return { ok: true, message: 'Application details updated.', application: saved };
 }
@@ -1901,6 +1966,7 @@ async function importStudents(env, body) {
   }
   const existingStudents = await listSchoolCollection(env, 'students');
   const schoolCode = await getSchoolCode(env);
+  const classNames = await configuredClassNames(env);
   const importedBy = clean(body.ImportedBy || body.importedBy) || 'Admissions Office';
   let imported = 0;
   let skipped = 0;
@@ -1910,9 +1976,9 @@ async function importStudents(env, body) {
     const input = rows[index] || {};
     const rowNo = index + 1;
     const applicantName = pick(input, ['ApplicantName', 'StudentName', 'Name']);
-    const classAdmitted = pick(input, ['ClassAdmitted', 'ClassName', 'Class']);
+    const classAdmitted = canonicalConfiguredClass(pick(input, ['ClassAdmitted', 'ClassName', 'Class']), classNames);
     let admissionNo = pick(input, ['AdmissionNo', 'AdmissionNumber']);
-    const appRef = pick(input, ['ApplicationReference']);
+    let appRef = pick(input, ['ApplicationReference']);
     if (!applicantName) {
       skipped += 1;
       failures.push(`Row ${rowNo}: missing student name.`);
@@ -1924,9 +1990,16 @@ async function importStudents(env, body) {
       continue;
     }
     if (!admissionNo) admissionNo = nextStudentAdmissionNo([...existingStudents, ...savedStudents], input.AcademicSession || input.Session || '', schoolCode);
+    const applicationReferenceOwner = appRef && [...existingStudents, ...savedStudents].find((row) =>
+      sameText(row.ApplicationReference || row.applicationReference, appRef) &&
+      !sameReferenceIdentity(row.AdmissionNo || row.admissionNo || row.__id, admissionNo)
+    );
+    if (applicationReferenceOwner) {
+      failures.push(`Row ${rowNo} (${admissionNo}): duplicate application reference ${appRef} was removed; admission number remains the account identity.`);
+      appRef = '';
+    }
     const duplicate = [...existingStudents, ...savedStudents].find((row) =>
-      sameText(row.AdmissionNo || row.admissionNo || row.__id, admissionNo) ||
-      (appRef && sameText(row.ApplicationReference || row.applicationReference, appRef))
+      sameReferenceIdentity(row.AdmissionNo || row.admissionNo || row.__id, admissionNo)
     );
     if (duplicate) {
       skipped += 1;
@@ -1964,7 +2037,7 @@ async function importStudents(env, body) {
 
 async function promoteStudents(env, body) {
   const targets = Array.isArray(body.Students) ? body.Students : [];
-  const newClass = clean(body.NewClass || body.newClass);
+  const newClass = canonicalConfiguredClass(clean(body.NewClass || body.newClass), await configuredClassNames(env));
   const session = clean(body.AcademicSession || body.Session);
   const term = clean(body.Term);
   const promotedBy = clean(body.PromotedBy || body.promotedBy) || 'Admissions Office';
@@ -2030,6 +2103,7 @@ async function enrollStudent(env, body) {
   if (await findStudent(env, admissionNo, appRef)) throw new Error('A student record already exists for this application or admission number.');
   const enrolledBy = clean(body.EnrolledBy || body.enrolledBy) || 'Admissions Office';
   const applicantName = pick(existing, ['ApplicantName', 'Name', 'DisplayName']);
+  const admittedClass = canonicalConfiguredClass(pick(existing, ['ClassApplyingFor', 'ClassName']), await configuredClassNames(env));
   const student = await saveStudent(env, {
     EnrolledAt: nowIso(),
     ApplicationReference: appRef,
@@ -2041,8 +2115,8 @@ async function enrollStudent(env, body) {
     DisplayName: applicantName,
     Gender: pick(existing, ['Gender']),
     DateOfBirth: pick(existing, ['DateOfBirth']),
-    ClassAdmitted: pick(existing, ['ClassApplyingFor', 'ClassName']),
-    ClassName: pick(existing, ['ClassApplyingFor', 'ClassName']),
+    ClassAdmitted: admittedClass,
+    ClassName: admittedClass,
     AcademicSession: pick(existing, ['AcademicSession']),
     Term: pick(existing, ['Term']),
     StudentType: pick(existing, ['StudentType']),
@@ -2118,7 +2192,7 @@ export async function recordSale(env, body) {
     ApplicantName: clean(body.ApplicantName),
     Email: email,
     Phone: clean(body.Phone),
-    ClassApplyingFor: clean(body.ClassApplyingFor),
+    ClassApplyingFor: canonicalConfiguredClass(clean(body.ClassApplyingFor), await configuredClassNames(env)),
     AmountPaid: formatNairaAmount(body.AmountPaid),
     FormLink: clean(body.FormLink),
     VerificationCode: code,
@@ -2316,12 +2390,13 @@ async function saveFeeItem(env, body) {
     throw err;
   }
   const existing = (await listCollection(env, 'feeItems')).find((row) => sameText(row.FeeCode, feeCode) || sameText(row.__id, safeDocumentId(feeCode))) || {};
+  const className = canonicalConfiguredClass(clean(body.ClassName || body.className) || 'All', await configuredClassNames(env));
   const payload = {
     ...existing,
     FeeCode: feeCode,
     FeeName: clean(body.FeeName || body.feeName),
     FeeCategory: clean(body.FeeCategory || body.feeCategory) || 'School Fee',
-    ClassName: clean(body.ClassName || body.className) || 'All',
+    ClassName: className,
     StudentType: clean(body.StudentType || body.studentType) || 'All',
     BillingCategory: clean(body.BillingCategory || body.billingCategory) || 'All',
     Gender: clean(body.Gender || body.gender) || 'All',

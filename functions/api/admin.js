@@ -2,6 +2,7 @@ import { getAccountsOverview } from './backend.js';
 import { listCollection, requireFirestoreEnv } from '../lib/firestore.js';
 import { requireStaffSession } from '../lib/staff-auth.js';
 import { listSchoolCollection, schoolSectionFor } from '../lib/school-scope.js';
+import { normalizeClassKey } from '../lib/class-names.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -203,9 +204,14 @@ export async function onRequestPost(context) {
       const key = clean(getter(row)) || 'Unspecified'; out[key] = (out[key] || 0) + 1; return out;
     }, {})).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
     const accountRows = accountOverview && accountOverview.ok ? staffScope(accountOverview.accounts || []) : [];
-    const classBalances = Object.entries(accountRows.reduce((out, row) => {
-      const key = clean(row.ClassName) || 'Unspecified'; out[key] = (out[key] || 0) + Math.max(0, toNumber(row.OutstandingBalance ?? row.Balance)); return out;
-    }, {})).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
+    const classBalanceGroups = accountRows.reduce((out, row) => {
+      const original = clean(row.ClassName) || 'Unspecified';
+      const key = normalizeClassKey(original) || 'unspecified';
+      out[key] = out[key] || { label: original, value: 0 };
+      out[key].value += Math.max(0, toNumber(row.OutstandingBalance ?? row.Balance));
+      return out;
+    }, {});
+    const classBalances = Object.values(classBalanceGroups).sort((a, b) => b.value - a.value);
     const charts = {
       studentGender: countBy(visibleStudents, (row) => row.Gender),
       studentCategory: countBy(visibleStudents, (row) => row.EnrollmentCategory || row.IntakeCategory || 'Returning'),

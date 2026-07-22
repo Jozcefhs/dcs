@@ -3,6 +3,7 @@
 
 import { getAdmissionClasses, getSchoolCode } from './backend.js';
 import { requireFirestoreEnv } from '../lib/firestore.js';
+import { normalizeClassKey } from '../lib/class-names.js';
 
 const PAYSTACK_INIT_URL = 'https://api.paystack.co/transaction/initialize';
 
@@ -19,7 +20,7 @@ function toAmount(value) {
 }
 
 function normalizeClassName(value) {
-  return String(value || '').trim().toLowerCase().replace(/\s*\/\s*/g, '/').replace(/\s+/g, ' ');
+  return normalizeClassKey(value);
 }
 
 async function getAdmissionClassSetup(env, className) {

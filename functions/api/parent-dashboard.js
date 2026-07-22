@@ -114,6 +114,21 @@ function anyExactKeyMatches(value, keys) {
   return keys.some((key) => sameText(value, key));
 }
 
+function referenceIdentityKey(value) {
+  return lower(value).split(/[^a-z0-9]+/).filter(Boolean).map((part) => /^\d+$/.test(part) ? String(Number(part)) : part).join('|');
+}
+
+function financialKeys(child) {
+  const primary = [pick(child, ['AccountRef', 'accountRef']), pick(child, ['AdmissionNo', 'admissionNo'])].map(clean).filter(Boolean);
+  if (primary.length) return primary;
+  return [pick(child, ['ApplicationReference', 'applicationReference', 'ApplicationID', 'applicationId', '__id'])].map(clean).filter(Boolean);
+}
+
+function financialReferenceMatches(value, child) {
+  const wanted = referenceIdentityKey(value);
+  return Boolean(wanted && financialKeys(child).some((key) => referenceIdentityKey(key) === wanted));
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -138,7 +153,9 @@ function applicationKeys(application) {
 function applicationMatchesChild(application, child) {
   const appKeys = applicationKeys(application);
   const childKeys = accountKeys(child);
-  if (appKeys.some((appKey) => childKeys.some((childKey) => sameText(appKey, childKey) || referencesMatch(appKey, childKey)))) {
+  const applicationAdmission = pick(application, ['AdmissionNo', 'admissionNo']);
+  const childAdmission = pick(child, ['AdmissionNo', 'admissionNo']);
+  if (applicationAdmission && childAdmission && referenceIdentityKey(applicationAdmission) === referenceIdentityKey(childAdmission)) {
     return true;
   }
 
@@ -150,9 +167,11 @@ function applicationMatchesChild(application, child) {
   const childName = pick(child, ['DisplayName', 'displayName', 'ApplicantName', 'applicantName', 'Name', 'name']);
   const applicationEmail = lower(pick(application, ['VerificationEmail', 'verificationEmail', 'ParentEmail', 'parentEmail', 'Email', 'email']));
   const childEmail = lower(pick(child, ['ParentEmail', 'parentEmail', 'VerificationEmail', 'verificationEmail', 'Email', 'email']));
-  return Boolean(applicationName && childName && applicationEmail && childEmail &&
+  const identityMatches = Boolean(applicationName && childName && applicationEmail && childEmail &&
     normalizedPersonName(applicationName) === normalizedPersonName(childName) &&
     applicationEmail === childEmail);
+  if (identityMatches) return true;
+  return child.SourceType === 'Application' && appKeys.some((appKey) => childKeys.some((childKey) => sameText(appKey, childKey) || referencesMatch(appKey, childKey)));
 }
 
 function studentLoginCode(student) {
@@ -490,8 +509,9 @@ function isWalletLedger(entry) {
 
 function isOptionalSubscriptionEntry(entry) {
   const category = lower(entry && entry.FeeCategory);
-  if (['bus service', 'transport', 'club', 'optional', 'others'].includes(category)) return true;
+  if (['bus service', 'transport', 'club', 'optional', 'others', 'store'].includes(category)) return true;
   const feeCode = clean(entry && entry.FeeCode).toUpperCase();
+  if (feeCode === 'STORE_CART') return true;
   const feeName = lower(entry && entry.FeeName);
   const description = lower(entry && entry.Description);
   const reference = clean(entry && entry.Reference).toUpperCase();
@@ -555,7 +575,8 @@ function accountSummaryForKeys(accounts, keys, ledgerEntries) {
       pick(row, ['AdmissionNo', 'admissionNo']),
       pick(row, ['ApplicationReference', 'applicationReference'])
     ].map(clean).filter(Boolean);
-    return rowKeys.some((key) => anyKeyMatches(key, keys));
+    const wanted = new Set(keys.map(referenceIdentityKey).filter(Boolean));
+    return rowKeys.slice(0, 2).some((key) => wanted.has(referenceIdentityKey(key)));
   });
   return normalizeAccountSummary(account) || feeAccountSummary(ledgerEntries);
 }
@@ -805,8 +826,8 @@ function groupedLedgerPayments(entries) {
   return Object.values(groups);
 }
 
-function paymentHistoryFor(keys, payments, ledger) {
-  const ledgerEntries = (ledger || []).filter((entry) => anyExactKeyMatches(entry.AccountRef, keys) && lower(entry.FeeCategory) !== 'wallet');
+function paymentHistoryFor(child, payments, ledger) {
+  const ledgerEntries = (ledger || []).filter((entry) => financialReferenceMatches(entry.AccountRef, child) && lower(entry.FeeCategory) !== 'wallet');
   const paidLedgerEntries = ledgerEntries.filter(isPaidRecord);
   return groupedLedgerPayments(paidLedgerEntries).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
 }
@@ -832,7 +853,7 @@ function paymentHistoryForChild(child, payments, ledger) {
     });
     return groupedLedgerPayments(appLedger).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
   }
-  return paymentHistoryFor(accountKeys(child), payments, ledger);
+  return paymentHistoryFor(child, payments, ledger);
 }
 
 async function getAppsScriptAccountsOverview(env) {
@@ -872,11 +893,11 @@ function dueStatus(dueDate) {
 function invoiceDueNotifications(invoices, keys, accountSummary = null, child = {}) {
   if (accountSummary && asMoneyNumber(accountSummary.OutstandingBalance) <= 0) return [];
   return (invoices || [])
-    .filter((invoice) => anyKeyMatches(invoice.AccountRef, keys))
+    .filter((invoice) => financialReferenceMatches(invoice.AccountRef, child))
     .filter((invoice) => {
       if (isSchoolFee(invoice)) return false;
       const enrollmentCategory = lower(child.EnrollmentCategory || child.IntakeCategory || 'Returning');
-      if (/acceptance/.test(lower(`${invoice.FeeCode} ${invoice.FeeName}`)) && enrollmentCategory !== 'new intake') return false;
+      if (/\baccept(?:ance)?/.test(lower(`${invoice.FeeCode} ${invoice.FeeName}`).replace(/[_-]+/g, ' ')) && enrollmentCategory !== 'new intake') return false;
       if (clean(child.AcademicSession) && clean(invoice.AcademicSession) && !['all', '*'].includes(lower(invoice.AcademicSession)) && !sameText(child.AcademicSession, invoice.AcademicSession)) return false;
       if (clean(child.Term) && clean(invoice.Term) && !['all', '*'].includes(lower(invoice.Term)) && !sameText(child.Term, invoice.Term)) return false;
       const status = lower(invoice.Status);
@@ -950,9 +971,9 @@ async function getDashboard(env, body) {
 
   for (const child of children) {
     const keys = accountKeys(child);
-    const childLedger = ledger.filter((entry) => anyKeyMatches(entry.AccountRef, keys));
+    const childLedger = ledger.filter((entry) => financialReferenceMatches(entry.AccountRef, child));
     const walletEntries = ledger.filter((entry) => {
-      return anyKeyMatches(entry.AccountRef, keys) &&
+      return financialReferenceMatches(entry.AccountRef, child) &&
         lower(entry.FeeCategory) === 'wallet';
     }).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
     child.WalletBalance = walletBalance(walletEntries);
@@ -967,7 +988,7 @@ async function getDashboard(env, body) {
     payableItems[child.AccountRef] = [];
     dueNotifications[child.AccountRef] = invoiceDueNotifications(invoices, keys, accountSummary, child);
     clinicVisits[child.AccountRef] = clinic.filter((record) => {
-      return anyKeyMatches(record.AdmissionNo, keys);
+      return financialReferenceMatches(record.AdmissionNo, child);
     }).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
     const resultSource = applications.find((app) => applicationMatchesChild(app, child)) ||
       (child.SourceType === 'Application' ? child : null);
@@ -989,7 +1010,7 @@ async function getDashboard(env, body) {
     entranceResults,
     clinicVisits,
     storeCatalog: (sources.storeItems || []).filter((row) => isYes(row.Active === undefined ? 'YES' : row.Active) && asMoneyNumber(row.Quantity) > 0),
-    storeOrders: (sources.storeOrders || []).filter((row) => children.some((child) => accountKeys(child).some((key) => anyKeyMatches(row.AccountRef || row.AdmissionNo, [key]))))
+    storeOrders: (sources.storeOrders || []).filter((row) => children.some((child) => financialReferenceMatches(row.AccountRef || row.AdmissionNo, child)))
   };
 }
 
@@ -1019,7 +1040,7 @@ async function getChildActivity(env, body) {
       children.push(child);
       accountKeys(child).forEach((key) => childRefs.add(lower(key)));
     });
-  const child = children.find((row) => accountKeys(row).some((key) => anyKeyMatches(accountRef, [key])));
+  const child = children.find((row) => financialReferenceMatches(accountRef, row));
   if (!child) {
     const err = new Error('The selected child was not found for this parent account.');
     err.status = 404;
@@ -1030,9 +1051,9 @@ async function getChildActivity(env, body) {
   const invoices = (sources.invoices || []).map(normalizeInvoice);
   const payments = (sources.payments || []).map(normalizePayment);
   const clinic = (sources.clinic || []).map(normalizeClinicRecord);
-  const walletEntries = ledger.filter((entry) => anyKeyMatches(entry.AccountRef, keys) && lower(entry.FeeCategory) === 'wallet')
+  const walletEntries = ledger.filter((entry) => financialReferenceMatches(entry.AccountRef, child) && lower(entry.FeeCategory) === 'wallet')
     .sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
-  const childLedger = ledger.filter((entry) => anyKeyMatches(entry.AccountRef, keys));
+  const childLedger = ledger.filter((entry) => financialReferenceMatches(entry.AccountRef, child));
   const accountSummary = accountSummaryForKeys(sources.accounts, keys, childLedger);
   child.TotalDebit = accountSummary.TotalDebit;
   child.TotalCredit = accountSummary.TotalCredit;
@@ -1049,7 +1070,7 @@ async function getChildActivity(env, body) {
     accountSummary,
     paymentRecords: paymentHistoryForChild(child, payments, ledger),
     dueNotifications: invoiceDueNotifications(invoices, keys, accountSummary, child),
-    clinicVisits: clinic.filter((record) => anyKeyMatches(record.AdmissionNo, keys)).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date))),
+    clinicVisits: clinic.filter((record) => financialReferenceMatches(record.AdmissionNo, child)).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date))),
     showResultsOnline: schoolResultsAreVisible(schoolProfile),
     entranceResults: result ? [result] : []
   };

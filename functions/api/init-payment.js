@@ -3,6 +3,7 @@
 
 import { getPayableFees, getSchoolCode } from './backend.js';
 import { listCollection, requireFirestoreEnv } from '../lib/firestore.js';
+import { classNamesMatch, normalizeClassKey } from '../lib/class-names.js';
 
 const PAYSTACK_INIT_URL = 'https://api.paystack.co/transaction/initialize';
 const SCHOOL_FEES_TOTAL_CODE = 'SCHOOL_FEES_TOTAL';
@@ -130,8 +131,9 @@ export async function onRequestPost(context) {
       const requestedCart = Array.isArray(body.storeCart) ? body.storeCart.slice(0, 25) : [];
       const catalog = await listCollection(env, 'storeItems');
       storeCart = requestedCart.map((entry) => {
-        const accountSection = String(payableAccount.SchoolSection || (/creche|nursery|primary|grade\s*[1-6]/i.test(payableAccount.ClassName || payableAccount.ClassAdmitted || '') ? 'Primary' : 'Secondary')).toLowerCase();
-        const item = catalog.find((row) => String(row.ItemCode || '').trim() === String(entry.itemCode || '').trim() && String(row.StoreType || '').trim() === String(entry.storeType || '').trim() && String(row.SchoolSection || 'Secondary').trim().toLowerCase() === accountSection && (!row.BranchId || !payableAccount.BranchId || String(row.BranchId).trim().toLowerCase() === String(payableAccount.BranchId).trim().toLowerCase()));
+        const classKey = normalizeClassKey(payableAccount.ClassName || payableAccount.ClassAdmitted || '');
+        const accountSection = String(payableAccount.SchoolSection || (/^(creche|prenursery|nursery[1-3]|primary[1-6])$/.test(classKey) ? 'Primary' : 'Secondary')).toLowerCase();
+        const item = catalog.find((row) => String(row.ItemCode || '').trim() === String(entry.itemCode || '').trim() && String(row.StoreType || '').trim() === String(entry.storeType || '').trim() && String(row.SchoolSection || 'Secondary').trim().toLowerCase() === accountSection && (!row.BranchId || !payableAccount.BranchId || String(row.BranchId).trim().toLowerCase() === String(payableAccount.BranchId).trim().toLowerCase()) && (!row.ClassName || ['all', '*'].includes(String(row.ClassName).trim().toLowerCase()) || classNamesMatch(row.ClassName, payableAccount.ClassName || payableAccount.ClassAdmitted)) && (!row.Gender || ['all', '*'].includes(String(row.Gender).trim().toLowerCase()) || String(row.Gender).trim().toLowerCase() === String(payableAccount.Gender || '').trim().toLowerCase()));
         if (!item || !isYes(item.Active === undefined ? 'YES' : item.Active)) throw new Error('A selected store item is no longer available.');
         const quantity = Math.max(1, Math.floor(toAmount(entry.quantity || 1)));
         if (quantity > toAmount(item.Quantity)) throw new Error(`${item.ItemName} does not have enough stock.`);

@@ -856,20 +856,35 @@ function storeItemMatchesChild(item, child) {
   const itemSection = String(item.SchoolSection || 'Secondary');
   const branchMatches = !item.BranchId || !child.BranchId || same(item.BranchId, child.BranchId);
   return branchMatches && same(itemSection, childSection) && (all(item.Gender) || same(item.Gender, child.Gender)) &&
-    (all(item.ClassName) || same(item.ClassName, child.ClassName || child.ClassAdmitted));
+    (all(item.ClassName) || normalizePortalClass(item.ClassName) === normalizePortalClass(child.ClassName || child.ClassAdmitted));
+}
+
+function normalizePortalClass(value) {
+  let text = String(value || '').trim().toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+  const numbers = { one: 1, first: 1, two: 2, second: 2, three: 3, third: 3, four: 4, fourth: 4, five: 5, fifth: 5, six: 6, sixth: 6, seven: 7, seventh: 7, eight: 8, eighth: 8, nine: 9, ninth: 9 };
+  text = text.replace(/\b(one|first|two|second|three|third|four|fourth|five|fifth|six|sixth|seven|seventh|eight|eighth|nine|ninth)\b/g, (word) => numbers[word]);
+  text = text.replace(/[._/\\-]+/g, ' ').replace(/\bclass\b/g, ' ').replace(/\s+/g, ' ').trim();
+  let match = text.match(/(?:primary|grade|basic)\s*([1-6])/); if (match) return `primary${match[1]}`;
+  match = text.match(/basic\s*([7-9])/); if (match) return `jss${Number(match[1]) - 6}`;
+  match = text.match(/(?:jss|junior\s*secondary)\s*([1-3])/); if (match) return `jss${match[1]}`;
+  match = text.match(/(?:ss|sss|senior\s*secondary)\s*([1-3])/); if (match) return `ss${match[1]}`;
+  match = text.match(/(?:nursery|kg)\s*([1-3])/); if (match) return `nursery${match[1]}`;
+  if (/pre\s*nursery|prenursery/.test(text)) return 'prenursery';
+  if (/creche|daycare|playgroup/.test(text)) return 'creche';
+  return text.replace(/[^a-z0-9]/g, '');
 }
 
 function renderStores(child) {
   if (!schoolStores || !storeOrders) return;
   const catalog = (dashboard.storeCatalog || []).filter((item) => storeItemMatchesChild(item, child));
-  schoolStores.innerHTML = catalog.length ? '' : '<p class="muted">No bookstore or uniform items are currently available.</p>';
+  schoolStores.innerHTML = catalog.length ? '' : '<p class="muted">No school-store items are currently available.</p>';
   const groups = ['Bookstore', 'Uniform Store'];
   groups.forEach((storeType) => {
     const items = catalog.filter((item) => item.StoreType === storeType);
     if (!items.length) return;
     const section = document.createElement('section');
     section.className = 'store-catalog-section';
-    section.innerHTML = `<h3>${escapeHtml(storeType)}</h3>`;
+    section.innerHTML = `<h3>${escapeHtml(storeType === 'Bookstore' ? 'Books & General Supplies' : 'Clothing & General Supplies')}</h3>`;
     items.forEach((item) => {
       const row = document.createElement('div');
       row.className = 'activity-item store-item-row';
