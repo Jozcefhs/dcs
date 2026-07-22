@@ -233,6 +233,103 @@ function table(title, rows, columns) {
   `;
 }
 
+const studentProfileSections = [
+  ['Student identity', ['DisplayName', 'Surname', 'FirstName', 'MiddleName', 'Gender', 'DateOfBirth', 'PreviousSchool']],
+  ['Enrollment', ['ClassName', 'ClassArm', 'StudentType', 'BillingCategory', 'EnrollmentCategory', 'AcademicProgress', 'AcademicSession', 'Term']],
+  ['Parent and login', ['ParentName', 'ParentPhone', 'ParentEmail', 'ParentLoginCode', 'ResidentialAddress', 'CityArea', 'StateOfResidence']],
+  ['Medical and emergency', ['BloodGroup', 'Genotype', 'MedicalCondition', 'EmergencyContactName', 'EmergencyContactPhone']],
+  ['Status and student card', ['Status', 'StatusReason', 'StatusEffectiveDate', 'ExpectedReturnDate', 'WalletCardId', 'WalletCardStatus']]
+];
+
+function studentFieldLabel(field) {
+  return field.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/Id$/, 'ID');
+}
+
+function studentFieldControl(field, value) {
+  const safeValue = escapeHtml(value || '');
+  const options = {
+    Gender: ['', 'Male', 'Female'],
+    StudentType: ['', 'Day Student', 'Boarding Student', 'Day', 'Boarding'],
+    EnrollmentCategory: ['New Intake', 'Returning'],
+    AcademicProgress: ['Promoted', 'Repeating'],
+    Term: ['First Term', 'Second Term', 'Third Term'],
+    Status: ['Active', 'Enrolled', 'Withdrawn', 'Expelled', 'Graduated'],
+    WalletCardStatus: ['', 'Active', 'Blocked', 'Lost', 'Replaced']
+  };
+  if (options[field]) {
+    const values = options[field].includes(value) ? options[field] : [value, ...options[field]];
+    return `<select name="${field}">${values.map((item) => `<option value="${escapeHtml(item)}"${clean(item) === clean(value) ? ' selected' : ''}>${escapeHtml(item || 'Select')}</option>`).join('')}</select>`;
+  }
+  const type = field === 'ParentEmail' ? 'email' : ['DateOfBirth', 'StatusEffectiveDate', 'ExpectedReturnDate'].includes(field) ? 'date' : 'text';
+  return `<input name="${field}" type="${type}" value="${safeValue}">`;
+}
+
+function renderStudentEditor(students) {
+  return `<dialog id="studentProfileDialog" class="workflow-dialog student-profile-dialog">
+    <div class="workflow-dialog-header"><div><small>Student register</small><h2>Edit Student Profile</h2></div><button type="button" data-close-student-dialog aria-label="Close">&times;</button></div>
+    <form id="studentProfileForm" class="workflow-form config-dialog-form">
+      <input type="hidden" name="AccountRef">
+      <div class="student-login-guidance"><strong>Parent login</strong><span>Imported parents use Parent Email and Parent Login Code on the Parent Dashboard.</span></div>
+      <div data-student-form-sections></div>
+      <div class="config-dialog-actions"><p class="status" data-student-form-status></p><button type="submit">Save student profile</button></div>
+    </form>
+  </dialog>`;
+}
+
+function openStudentEditor(student) {
+  const dialog = document.getElementById('studentProfileDialog');
+  const form = document.getElementById('studentProfileForm');
+  if (!dialog || !form || !student) return;
+  form.elements.AccountRef.value = pick(student, ['AdmissionNo', 'AccountRef', '__id']);
+  form.querySelector('[data-student-form-sections]').innerHTML = studentProfileSections.map(([title, fields]) => `
+    <section class="config-group"><header><strong>${escapeHtml(title)}</strong></header><div class="config-grid">
+      ${fields.map((field) => {
+        let value = pick(student, [field]);
+        if (field === 'DisplayName') value = value || pick(student, ['ApplicantName', 'StudentName']);
+        if (field === 'ClassName') value = value || pick(student, ['ClassAdmitted']);
+        if (field === 'ParentLoginCode') value = value || pick(student, ['VerificationCode']);
+        return `<label>${escapeHtml(studentFieldLabel(field))}${studentFieldControl(field, value)}${field === 'ParentLoginCode' ? '<button type="button" class="student-code-generator" data-generate-student-code>Generate secure code</button>' : ''}</label>`;
+      }).join('')}
+    </div></section>`).join('');
+  form.querySelector('[data-generate-student-code]')?.addEventListener('click', () => {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const bytes = crypto.getRandomValues(new Uint8Array(8));
+    form.elements.ParentLoginCode.value = Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join('');
+  });
+  setStatus(form.querySelector('[data-student-form-status]'), '', '');
+  dialog.showModal();
+}
+
+function bindStudentEditor(students) {
+  document.querySelector('[data-close-student-dialog]')?.addEventListener('click', () => document.getElementById('studentProfileDialog')?.close());
+  panelEl.querySelectorAll('[data-edit-student]').forEach((button) => button.addEventListener('click', () => {
+    const student = students.find((row) => clean(pick(row, ['AdmissionNo', 'AccountRef', '__id'])).toLowerCase() === clean(button.dataset.editStudent).toLowerCase());
+    openStudentEditor(student);
+  }));
+  document.getElementById('studentProfileForm')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const status = form.querySelector('[data-student-form-status]');
+    const button = form.querySelector('button[type="submit"]');
+    const payload = Object.fromEntries(new FormData(form).entries());
+    payload.action = 'update';
+    payload.VerificationCode = payload.ParentLoginCode || '';
+    setButtonLoading(button, true, 'Saving...', 'Save student profile');
+    try {
+      const response = await fetch('/api/staff-students', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.message || 'Could not update student profile.');
+      setStatus(status, data.message, 'ok');
+      await loadDashboard();
+      document.getElementById('studentProfileDialog')?.close();
+    } catch (error) {
+      setStatus(status, error.message || String(error), 'bad');
+    } finally {
+      setButtonLoading(button, false, 'Saving...', 'Save student profile');
+    }
+  });
+}
+
 const admissionDocuments = [
   ['BirthCertificate', 'Birth Certificate'],
   ['PreviousSchoolReport', 'Previous School Report'],
@@ -371,13 +468,16 @@ function renderSection(active) {
       { label: 'Amount', value: (row) => money(pick(row, ['AmountPaid', 'Amount'])) }
     ]);
   } else if (active === 'students') {
-    panelEl.innerHTML = table('Students', departments.students || [], [
+    const students = departments.students || [];
+    panelEl.innerHTML = table('Students', students, [
       { label: 'Admission No', value: (row) => pick(row, ['AdmissionNo', 'AccountRef', '__id']) },
       { label: 'Name', value: (row) => pick(row, ['DisplayName', 'ApplicantName', 'StudentName']) },
       { label: 'Class', value: (row) => [pick(row, ['ClassName']), pick(row, ['ClassArm'])].filter(Boolean).join(' ') },
       { label: 'Type', value: (row) => pick(row, ['StudentType']) },
-      { label: 'Status', value: (row) => pick(row, ['Status']) }
-    ]);
+      { label: 'Status', value: (row) => pick(row, ['Status']) },
+      { label: 'Profile', render: (row) => `<button type="button" class="table-action" data-edit-student="${escapeHtml(pick(row, ['AdmissionNo', 'AccountRef', '__id']))}">Edit</button>` }
+    ]) + renderStudentEditor(students);
+    bindStudentEditor(students);
   } else if (active === 'bookstore' || active === 'uniformStore') {
     panelEl.innerHTML = '<p class="muted">Loading store catalog...</p>';
     loadStaffStore(active);

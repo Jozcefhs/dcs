@@ -136,6 +136,16 @@ async function sha256Hex(value) {
   return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+function generateParentLoginCode(existingCodes = new Set()) {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const bytes = crypto.getRandomValues(new Uint8Array(8));
+    const code = Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join('');
+    if (!existingCodes.has(code)) return code;
+  }
+  return `P${Date.now().toString(36).toUpperCase().slice(-7)}`;
+}
+
 function applicationIdFrom(data) {
   return clean(data.ApplicationID || data.ApplicationReference || data.id || data.applicationReference);
 }
@@ -174,7 +184,7 @@ async function findStudentByAccountRef(env, accountRef) {
   if (!wanted) return null;
   const rows = await listSchoolCollection(env, 'students');
   const normalized = rows.map(normalizeStudent);
-  return normalized.find((row) => sameReferenceIdentity(row.AdmissionNo || row.AccountRef, wanted)) ||
+  return normalized.find((row) => [row.AdmissionNo, row.AccountRef, row.__id].some((value) => value && sameReferenceIdentity(value, wanted))) ||
     normalized.find((row) => sameReferenceIdentity(row.ApplicationReference, wanted)) || null;
 }
 
@@ -182,7 +192,7 @@ function findStudentByAccountRefInRows(rows, accountRef) {
   const wanted = clean(accountRef);
   if (!wanted) return null;
   const normalized = (rows || []).map(normalizeStudent);
-  return normalized.find((row) => sameReferenceIdentity(row.AdmissionNo || row.AccountRef, wanted)) ||
+  return normalized.find((row) => [row.AdmissionNo, row.AccountRef, row.__id].some((value) => value && sameReferenceIdentity(value, wanted))) ||
     normalized.find((row) => sameReferenceIdentity(row.ApplicationReference, wanted)) || null;
 }
 
@@ -213,9 +223,14 @@ async function updateStudentProfile(env, body) {
   const existing = await findStudentByAccountRef(env, accountRef);
   if (!existing) throw applicationNotFound(accountRef);
   const editableFields = [
-    'DisplayName', 'Gender', 'DateOfBirth', 'ClassName', 'ClassArm', 'StudentType',
-    'BillingCategory', 'EnrollmentCategory', 'AcademicProgress', 'AcademicSession',
-    'Term', 'ParentName', 'ParentPhone', 'ParentEmail', 'Status'
+    'DisplayName', 'ApplicantName', 'Surname', 'FirstName', 'MiddleName', 'Gender',
+    'DateOfBirth', 'ClassName', 'ClassArm', 'StudentType', 'BillingCategory',
+    'EnrollmentCategory', 'AcademicProgress', 'AcademicSession', 'Term', 'ParentName',
+    'ParentPhone', 'ParentEmail', 'ResidentialAddress', 'CityArea', 'StateOfResidence',
+    'BloodGroup', 'Genotype', 'MedicalCondition', 'EmergencyContactName',
+    'EmergencyContactPhone', 'PreviousSchool', 'VerificationCode', 'ParentLoginCode',
+    'WalletCardId', 'WalletCardStatus', 'Status', 'StatusReason', 'StatusEffectiveDate',
+    'ExpectedReturnDate'
   ];
   const updated = { ...existing };
   editableFields.forEach((field) => {
@@ -225,6 +240,13 @@ async function updateStudentProfile(env, body) {
     updated.ClassName = canonicalConfiguredClass(body.ClassName, await configuredClassNames(env));
     updated.ClassAdmitted = updated.ClassName;
   }
+  if (body.ParentEmail !== undefined) updated.ParentEmail = lower(body.ParentEmail);
+  if (body.VerificationCode !== undefined || body.ParentLoginCode !== undefined) {
+    const loginCode = clean(body.ParentLoginCode ?? body.VerificationCode).toUpperCase();
+    updated.ParentLoginCode = loginCode;
+    updated.VerificationCode = loginCode;
+  }
+  if (body.DisplayName !== undefined) updated.ApplicantName = clean(body.DisplayName);
   updated.UpdatedAt = nowIso();
   updated.UpdatedBy = clean(body.UpdatedBy || body.RecordedBy) || 'Student Register';
   const student = await saveStudent(env, updated);
@@ -2076,6 +2098,8 @@ async function importStudents(env, body) {
   let skipped = 0;
   const failures = [];
   const savedStudents = [];
+  const credentials = [];
+  const loginCodes = new Set(existingStudents.flatMap((row) => studentLoginCodes(row)));
   for (let index = 0; index < rows.length; index += 1) {
     const input = rows[index] || {};
     const rowNo = index + 1;
@@ -2110,6 +2134,9 @@ async function importStudents(env, body) {
       failures.push(`Row ${rowNo} (${admissionNo}): already exists.`);
       continue;
     }
+    let parentLoginCode = clean(input.ParentLoginCode || input.VerificationCode || input.LoginCode).toUpperCase();
+    if (!parentLoginCode) parentLoginCode = generateParentLoginCode(loginCodes);
+    loginCodes.add(parentLoginCode);
     const student = {
       ...input,
       EnrolledAt: input.EnrolledAt || nowIso(),
@@ -2124,6 +2151,8 @@ async function importStudents(env, body) {
       StudentType: input.StudentType || 'Day Student',
       BillingCategory: input.BillingCategory || input['Billing Category'] || 'Regular',
       Gender: input.Gender || input.Sex || '',
+      ParentLoginCode: parentLoginCode,
+      VerificationCode: parentLoginCode,
       EnrollmentCategory: input.EnrollmentCategory || input.IntakeCategory || 'Returning',
       AcademicProgress: input.AcademicProgress || input.ProgressCategory || input.RepeaterStatus || 'Promoted',
       Status: input.Status || 'Active',
@@ -2134,9 +2163,16 @@ async function importStudents(env, body) {
     };
     const saved = await saveStudent(env, student);
     savedStudents.push(saved);
+    credentials.push({
+      AdmissionNo: admissionNo,
+      DisplayName: applicantName,
+      ParentEmail: lower(input.ParentEmail || input.VerificationEmail || input.Email),
+      ParentLoginCode: parentLoginCode,
+      LoginReady: Boolean(clean(input.ParentEmail || input.VerificationEmail || input.Email))
+    });
     imported += 1;
   }
-  return { ok: true, message: 'Student import completed.', imported, skipped, failures, students: (await listSchoolCollection(env, 'students')).map(normalizeStudent) };
+  return { ok: true, message: 'Student import completed.', imported, skipped, failures, credentials, students: (await listSchoolCollection(env, 'students')).map(normalizeStudent) };
 }
 
 async function promoteStudents(env, body) {
