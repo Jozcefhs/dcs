@@ -2,6 +2,7 @@ const setupLoginForm = document.getElementById('setupLoginForm');
 const setupForm = document.getElementById('setupForm');
 const setupLoginStatus = document.getElementById('setupLoginStatus');
 const setupStatus = document.getElementById('setupStatus');
+const saveSetupButton = document.getElementById('saveSetupButton');
 let unlockedPassword = '';
 let webLogoDataUrl = '';
 let webLogoChanged = false;
@@ -100,7 +101,7 @@ setupLoginForm.addEventListener('submit', async (event) => {
     await loadProfile(unlockedPassword);
     setupLoginForm.hidden = true;
     setupForm.hidden = false;
-    setStatus('Setup unlocked.', 'ok');
+    setStatus('Settings loaded and ready to edit.', 'ok');
   } catch (error) {
     unlockedPassword = '';
     setLoginStatus(error.message, 'bad');
@@ -155,6 +156,8 @@ setupForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   try {
     setStatus('Saving setup...', '');
+    saveSetupButton.disabled = true;
+    saveSetupButton.textContent = 'Saving...';
     const response = await fetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -165,10 +168,31 @@ setupForm.addEventListener('submit', async (event) => {
     });
     const data = await response.json();
     if (!response.ok || !data.ok) throw new Error(data.message || 'Setup could not be saved.');
-    setStatus('School setup saved.', 'ok');
+    setStatus('All changes saved.', 'ok');
   } catch (error) {
     setStatus(error.message, 'bad');
+  } finally {
+    saveSetupButton.disabled = false;
+    saveSetupButton.textContent = 'Save changes';
   }
 });
+
+setupForm.addEventListener('input', () => {
+  setStatus('You have unsaved changes.', '');
+});
+
+const settingsNavLinks = [...document.querySelectorAll('.settings-nav-link')];
+settingsNavLinks.forEach((link) => link.addEventListener('click', () => {
+  settingsNavLinks.forEach((item) => item.classList.toggle('active', item === link));
+}));
+
+if ('IntersectionObserver' in window) {
+  const sectionObserver = new IntersectionObserver((entries) => {
+    const visible = entries.filter((entry) => entry.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+    if (!visible) return;
+    settingsNavLinks.forEach((link) => link.classList.toggle('active', link.getAttribute('href') === `#${visible.target.id}`));
+  }, { rootMargin: '-15% 0px -65% 0px', threshold: [0, .2, .5] });
+  document.querySelectorAll('.settings-section').forEach((section) => sectionObserver.observe(section));
+}
 
 // Public pages can read the school profile, but setup editing stays locked until password entry.

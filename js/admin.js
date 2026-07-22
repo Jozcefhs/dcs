@@ -280,15 +280,18 @@ function renderStaffStore(section, store) {
   const activeCategories = categories.filter((row) => clean(row.Active || 'YES') !== 'NO');
   panelEl.innerHTML = `
     <div class="workflow-intro"><div><p class="eyebrow">School store</p><h2>${label}</h2><p class="muted">List items and prices, monitor paid orders, and record collection.</p></div></div>
-    <form id="staffStoreItemForm" class="workflow-form workflow-form-grid">
+    <section class="config-card">
+      <header class="config-card-heading"><div><small>Inventory setup</small><h3>Add or update an item</h3><p>Define how this product appears to parents and storekeepers.</p></div></header>
+    <form id="staffStoreItemForm" class="workflow-form workflow-form-grid config-form">
       <label>Item code<input name="ItemCode" required></label><label>Item name<input name="ItemName" required></label>
       <label>Category<input name="Category" list="storeCategoryOptions" autocomplete="off" required><datalist id="storeCategoryOptions">${activeCategories.map((row) => `<option value="${escapeHtml(row.Name)}"></option>`).join('')}</datalist></label><label>Size<input name="Size"></label>
       <label>Gender<select name="Gender"><option>All</option><option>Male</option><option>Female</option></select></label><label>Class<input name="ClassName" value="All"></label>
       <label>Price<input name="Price" type="number" min="0" step="0.01" required></label><label>Stock quantity<input name="Quantity" type="number" min="0" step="1" required></label>
-      <label class="check-row"><input name="Active" type="checkbox" checked> Available to parents</label><button type="submit">Save Item</button><p class="status" data-store-status></p>
+      <div class="config-actionbar"><label class="check-row"><input name="Active" type="checkbox" checked> Available to parents</label><p class="status" data-store-status></p><button type="submit">Save item</button></div>
     </form>
-    <details class="workflow-card"><summary>Category Management</summary>
-      <form id="storeCategoryForm" class="workflow-form workflow-form-grid"><input type="hidden" name="CategoryId"><label>Category name<input name="Name" required></label><label>Available in<select name="AppliesTo"><option value="${label}">${label}</option><option value="Bookstore,Uniform Store">Both stores</option></select></label><label class="check-row"><input name="Active" type="checkbox" checked> Active</label><button type="submit">Save Category</button><p class="status" data-category-status></p></form>
+    </section>
+    <details class="workflow-card config-details"><summary><span>Category management<small>Add, rename or deactivate reusable product categories.</small></span></summary>
+      <form id="storeCategoryForm" class="workflow-form workflow-form-grid config-form"><input type="hidden" name="CategoryId"><label>Category name<input name="Name" required></label><label>Available in<select name="AppliesTo"><option value="${label}">${label}</option><option value="Bookstore,Uniform Store">Both stores</option></select></label><div class="config-actionbar"><label class="check-row"><input name="Active" type="checkbox" checked> Category active</label><p class="status" data-category-status></p><button type="submit">Save category</button></div></form>
       <div class="workflow-record-list">${categories.length ? categories.map((row) => `<article class="workflow-record"><div><strong>${escapeHtml(row.Name)}</strong><small>${escapeHtml((row.StoreScopes || []).join(', '))} · ${escapeHtml(row.Active || 'YES')}</small></div><div class="workflow-actions"><button type="button" data-edit-category="${escapeHtml(row.CategoryId)}">Edit</button>${clean(row.Active || 'YES') === 'NO' ? '' : `<button type="button" data-deactivate-category="${escapeHtml(row.CategoryId)}">Deactivate</button>`}</div></article>`).join('') : '<p class="muted">Existing item categories will be added here automatically.</p>'}</div>
     </details>
     ${table(`${label} Items`, store.items || [], [
@@ -298,7 +301,7 @@ function renderStaffStore(section, store) {
     ])}
     <h2>Paid Orders & Collection</h2><div class="workflow-record-list">${(store.orders || []).length ? (store.orders || []).map((order) => `
       <article class="workflow-record"><div class="workflow-record-heading"><div><strong>${escapeHtml(order.DisplayName || order.AccountRef)}</strong><small>${escapeHtml(order.OrderNo)}</small></div><span class="workflow-status">${escapeHtml(order.Status || 'Paid - Awaiting Collection')}</span></div>
-      <p>${money(order.Amount)} â€¢ ${escapeHtml(order.PaidAt || order.CreatedAt || '')}</p>
+      <p>${money(order.Amount)} &middot; ${escapeHtml(order.PaidAt || order.CreatedAt || '')}</p>
       <div class="workflow-actions"><button type="button" data-store-order="${escapeHtml(order.OrderNo)}" data-store-status="Ready for Collection">Ready for Collection</button><button type="button" data-store-order="${escapeHtml(order.OrderNo)}" data-store-status="Collected">Verify & Mark Collected</button></div></article>
     `).join('') : '<p class="muted">No paid orders yet.</p>'}</div>`;
   document.getElementById('staffStoreItemForm')?.addEventListener('submit', async (event) => {
@@ -745,24 +748,25 @@ function renderStaffUsers() {
     </section>
     <dialog id="staffUserDialog" class="workflow-dialog">
       <div class="workflow-dialog-header"><div><small>Identity & access</small><h2 id="staffUserDialogTitle">New Staff Account</h2></div><button type="button" data-close-user-dialog aria-label="Close">×</button></div>
-      <form id="staffUserForm" class="workflow-form">
-        <label>Username <span class="required">*</span><input name="Username" required></label>
-        <label>Display name <span class="required">*</span><input name="DisplayName" required></label>
-        <label>Role <select name="Role" required>
-          ${['Super Admin','Admissions Officer','Accounts Officer','Management','Department User','Tuck Shop User','Clinic User','Kitchen User','Front Desk'].map((role) => `<option>${role}</option>`).join('')}
-        </select></label>
-        <label>Department<input name="Department" placeholder="Required for Department User"></label>
-        <label>Branch ID<input name="BranchId" placeholder="Blank allows all branches"></label>
-        <label>School section<select name="SchoolSectionAccess"><option>All</option><option>Primary</option><option>Secondary</option></select></label>
-        <label class="check-row"><input name="ApprovalEnabled" type="checkbox"> Administrator grants finance approval right</label>
-        <label>Maximum approval amount<input name="ApprovalMaxAmount" type="number" min="0" step="0.01" value="0"><small>Zero blocks approval. Super Admin is unrestricted.</small></label>
-        <fieldset class="approval-account-list"><legend>Accounts this user may approve directly from</legend>${staffApprovalAccounts.length ? staffApprovalAccounts.map((account) => `<label class="check-row"><input type="checkbox" name="ApprovalAccountOption" value="${escapeHtml(account.Code)}"> ${escapeHtml(account.Code)} - ${escapeHtml(account.Name || '')}</label>`).join('') : '<small>Create active Chart of Accounts entries in the desktop Finance tab first.</small>'}</fieldset>
-        <fieldset class="approval-account-list"><legend>Web companion tabs (leave all clear to use role defaults)</legend>${tabConfig.map(([key, label]) => `<label class="check-row"><input type="checkbox" name="TabAccessOption" value="${escapeHtml(key)}"> ${escapeHtml(label)}</label>`).join('')}</fieldset>
-        <label>New or reset password<input name="Password" type="password" minlength="6" autocomplete="new-password"><small>Required for a new account. Leave blank when editing unless resetting it.</small></label>
-        <label class="check-row"><input name="Active" type="checkbox" checked> Account active</label>
-        <label class="check-row"><input name="MustChangePassword" type="checkbox" checked> Require password change at next sign-in</label>
-        <button type="submit">Save Staff Account</button>
-        <p class="status" data-user-form-status></p>
+      <form id="staffUserForm" class="workflow-form config-dialog-form">
+        <section class="config-group"><header><strong>Account identity</strong><small>Basic sign-in identity and organizational access.</small></header><div class="config-grid">
+          <label>Username <span class="required">*</span><input name="Username" required></label>
+          <label>Display name <span class="required">*</span><input name="DisplayName" required></label>
+          <label>Role <select name="Role" required>${['Super Admin','Admissions Officer','Accounts Officer','Management','Department User','Tuck Shop User','Clinic User','Kitchen User','Front Desk'].map((role) => `<option>${role}</option>`).join('')}</select></label>
+          <label>Department<input name="Department" placeholder="Required for Department User"></label>
+          <label>Branch ID<input name="BranchId" placeholder="Blank allows all branches"></label>
+          <label>School section<select name="SchoolSectionAccess"><option>All</option><option>Primary</option><option>Secondary</option></select></label>
+        </div></section>
+        <section class="config-group"><header><strong>Finance approval</strong><small>Approval is blocked unless explicitly enabled by an administrator.</small></header><div class="config-grid">
+          <label class="check-row config-switch"><input name="ApprovalEnabled" type="checkbox"> Allow this user to approve finance documents</label>
+          <label>Maximum approval amount<input name="ApprovalMaxAmount" type="number" min="0" step="0.01" value="0"><small>Zero blocks approval. Super Admin is unrestricted.</small></label>
+        </div><div class="approval-account-list config-option-list"><strong>Accounts this user may approve directly from</strong>${staffApprovalAccounts.length ? staffApprovalAccounts.map((account) => `<label class="check-row"><input type="checkbox" name="ApprovalAccountOption" value="${escapeHtml(account.Code)}"> ${escapeHtml(account.Code)} - ${escapeHtml(account.Name || '')}</label>`).join('') : '<small>Create active Chart of Accounts entries in the desktop Finance tab first.</small>'}</div></section>
+        <section class="config-group"><header><strong>Web companion access</strong><small>Leave all clear to use the selected role's default tabs.</small></header><div class="approval-account-list config-option-list config-option-grid">${tabConfig.map(([key, label]) => `<label class="check-row"><input type="checkbox" name="TabAccessOption" value="${escapeHtml(key)}"> ${escapeHtml(label)}</label>`).join('')}</div></section>
+        <section class="config-group"><header><strong>Security</strong><small>Password and account-state controls.</small></header><div class="config-grid">
+          <label>New or reset password<input name="Password" type="password" minlength="6" autocomplete="new-password"><small>Required for a new account. Leave blank when editing unless resetting it.</small></label>
+          <div class="config-toggle-stack"><label class="check-row"><input name="Active" type="checkbox" checked> Account active</label><label class="check-row"><input name="MustChangePassword" type="checkbox" checked> Require password change at next sign-in</label></div>
+        </div></section>
+        <div class="config-dialog-actions"><p class="status" data-user-form-status></p><button type="submit">Save staff account</button></div>
       </form>
     </dialog>
   `;
