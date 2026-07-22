@@ -2,6 +2,12 @@ import { deleteDocument, listCollection, requireFirestoreEnv, upsertDocument } f
 import { deleteSchoolDocument, getSchoolStructure, listSchoolCollection, safeScopeId, upsertSchoolDocument } from '../lib/school-scope.js';
 import { canonicalConfiguredClass, classNamesMatch } from '../lib/class-names.js';
 import { categoryApplies, ensureStoreCategories, resolveStoreCategory, saveStoreCategory } from '../lib/store-categories.js';
+import {
+  clonePayrollTaxProfile, getPayrollTaxConfiguration, migratePayrollTaxPhase2,
+  PAYROLL_TAX_COLLECTIONS, savePayrollSalaryComponent, savePayrollTaxBands,
+  savePayrollTaxProfile, savePayrollTaxReliefRules, seedTraditionalPayeConfiguration,
+  validatePayrollTaxConfigurationData
+} from '../lib/payroll/tax-config-service.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -4499,7 +4505,11 @@ async function routeAction(env, action, body = {}) {
         'settings', 'formSales', 'staffUsers', 'staffSecurityAudit',
         'accountingExpenses', 'accountingSupplierBills', 'accountingApprovalLimits',
         'accountingAudit', 'accountingJournals', 'accountingBudgets', 'accountingBanks', 'chartOfAccounts',
-        'accountingPayrollProfiles', 'accountingPayrollRuns', 'clinicRecords',
+        'accountingPayrollProfiles', 'accountingPayrollRuns',
+        'payrollProfiles', 'payrollRuns', 'payrollItems', 'payrollPayments', 'payrollAudit',
+        PAYROLL_TAX_COLLECTIONS.components, PAYROLL_TAX_COLLECTIONS.profiles, PAYROLL_TAX_COLLECTIONS.bands,
+        PAYROLL_TAX_COLLECTIONS.reliefs, PAYROLL_TAX_COLLECTIONS.mappings, PAYROLL_TAX_COLLECTIONS.overrides, PAYROLL_TAX_COLLECTIONS.migrations,
+        'clinicRecords',
         'clinicInventory', 'clinicMovements', 'kitchenInventory', 'kitchenMovements',
         'tuckShopPurchases', 'storeItems', 'storeOrders', 'storeCategories'
       ];
@@ -4573,6 +4583,58 @@ async function routeAction(env, action, body = {}) {
       return getAccountsOverview(env);
     case 'getAccountingOverview':
       return getAccountingOverview(env, body);
+    case 'getPayrollTaxConfiguration': {
+      requireAccountingRole(body, ['Super Admin', 'Accounts Officer']);
+      const configuration = await getPayrollTaxConfiguration(env);
+      return { ok: true, message: 'Payroll tax configuration loaded.', ...configuration, validation: validatePayrollTaxConfigurationData(configuration) };
+    }
+    case 'seedTraditionalPayeConfiguration': {
+      requireAccountingRole(body, ['Super Admin']);
+      const result = await seedTraditionalPayeConfiguration(env, body);
+      await writePayrollAudit(env, 'SEED TAX CONFIG', 'Payroll Tax Profile', clean(result.profile?.ProfileId), body, result.message);
+      return { ok: true, ...result };
+    }
+    case 'savePayrollSalaryComponent': {
+      requireAccountingRole(body, ['Super Admin']);
+      const component = await savePayrollSalaryComponent(env, body, clean(body.RecordedBy));
+      await writePayrollAudit(env, 'SAVE COMPONENT', 'Payroll Salary Component', component.ComponentId, body, component.Name);
+      return { ok: true, message: 'Payroll salary component saved.', component };
+    }
+    case 'savePayrollTaxProfile': {
+      requireAccountingRole(body, ['Super Admin']);
+      const profile = await savePayrollTaxProfile(env, body, clean(body.RecordedBy));
+      await writePayrollAudit(env, 'SAVE TAX PROFILE', 'Payroll Tax Profile', profile.ProfileId, body, `Version ${profile.Version}`);
+      return { ok: true, message: 'Payroll tax profile saved.', profile };
+    }
+    case 'clonePayrollTaxProfile': {
+      requireAccountingRole(body, ['Super Admin']);
+      const result = await clonePayrollTaxProfile(env, body, clean(body.RecordedBy));
+      await writePayrollAudit(env, 'CLONE TAX PROFILE', 'Payroll Tax Profile', result.profile.ProfileId, body, `Cloned from ${clean(body.SourceProfileId || body.ProfileId)}`);
+      return { ok: true, message: 'A new draft tax-profile version was created.', ...result };
+    }
+    case 'savePayrollTaxBands': {
+      requireAccountingRole(body, ['Super Admin']);
+      const bands = await savePayrollTaxBands(env, body, clean(body.RecordedBy));
+      await writePayrollAudit(env, 'SAVE TAX BANDS', 'Payroll Tax Profile', clean(body.TaxProfileId || body.ProfileId), body, `${bands.length} band(s)`);
+      return { ok: true, message: 'Payroll tax bands validated and saved.', bands };
+    }
+    case 'savePayrollTaxReliefRules': {
+      requireAccountingRole(body, ['Super Admin']);
+      const reliefs = await savePayrollTaxReliefRules(env, body, clean(body.RecordedBy));
+      await writePayrollAudit(env, 'SAVE RELIEF RULES', 'Payroll Tax Profile', clean(body.TaxProfileId || body.ProfileId), body, `${reliefs.length} rule(s)`);
+      return { ok: true, message: 'Payroll tax relief rules saved.', reliefs };
+    }
+    case 'validatePayrollTaxConfiguration': {
+      requireAccountingRole(body, ['Super Admin', 'Accounts Officer']);
+      const configuration = await getPayrollTaxConfiguration(env);
+      return { ok: true, message: 'Payroll tax configuration validation completed.', validation: validatePayrollTaxConfigurationData(configuration) };
+    }
+    case 'migratePayrollTaxPhase2': {
+      requireAccountingRole(body, ['Super Admin']);
+      const result = await migratePayrollTaxPhase2(env, body);
+      await writePayrollAudit(env, result.report?.Apply ? 'APPLY PAYE MIGRATION' : 'PREVIEW PAYE MIGRATION', 'Payroll Migration', clean(result.report?.MigrationId), body, result.message);
+      return result;
+    }
     case 'savePayrollProfile':
       return savePayrollProfile(env, body);
     case 'createPayrollProfilesFromStaff':
