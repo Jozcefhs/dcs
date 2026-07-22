@@ -934,7 +934,8 @@ function renderStoreCart(child) {
       const response = await fetch('/api/init-payment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...authPayload(), accountRef: child.AccountRef, feeCode: 'STORE_CART', amount: total, storeCart: cart }) });
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.message || 'Could not start store checkout.');
-      window.location.href = data.authorizationUrl;
+      if (!data.authorizationUrl) throw new Error('Paystack did not return a checkout link. Please contact the school accounts office.');
+      window.location.assign(data.authorizationUrl);
     } catch (error) {
       setStatus(error.message || String(error), 'bad'); checkoutStoreCartBtn.disabled = false;
     }

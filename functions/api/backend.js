@@ -1,6 +1,7 @@
 import { deleteDocument, listCollection, requireFirestoreEnv, upsertDocument } from '../lib/firestore.js';
 import { deleteSchoolDocument, getSchoolStructure, listSchoolCollection, safeScopeId, upsertSchoolDocument } from '../lib/school-scope.js';
 import { canonicalConfiguredClass, classNamesMatch } from '../lib/class-names.js';
+import { categoryApplies, ensureStoreCategories, resolveStoreCategory, saveStoreCategory } from '../lib/store-categories.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -1608,10 +1609,11 @@ async function deleteBillingCategory(env, body) {
 
 async function getStoreOverview(env, body) {
   const storeType = clean(body.StoreType || body.storeType);
-  const [items, orders] = await Promise.all([listCollection(env, 'storeItems'), listCollection(env, 'storeOrders')]);
+  const [{ categories, items }, orders] = await Promise.all([ensureStoreCategories(env), listCollection(env, 'storeOrders')]);
   const matches = (row) => !storeType || sameText(row.StoreType, storeType);
   return {
     ok: true, message: 'Store catalog and orders loaded.',
+    categories: categories.filter((row) => !storeType || categoryApplies(row, storeType)).sort((a, b) => clean(a.Name).localeCompare(clean(b.Name))),
     items: items.filter(matches).sort((a, b) => clean(a.ItemName).localeCompare(clean(b.ItemName))),
     orders: orders.filter(matches).sort((a, b) => clean(b.PaidAt || b.CreatedAt).localeCompare(clean(a.PaidAt || a.CreatedAt)))
   };
@@ -1625,16 +1627,22 @@ async function saveStoreItem(env, body) {
     const err = new Error('Store type, item code and item name are required.'); err.status = 400; throw err;
   }
   const existing = (await listCollection(env, 'storeItems')).find((row) => sameText(row.StoreType, storeType) && sameText(row.ItemCode, itemCode)) || {};
+  const category = await resolveStoreCategory(env, body, storeType);
   const className = canonicalConfiguredClass(clean(body.ClassName) || 'All', await configuredClassNames(env));
   const payload = {
     ...existing, StoreType: storeType, ItemCode: itemCode, ItemName: itemName,
-    Category: clean(body.Category), Gender: clean(body.Gender) || 'All', ClassName: className,
+    CategoryId: category.CategoryId, Category: category.Name, Gender: clean(body.Gender) || 'All', ClassName: className,
     Size: clean(body.Size), Price: asMoneyNumber(body.Price), Quantity: Math.max(0, asMoneyNumber(body.Quantity)),
     Active: yesNo(body.Active ?? 'YES') || 'YES', UpdatedAt: nowIso(), CreatedAt: existing.CreatedAt || nowIso()
   };
   delete payload.__id; delete payload.__name;
   await upsertDocument(env, 'storeItems', safeDocumentId(`${storeType}-${itemCode}`), payload);
   return { ok: true, message: `${storeType} item saved.`, item: payload };
+}
+
+async function saveStoreCategoryAction(env, body) {
+  const category = await saveStoreCategory(env, body, clean(body.UpdatedBy || body.RecordedBy));
+  return { ok: true, message: clean(body.Active).toUpperCase() === 'NO' ? 'Category deactivated. Existing references were preserved.' : 'Category saved.', category };
 }
 
 async function updateStoreOrderStatus(env, body) {
@@ -4485,7 +4493,7 @@ async function routeAction(env, action, body = {}) {
         'accountingAudit', 'accountingJournals', 'accountingBudgets', 'accountingBanks', 'chartOfAccounts',
         'accountingPayrollProfiles', 'accountingPayrollRuns', 'clinicRecords',
         'clinicInventory', 'clinicMovements', 'kitchenInventory', 'kitchenMovements',
-        'tuckShopPurchases', 'storeItems', 'storeOrders'
+        'tuckShopPurchases', 'storeItems', 'storeOrders', 'storeCategories'
       ];
       const schoolCollections = ['applications', 'students'];
       const [rootGroups, schoolGroups] = await Promise.all([
@@ -4529,6 +4537,8 @@ async function routeAction(env, action, body = {}) {
       return getStoreOverview(env, body);
     case 'saveStoreItem':
       return saveStoreItem(env, body);
+    case 'saveStoreCategory':
+      return saveStoreCategoryAction(env, body);
     case 'updateStoreOrderStatus':
       return updateStoreOrderStatus(env, body);
     case 'deleteFeeItem':

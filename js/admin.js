@@ -276,15 +276,21 @@ function inventoryColumns() {
 
 function renderStaffStore(section, store) {
   const label = section === 'bookstore' ? 'Bookstore' : 'Uniform Store';
+  const categories = store.categories || [];
+  const activeCategories = categories.filter((row) => clean(row.Active || 'YES') !== 'NO');
   panelEl.innerHTML = `
     <div class="workflow-intro"><div><p class="eyebrow">School store</p><h2>${label}</h2><p class="muted">List items and prices, monitor paid orders, and record collection.</p></div></div>
     <form id="staffStoreItemForm" class="workflow-form workflow-form-grid">
       <label>Item code<input name="ItemCode" required></label><label>Item name<input name="ItemName" required></label>
-      <label>Category<input name="Category"></label><label>Size<input name="Size"></label>
+      <label>Category<input name="Category" list="storeCategoryOptions" autocomplete="off" required><datalist id="storeCategoryOptions">${activeCategories.map((row) => `<option value="${escapeHtml(row.Name)}"></option>`).join('')}</datalist></label><label>Size<input name="Size"></label>
       <label>Gender<select name="Gender"><option>All</option><option>Male</option><option>Female</option></select></label><label>Class<input name="ClassName" value="All"></label>
       <label>Price<input name="Price" type="number" min="0" step="0.01" required></label><label>Stock quantity<input name="Quantity" type="number" min="0" step="1" required></label>
       <label class="check-row"><input name="Active" type="checkbox" checked> Available to parents</label><button type="submit">Save Item</button><p class="status" data-store-status></p>
     </form>
+    <details class="workflow-card"><summary>Category Management</summary>
+      <form id="storeCategoryForm" class="workflow-form workflow-form-grid"><input type="hidden" name="CategoryId"><label>Category name<input name="Name" required></label><label>Available in<select name="AppliesTo"><option value="${label}">${label}</option><option value="Bookstore,Uniform Store">Both stores</option></select></label><label class="check-row"><input name="Active" type="checkbox" checked> Active</label><button type="submit">Save Category</button><p class="status" data-category-status></p></form>
+      <div class="workflow-record-list">${categories.length ? categories.map((row) => `<article class="workflow-record"><div><strong>${escapeHtml(row.Name)}</strong><small>${escapeHtml((row.StoreScopes || []).join(', '))} · ${escapeHtml(row.Active || 'YES')}</small></div><div class="workflow-actions"><button type="button" data-edit-category="${escapeHtml(row.CategoryId)}">Edit</button>${clean(row.Active || 'YES') === 'NO' ? '' : `<button type="button" data-deactivate-category="${escapeHtml(row.CategoryId)}">Deactivate</button>`}</div></article>`).join('') : '<p class="muted">Existing item categories will be added here automatically.</p>'}</div>
+    </details>
     ${table(`${label} Items`, store.items || [], [
       { label: 'Code', value: (row) => pick(row, ['ItemCode', '__id']) }, { label: 'Item', value: (row) => pick(row, ['ItemName']) },
       { label: 'Category / Size', value: (row) => [pick(row, ['Category']), pick(row, ['Size'])].filter(Boolean).join(' / ') },
@@ -298,12 +304,22 @@ function renderStaffStore(section, store) {
   document.getElementById('staffStoreItemForm')?.addEventListener('submit', async (event) => {
     event.preventDefault(); const form = event.currentTarget; const status = form.querySelector('[data-store-status]');
     const payload = Object.fromEntries(new FormData(form).entries()); payload.Active = form.elements.Active.checked;
+    const match = activeCategories.find((row) => clean(row.Name).toLowerCase() === clean(payload.Category).toLowerCase());
+    if (!match && !window.confirm(`Create "${payload.Category}" as a new ${label} category?`)) return;
+    payload.CategoryId = match?.CategoryId || ''; payload.CreateCategoryIfMissing = !match;
     try {
       const response = await fetch('/api/staff-stores', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'saveItem', section, ...payload }) });
       const data = await response.json(); if (!response.ok || !data.ok) throw new Error(data.message || 'Could not save store item.');
-      setStatus(status, data.message, 'ok'); await loadDashboard();
+      setStatus(status, data.message, 'ok'); await loadStaffStore(section);
     } catch (error) { setStatus(status, error.message || String(error), 'bad'); }
   });
+  const categoryForm = document.getElementById('storeCategoryForm');
+  categoryForm?.addEventListener('submit', async (event) => {
+    event.preventDefault(); const form = event.currentTarget; const status = form.querySelector('[data-category-status]'); const payload = Object.fromEntries(new FormData(form).entries()); payload.Active = form.elements.Active.checked ? 'YES' : 'NO';
+    try { const response = await fetch('/api/staff-stores', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'saveCategory', section, ...payload }) }); const data = await response.json(); if (!response.ok || !data.ok) throw new Error(data.message || 'Could not save category.'); setStatus(status, data.message, 'ok'); await loadStaffStore(section); } catch (error) { setStatus(status, error.message || String(error), 'bad'); }
+  });
+  panelEl.querySelectorAll('[data-edit-category]').forEach((button) => button.addEventListener('click', () => { const row = categories.find((item) => item.CategoryId === button.dataset.editCategory); if (!row || !categoryForm) return; categoryForm.elements.CategoryId.value = row.CategoryId; categoryForm.elements.Name.value = row.Name; categoryForm.elements.Active.checked = clean(row.Active || 'YES') !== 'NO'; categoryForm.scrollIntoView({ behavior: 'smooth', block: 'center' }); }));
+  panelEl.querySelectorAll('[data-deactivate-category]').forEach((button) => button.addEventListener('click', async () => { if (!window.confirm('Deactivate this category? Existing inventory and transaction references will remain intact.')) return; const response = await fetch('/api/staff-stores', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'deactivateCategory', section, CategoryId: button.dataset.deactivateCategory, Name: categories.find((row) => row.CategoryId === button.dataset.deactivateCategory)?.Name }) }); const data = await response.json(); if (!response.ok || !data.ok) return setStatus(dashboardStatus, data.message || 'Could not deactivate category.', 'bad'); await loadStaffStore(section); }));
   panelEl.querySelectorAll('[data-store-order]').forEach((button) => button.addEventListener('click', async () => {
     const collectionReference = button.dataset.storeStatus === 'Collected'
       ? window.prompt("Scan or enter the student's card ID, admission number, or parent verification code.")
@@ -315,6 +331,10 @@ function renderStaffStore(section, store) {
       const data = await response.json(); if (!response.ok || !data.ok) throw new Error(data.message || 'Could not update order.'); await loadDashboard();
     } catch (error) { setStatus(dashboardStatus, error.message || String(error), 'bad'); button.disabled = false; }
   }));
+}
+
+async function loadStaffStore(section) {
+  try { const response = await fetch('/api/staff-stores', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'list', section }) }); const data = await response.json(); if (!response.ok || !data.ok) throw new Error(data.message || 'Could not load school store.'); renderStaffStore(section, data); } catch (error) { panelEl.innerHTML = `<p class="status bad">${escapeHtml(error.message || String(error))}</p>`; }
 }
 
 function renderSection(active) {
@@ -356,8 +376,8 @@ function renderSection(active) {
       { label: 'Status', value: (row) => pick(row, ['Status']) }
     ]);
   } else if (active === 'bookstore' || active === 'uniformStore') {
-    const store = departments[active] || {};
-    renderStaffStore(active, store);
+    panelEl.innerHTML = '<p class="muted">Loading store catalog...</p>';
+    loadStaffStore(active);
   } else if (active === 'accounts') {
     const accounts = departments.accounts || {};
     panelEl.innerHTML = table('Payments', accounts.payments || [], [

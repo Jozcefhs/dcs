@@ -2,6 +2,7 @@ import { listCollection, requireFirestoreEnv, upsertDocument } from '../lib/fire
 import { requireStaffSession } from '../lib/staff-auth.js';
 import { listSchoolCollection, schoolSectionFor } from '../lib/school-scope.js';
 import { canonicalConfiguredClass } from '../lib/class-names.js';
+import { categoryApplies, ensureStoreCategories, resolveStoreCategory, saveStoreCategory } from '../lib/store-categories.js';
 
 function clean(value) { return String(value ?? '').trim(); }
 function lower(value) { return clean(value).toLowerCase(); }
@@ -31,14 +32,19 @@ export async function onRequestPost(context) {
     }
     const storeType = storeForSection(section);
     const action = lower(body.action || 'list');
+    if (action === 'savecategory' || action === 'deactivatecategory') {
+      const category = await saveStoreCategory(env, { ...body, StoreType: storeType, Active: action === 'deactivatecategory' ? 'NO' : body.Active }, user.displayName || user.username);
+      return Response.json({ ok: true, message: action === 'deactivatecategory' ? 'Category deactivated. Existing references were preserved.' : 'Category saved.', category });
+    }
     if (action === 'saveitem') {
       const itemCode = clean(body.ItemCode);
       const itemName = clean(body.ItemName);
       if (!itemCode || !itemName) { const err = new Error('Item code and item name are required.'); err.status = 400; throw err; }
       const configuredClasses = await listCollection(env, 'settings/academics/classes').catch(() => []);
+      const category = await resolveStoreCategory(env, body, storeType);
       const payload = {
         StoreType: storeType, ItemCode: itemCode, ItemName: itemName,
-        Category: clean(body.Category), Size: clean(body.Size), Gender: clean(body.Gender) || 'All',
+        CategoryId: category.CategoryId, Category: category.Name, Size: clean(body.Size), Gender: clean(body.Gender) || 'All',
         ClassName: canonicalConfiguredClass(clean(body.ClassName) || 'All', configuredClasses), Price: Math.max(0, Number(body.Price || 0) || 0),
         Quantity: Math.max(0, Math.floor(Number(body.Quantity || 0) || 0)), Active: yes(body.Active ?? true) ? 'YES' : 'NO',
         BranchId: clean(user.branchId) || 'main',
@@ -69,8 +75,8 @@ export async function onRequestPost(context) {
       await upsertDocument(env, 'storeOrders', order.__id || safeId(orderNo), payload);
       return Response.json({ ok: true, message: 'Order collection status updated.', order: payload });
     }
-    const [items, orders] = await Promise.all([listCollection(env, 'storeItems'), listCollection(env, 'storeOrders')]);
-    return Response.json({ ok: true, items: visible(items, user).filter((row) => clean(row.StoreType) === storeType), orders: visible(orders, user).filter((row) => clean(row.StoreType) === storeType) });
+    const [{ categories, items }, orders] = await Promise.all([ensureStoreCategories(env), listCollection(env, 'storeOrders')]);
+    return Response.json({ ok: true, categories: categories.filter((row) => categoryApplies(row, storeType)), items: visible(items, user).filter((row) => clean(row.StoreType) === storeType), orders: visible(orders, user).filter((row) => clean(row.StoreType) === storeType) });
   } catch (err) {
     return Response.json({ ok: false, message: err.message || String(err) }, { status: err.status || 500 });
   }
