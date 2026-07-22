@@ -2,6 +2,9 @@
 // Verifies Paystack payment and records it in the configured backend.
 
 import { recordManualPayment } from './backend.js';
+import { getDocument, listCollection, upsertDocument } from '../lib/firestore.js';
+
+function safeId(value) { return String(value || '').replace(/[\/\\?#\[\]]/g, '-').replace(/\s+/g, '_').slice(0, 140); }
 
 function extractMetadata(data) {
   const metadata = data && data.metadata;
@@ -118,6 +121,38 @@ export async function onRequestPost(context) {
         ok: false,
         message: recordErrors.length ? `Payment confirmed, but backend recording failed. ${recordErrors.join(' | ')}` : 'Payment confirmed, but it could not be recorded.'
       }, { status: 400 });
+    }
+
+    if (firestoreConfigured) {
+      const paidItems = Array.isArray(meta.storeCart) ? meta.storeCart : [];
+      const feeCandidates = Array.isArray(meta.feeItems) && meta.feeItems.length ? meta.feeItems : [{ FeeCode: meta.feeCode, FeeName: meta.feeName, FeeCategory: meta.feeCategory, Amount: amount }];
+      const includedItems = !paidItems.length
+        ? feeCandidates.filter((item) => /book|uniform|wear/i.test(`${item.FeeCategory || ''} ${item.FeeName || ''}`)).map((item) => ({
+          ItemCode: item.FeeCode, ItemName: item.FeeName, StoreType: /uniform|wear/i.test(`${item.FeeCategory || ''} ${item.FeeName || ''}`) ? 'Uniform Store' : 'Bookstore', Quantity: 1, UnitPrice: Number(item.Amount || 0), Amount: Number(item.Amount || 0), IncludedInSchoolFees: 'YES'
+        })) : [];
+      const orderItems = paidItems.length ? paidItems : includedItems;
+      if (orderItems.length) {
+        const catalog = paidItems.length ? await listCollection(env, 'storeItems') : [];
+        for (const storeType of [...new Set(orderItems.map((item) => item.StoreType || 'Bookstore'))]) {
+          const items = orderItems.filter((item) => (item.StoreType || 'Bookstore') === storeType);
+          const orderNo = `${tx.reference}-${storeType === 'Uniform Store' ? 'UNIFORM' : 'BOOKS'}`;
+          const documentId = safeId(orderNo);
+          if (await getDocument(env, 'storeOrders', documentId)) continue;
+          await upsertDocument(env, 'storeOrders', documentId, {
+            OrderNo: orderNo, StoreType: storeType, AccountRef: meta.accountRef || meta.admissionNo,
+            AdmissionNo: meta.admissionNo || '', DisplayName: meta.displayName || '', ClassName: meta.className || '',
+            ParentEmail: meta.verificationEmail || '', Items: items, Amount: items.reduce((sum, item) => sum + Number(item.Amount || 0), 0),
+            PaymentReference: tx.reference, PaidAt: tx.paid_at || new Date().toISOString(), Status: 'Paid - Awaiting Collection', CreatedAt: new Date().toISOString()
+          });
+          for (const item of items) {
+            const stock = catalog.find((row) => String(row.ItemCode) === String(item.ItemCode) && String(row.StoreType) === String(storeType));
+            if (!stock) continue;
+            const payload = { ...stock, Quantity: Math.max(0, Number(stock.Quantity || 0) - Number(item.Quantity || 1)), UpdatedAt: new Date().toISOString() };
+            delete payload.__id; delete payload.__name;
+            await upsertDocument(env, 'storeItems', safeId(`${storeType}-${item.ItemCode}`), payload);
+          }
+        }
+      }
     }
 
     return Response.json({

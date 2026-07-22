@@ -26,7 +26,7 @@ function lower(value) {
 
 function asMoneyNumber(value) {
   const number = Number(String(value ?? '0').replace(/,/g, ''));
-  return Number.isFinite(number) ? number : 0;
+  return Number.isFinite(number) ? Math.round((number + Number.EPSILON) * 100) / 100 : 0;
 }
 
 function formatNairaAmount(value) {
@@ -249,6 +249,9 @@ function normalizeStudent(row, profile = {}) {
     ClassArm: pick(row, ['classArm', 'ClassArm', 'arm', 'Arm']),
     StudentType: pick(row, ['studentType', 'StudentType'], 'Day Student'),
     BillingCategory: pick(row, ['billingCategory', 'BillingCategory'], 'Regular'),
+    Gender: pick(row, ['gender', 'Gender', 'sex', 'Sex']),
+    EnrollmentCategory: pick(row, ['enrollmentCategory', 'EnrollmentCategory', 'IntakeCategory', 'StudentEntryType'], 'Returning'),
+    AcademicProgress: pick(row, ['academicProgress', 'AcademicProgress', 'ProgressCategory', 'RepeaterStatus'], 'Promoted'),
     AcademicSession: pick(row, ['academicSession', 'AcademicSession']),
     Term: pick(row, ['term', 'Term']),
     ParentEmail: lower(pick(row, ['parentEmail', 'ParentEmail'])),
@@ -284,6 +287,9 @@ function normalizeAccount(row) {
     ClassName: pick(row, ['className', 'ClassName']),
     StudentType: pick(row, ['studentType', 'StudentType']),
     BillingCategory: pick(row, ['billingCategory', 'BillingCategory'], 'Regular'),
+    Gender: pick(row, ['gender', 'Gender']),
+    EnrollmentCategory: pick(row, ['enrollmentCategory', 'EnrollmentCategory'], 'Returning'),
+    AcademicProgress: pick(row, ['academicProgress', 'AcademicProgress'], 'Promoted'),
     TotalDebit: asMoneyNumber(pick(row, ['totalDebit', 'TotalDebit'])),
     TotalCredit: asMoneyNumber(pick(row, ['totalCredit', 'TotalCredit'])),
     Balance: asMoneyNumber(pick(row, ['balance', 'Balance'])),
@@ -302,12 +308,16 @@ function normalizeFeeItem(row) {
     ClassName: pick(row, ['className', 'ClassName'], 'All'),
     StudentType: pick(row, ['studentType', 'StudentType'], 'All'),
     BillingCategory: pick(row, ['billingCategory', 'BillingCategory'], 'All'),
+    Gender: pick(row, ['gender', 'Gender'], 'All'),
+    EnrollmentCategory: pick(row, ['enrollmentCategory', 'EnrollmentCategory', 'IntakeCategory'], 'All'),
+    AcademicProgress: pick(row, ['academicProgress', 'AcademicProgress', 'ProgressCategory'], 'All'),
     AcademicSession: pick(row, ['academicSession', 'AcademicSession'], 'All'),
     Term: pick(row, ['term', 'Term'], 'All'),
     Amount: asMoneyNumber(pick(row, ['amount', 'Amount'])),
     Currency: pick(row, ['currency', 'Currency'], 'NGN'),
     PayableOnline: yesNo(pick(row, ['payableOnline', 'PayableOnline'])),
     AllowInstallment: yesNo(pick(row, ['allowInstallment', 'AllowInstallment'])),
+    PartPaymentMode: pick(row, ['partPaymentMode', 'PartPaymentMode'], 'Item'),
     MinAmount: asMoneyNumber(pick(row, ['minAmount', 'MinAmount'])),
     MaxAmount: asMoneyNumber(pick(row, ['maxAmount', 'MaxAmount'])),
     DueDate: toDisplayDate(pick(row, ['dueDate', 'DueDate', 'PaymentDueDate', 'paymentDueDate'])),
@@ -527,9 +537,16 @@ function feeMatchesApplication(fee, app) {
   const appBillingCategory = app.BillingCategory || 'Regular';
   const appSession = app.AcademicSession || '';
   const appTerm = app.Term || '';
+  const appGender = app.Gender || '';
+  const enrollmentCategory = app.EnrollmentCategory || app.IntakeCategory || 'Returning';
+  const academicProgress = app.AcademicProgress || app.ProgressCategory || 'Promoted';
+  if (normalizeMatchText(academicProgress) === 'repeating' && /book|uniform|school wear/.test(normalizeMatchText(`${fee.FeeCategory || ''} ${fee.FeeName || ''}`))) return false;
   return feeFieldMatches(fee.ClassName, appClass) &&
     feeFieldMatches(fee.StudentType, appType) &&
     feeFieldMatches(fee.BillingCategory || 'All', appBillingCategory, true) &&
+    feeFieldMatches(fee.Gender || 'All', appGender) &&
+    feeFieldMatches(fee.EnrollmentCategory || 'All', enrollmentCategory, true) &&
+    feeFieldMatches(fee.AcademicProgress || 'All', academicProgress, true) &&
     feeFieldMatches(fee.AcademicSession, appSession, true) &&
     feeFieldMatches(fee.Term, appTerm, true);
 }
@@ -549,9 +566,13 @@ function feeMatchesAccountPeriod(fee, app) {
   const appBillingCategory = app.BillingCategory || 'Regular';
   const appSession = app.AcademicSession || '';
   const appTerm = app.Term || '';
+  if (normalizeMatchText(app.AcademicProgress || 'Promoted') === 'repeating' && /book|uniform|school wear/.test(normalizeMatchText(`${fee.FeeCategory || ''} ${fee.FeeName || ''}`))) return false;
   if (!feeFieldMatches(fee.ClassName, appClass)) return false;
   if (!feeFieldMatches(fee.StudentType, appType)) return false;
   if (!feeFieldMatches(fee.BillingCategory || 'All', appBillingCategory, true)) return false;
+  if (!feeFieldMatches(fee.Gender || 'All', app.Gender || '')) return false;
+  if (!feeFieldMatches(fee.EnrollmentCategory || 'All', app.EnrollmentCategory || 'Returning', true)) return false;
+  if (!feeFieldMatches(fee.AcademicProgress || 'All', app.AcademicProgress || 'Promoted', true)) return false;
   if (!feeFieldMatches(fee.AcademicSession, appSession, true)) return false;
   const feeTerm = normalizeMatchText(fee.Term || 'All');
   if (!feeTerm || feeTerm === 'all' || feeTerm === '*') return true;
@@ -574,6 +595,9 @@ function feeOverrideKey(fee) {
     normalizeMatchText(fee.FeeCategory || ''),
     normalizeMatchText(fee.ClassName || 'All'),
     normalizeMatchText(fee.StudentType || 'All'),
+    normalizeMatchText(fee.Gender || 'All'),
+    normalizeMatchText(fee.EnrollmentCategory || 'All'),
+    normalizeMatchText(fee.AcademicProgress || 'All'),
     normalizeMatchText(fee.AcademicSession || 'All'),
     normalizeMatchText(fee.Term || 'All')
   ].join('||');
@@ -657,9 +681,13 @@ function feeMatchesAccountBase(fee, app) {
   const appType = app.StudentType || '';
   const appBillingCategory = app.BillingCategory || 'Regular';
   const appSession = app.AcademicSession || '';
+  if (normalizeMatchText(app.AcademicProgress || 'Promoted') === 'repeating' && /book|uniform|school wear/.test(normalizeMatchText(`${fee.FeeCategory || ''} ${fee.FeeName || ''}`))) return false;
   return feeFieldMatches(fee.ClassName, appClass) &&
     feeFieldMatches(fee.StudentType, appType) &&
     feeFieldMatches(fee.BillingCategory || 'All', appBillingCategory, true) &&
+    feeFieldMatches(fee.Gender || 'All', app.Gender || '') &&
+    feeFieldMatches(fee.EnrollmentCategory || 'All', app.EnrollmentCategory || 'Returning', true) &&
+    feeFieldMatches(fee.AcademicProgress || 'All', app.AcademicProgress || 'Promoted', true) &&
     feeFieldMatches(fee.AcademicSession, appSession, true);
 }
 
@@ -1250,7 +1278,7 @@ export async function getPayableFees(env, body = {}) {
 }
 
 export async function getAccountsOverview(env) {
-  const [accounts, payments, invoices, feeItems, storedLedger, applications, students, settings] = await Promise.all([
+  const [accounts, payments, invoices, feeItems, storedLedger, applications, students, settings, billingCategories] = await Promise.all([
     listCollection(env, 'accounts'),
     listCollection(env, 'payments'),
     listCollection(env, 'invoices'),
@@ -1258,7 +1286,8 @@ export async function getAccountsOverview(env) {
     listCollection(env, 'ledger'),
     listSchoolCollection(env, 'applications'),
     listSchoolCollection(env, 'students'),
-    listCollection(env, 'settings')
+    listCollection(env, 'settings'),
+    listCollection(env, 'billingCategories')
   ]);
   const schoolProfile = settings.find((row) => row.__id === 'schoolProfile') || settings.find((row) => clean(row.SchoolName)) || {};
   const normalizedPayments = payments.map(normalizePayment);
@@ -1296,6 +1325,9 @@ export async function getAccountsOverview(env) {
       ClassName: clean(existing.ClassName || normalized.ClassName),
       StudentType: clean(existing.StudentType || normalized.StudentType),
       BillingCategory: clean(existing.BillingCategory || normalized.BillingCategory) || 'Regular',
+      Gender: clean(existing.Gender || normalized.Gender),
+      EnrollmentCategory: clean(existing.EnrollmentCategory || normalized.EnrollmentCategory) || 'Returning',
+      AcademicProgress: clean(existing.AcademicProgress || normalized.AcademicProgress) || 'Promoted',
       AcademicSession: clean(existing.AcademicSession || normalized.AcademicSession),
       Term: clean(existing.Term || normalized.Term),
       Status: clean(existing.Status || normalized.Status),
@@ -1324,6 +1356,9 @@ export async function getAccountsOverview(env) {
     ClassName: student.ClassName || student.ClassAdmitted,
     StudentType: student.StudentType,
     BillingCategory: student.BillingCategory,
+    Gender: student.Gender,
+    EnrollmentCategory: student.EnrollmentCategory,
+    AcademicProgress: student.AcademicProgress,
     AcademicSession: student.AcademicSession,
     Term: student.Term,
     Status: student.Status || 'Active',
@@ -1438,12 +1473,12 @@ export async function getAccountsOverview(env) {
           return category === 'admission' || requiredForEnrollment;
         })
         .filter((fee) => feeMatchesAccountPeriod(fee, account));
-      const expectedFeeDebit = matchingExpectedFees.reduce((sum, fee) => sum + asMoneyNumber(fee.Amount), 0);
+      const expectedFeeDebit = asMoneyNumber(matchingExpectedFees.reduce((sum, fee) => sum + asMoneyNumber(fee.Amount), 0));
       if (expectedFeeDebit > totalDebit) {
         totalDebit = expectedFeeDebit;
       }
     }
-    const netBalance = totalDebit + accountCreditDebit - totalCredit;
+    const netBalance = asMoneyNumber(totalDebit + accountCreditDebit - totalCredit);
     return {
       ...account,
       TotalDebit: totalDebit,
@@ -1452,7 +1487,7 @@ export async function getAccountsOverview(env) {
       Balance: netBalance,
       OutstandingBalance: Math.max(0, netBalance),
       ExcessCredit: Math.max(0, -netBalance),
-      WalletBalance: walletBalance,
+      WalletBalance: asMoneyNumber(walletBalance),
       LastPaymentAt: lastPaymentAt
     };
   }).sort((a, b) => clean(a.DisplayName || a.AccountRef).localeCompare(clean(b.DisplayName || b.AccountRef)));
@@ -1463,8 +1498,60 @@ export async function getAccountsOverview(env) {
     payments: normalizedPayments,
     invoices: normalizedInvoices,
     ledger,
-    feeItems: feeItems.map(normalizeFeeItem)
+    feeItems: feeItems.map(normalizeFeeItem),
+    billingCategories: billingCategories.map((row) => clean(row.Name || row.BillingCategory || row.__id)).filter(Boolean).sort()
   };
+}
+
+async function saveBillingCategory(env, body) {
+  const name = clean(body.Name || body.BillingCategory || body.name);
+  if (!name || sameText(name, 'All')) { const err = new Error('Enter a billing category name other than All.'); err.status = 400; throw err; }
+  const payload = { Name: name, Active: yesNo(body.Active ?? 'YES') || 'YES', UpdatedAt: nowIso() };
+  await upsertDocument(env, 'billingCategories', safeDocumentId(name), payload);
+  return { ok: true, message: 'Billing category saved.', category: payload };
+}
+
+async function getStoreOverview(env, body) {
+  const storeType = clean(body.StoreType || body.storeType);
+  const [items, orders] = await Promise.all([listCollection(env, 'storeItems'), listCollection(env, 'storeOrders')]);
+  const matches = (row) => !storeType || sameText(row.StoreType, storeType);
+  return {
+    ok: true, message: 'Store catalog and orders loaded.',
+    items: items.filter(matches).sort((a, b) => clean(a.ItemName).localeCompare(clean(b.ItemName))),
+    orders: orders.filter(matches).sort((a, b) => clean(b.PaidAt || b.CreatedAt).localeCompare(clean(a.PaidAt || a.CreatedAt)))
+  };
+}
+
+async function saveStoreItem(env, body) {
+  const storeType = clean(body.StoreType || body.storeType);
+  const itemCode = clean(body.ItemCode || body.itemCode);
+  const itemName = clean(body.ItemName || body.itemName);
+  if (!['Bookstore', 'Uniform Store'].includes(storeType) || !itemCode || !itemName) {
+    const err = new Error('Store type, item code and item name are required.'); err.status = 400; throw err;
+  }
+  const existing = (await listCollection(env, 'storeItems')).find((row) => sameText(row.StoreType, storeType) && sameText(row.ItemCode, itemCode)) || {};
+  const payload = {
+    ...existing, StoreType: storeType, ItemCode: itemCode, ItemName: itemName,
+    Category: clean(body.Category), Gender: clean(body.Gender) || 'All', ClassName: clean(body.ClassName) || 'All',
+    Size: clean(body.Size), Price: asMoneyNumber(body.Price), Quantity: Math.max(0, asMoneyNumber(body.Quantity)),
+    Active: yesNo(body.Active ?? 'YES') || 'YES', UpdatedAt: nowIso(), CreatedAt: existing.CreatedAt || nowIso()
+  };
+  delete payload.__id; delete payload.__name;
+  await upsertDocument(env, 'storeItems', safeDocumentId(`${storeType}-${itemCode}`), payload);
+  return { ok: true, message: `${storeType} item saved.`, item: payload };
+}
+
+async function updateStoreOrderStatus(env, body) {
+  const orderNo = clean(body.OrderNo || body.orderNo);
+  const orders = await listCollection(env, 'storeOrders');
+  const existing = orders.find((row) => sameText(row.OrderNo, orderNo) || sameText(row.__id, safeDocumentId(orderNo)));
+  if (!existing) { const err = new Error('Store order was not found.'); err.status = 404; throw err; }
+  const status = clean(body.Status || body.status) || 'Ready for Collection';
+  const payload = { ...existing, Status: status, UpdatedAt: nowIso(), UpdatedBy: clean(body.RecordedBy) || 'Store Keeper' };
+  delete payload.__id; delete payload.__name;
+  if (sameText(status, 'Collected')) { payload.CollectedAt = nowIso(); payload.CollectedBy = clean(body.RecordedBy) || 'Store Keeper'; }
+  await upsertDocument(env, 'storeOrders', safeDocumentId(orderNo), payload);
+  return { ok: true, message: `Order marked ${status}.`, order: payload };
 }
 
 async function saveBrevoSettings(env, body) {
@@ -1480,6 +1567,8 @@ async function saveBrevoSettings(env, body) {
   const payload = {
     BrevoSenderName: senderName,
     BrevoSenderEmail: senderEmail,
+    BrevoReplyToEmail: clean(body.BrevoReplyToEmail || body.ReplyToEmail),
+    BrevoReplyToName: clean(body.BrevoReplyToName || body.ReplyToName),
     UpdatedAt: now,
     UpdatedBy: clean(body.UserRole || body.UpdatedBy || body.updatedBy) || 'Super Admin'
   };
@@ -1494,6 +1583,8 @@ async function saveBrevoSettings(env, body) {
     settings: {
       BrevoSenderName: senderName,
       BrevoSenderEmail: senderEmail,
+      BrevoReplyToEmail: payload.BrevoReplyToEmail,
+      BrevoReplyToName: payload.BrevoReplyToName,
       HasBrevoApiKey: Boolean(apiKey)
     }
   };
@@ -1778,7 +1869,10 @@ async function importStudents(env, body) {
       continue;
     }
     if (!admissionNo) admissionNo = nextStudentAdmissionNo([...existingStudents, ...savedStudents], input.AcademicSession || input.Session || '', schoolCode);
-    const duplicate = await findStudent(env, admissionNo, appRef);
+    const duplicate = [...existingStudents, ...savedStudents].find((row) =>
+      sameText(row.AdmissionNo || row.admissionNo || row.__id, admissionNo) ||
+      (appRef && sameText(row.ApplicationReference || row.applicationReference, appRef))
+    );
     if (duplicate) {
       skipped += 1;
       failures.push(`Row ${rowNo} (${admissionNo}): already exists.`);
@@ -1797,6 +1891,9 @@ async function importStudents(env, body) {
       Term: input.Term || '',
       StudentType: input.StudentType || 'Day Student',
       BillingCategory: input.BillingCategory || input['Billing Category'] || 'Regular',
+      Gender: input.Gender || input.Sex || '',
+      EnrollmentCategory: input.EnrollmentCategory || input.IntakeCategory || 'Returning',
+      AcademicProgress: input.AcademicProgress || input.ProgressCategory || input.RepeaterStatus || 'Promoted',
       Status: input.Status || 'Active',
       ImportedAt: nowIso(),
       ImportedBy: importedBy,
@@ -1822,9 +1919,15 @@ async function promoteStudents(env, body) {
   let promoted = 0;
   let skipped = 0;
   const failures = [];
+  const existingStudents = await listSchoolCollection(env, 'students');
   for (let index = 0; index < targets.length; index += 1) {
     const target = targets[index] || {};
-    const student = await findStudent(env, pick(target, ['AdmissionNo', 'AdmissionNumber']), pick(target, ['ApplicationReference']));
+    const admissionNo = pick(target, ['AdmissionNo', 'AdmissionNumber']);
+    const applicationReference = pick(target, ['ApplicationReference']);
+    const student = existingStudents.find((row) =>
+      (admissionNo && (sameText(row.AdmissionNo || row.admissionNo || row.__id, admissionNo))) ||
+      (applicationReference && sameText(row.ApplicationReference || row.applicationReference, applicationReference))
+    );
     if (!student) {
       skipped += 1;
       failures.push(`Selected row ${index + 1}: student not found.`);
@@ -1845,6 +1948,8 @@ async function promoteStudents(env, body) {
       ClassName: newClass,
       AcademicSession: session,
       Term: term || student.Term || '',
+      EnrollmentCategory: 'Returning',
+      AcademicProgress: clean(body.AcademicProgress || body.ProgressCategory) || 'Promoted',
       PromotedAt: nowIso(),
       PromotedBy: promotedBy,
       PromotionHistory: student.PromotionHistory ? `${student.PromotionHistory}\n${line}` : line,
@@ -1887,6 +1992,8 @@ async function enrollStudent(env, body) {
     Term: pick(existing, ['Term']),
     StudentType: pick(existing, ['StudentType']),
     BillingCategory: pick(existing, ['BillingCategory'], 'Regular'),
+    EnrollmentCategory: 'New Intake',
+    AcademicProgress: 'New Intake',
     ParentName: pick(existing, ['FatherName', 'MotherName', 'GuardianName', 'ParentName']),
     ParentPhone: pick(existing, ['FatherPhone', 'MotherPhone', 'GuardianPhone', 'ParentPhone']),
     ParentEmail: pick(existing, ['ParentEmail', 'VerificationEmail', 'FatherEmail', 'MotherEmail']),
@@ -2162,12 +2269,16 @@ async function saveFeeItem(env, body) {
     ClassName: clean(body.ClassName || body.className) || 'All',
     StudentType: clean(body.StudentType || body.studentType) || 'All',
     BillingCategory: clean(body.BillingCategory || body.billingCategory) || 'All',
+    Gender: clean(body.Gender || body.gender) || 'All',
+    EnrollmentCategory: clean(body.EnrollmentCategory || body.enrollmentCategory || body.IntakeCategory) || 'All',
+    AcademicProgress: clean(body.AcademicProgress || body.academicProgress || body.ProgressCategory) || 'All',
     AcademicSession: clean(body.AcademicSession || body.academicSession) || 'All',
     Term: clean(body.Term || body.term) || 'All',
     Amount: asMoneyNumber(body.Amount || body.amount),
     Currency: clean(body.Currency || body.currency) || 'NGN',
     PayableOnline: yesNo(body.PayableOnline ?? body.payableOnline ?? 'YES') || 'YES',
     AllowInstallment: yesNo(body.AllowInstallment ?? body.allowInstallment ?? 'NO') || 'NO',
+    PartPaymentMode: clean(body.PartPaymentMode || body.partPaymentMode) || 'Item',
     MinAmount: asMoneyNumber(body.MinAmount || body.minAmount),
     MaxAmount: asMoneyNumber(body.MaxAmount || body.maxAmount),
     DueDate: clean(body.DueDate || body.dueDate || body.PaymentDueDate || body.paymentDueDate),
@@ -3278,7 +3389,7 @@ async function saveAccountingExpense(env, body) {
   }
   const requestedStatus = clean(body.Status || body.status || 'Draft');
   const forcedDepartment = enforceDepartmentSubmission(body, existing, requestedStatus);
-  if (['approved', 'posted', 'rejected'].includes(lower(requestedStatus))) {
+  if (['approved', 'rejected'].includes(lower(requestedStatus)) || (lower(requestedStatus) === 'posted' && lower(existing.Status) !== 'approved')) {
     await requireAccountingApprovalLimit(env, body, 'Expense', amount);
   }
   const payload = {
@@ -3291,8 +3402,8 @@ async function saveAccountingExpense(env, body) {
     Reference: clean(body.Reference || body.reference), AttachmentUrl: clean(body.AttachmentUrl || body.attachmentUrl),
     Notes: clean(body.Notes || body.notes), Status: requestedStatus,
     RequestedBy: existing.RequestedBy || clean(body.RecordedBy || body.recordedBy), RequestedAt: existing.RequestedAt || nowIso(),
-    ApprovedBy: ['approved', 'posted'].includes(lower(requestedStatus)) ? clean(body.RecordedBy || body.recordedBy) : '',
-    ApprovedAt: ['approved', 'posted'].includes(lower(requestedStatus)) ? nowIso() : '', UpdatedAt: nowIso()
+    ApprovedBy: lower(requestedStatus) === 'approved' ? clean(body.RecordedBy || body.recordedBy) : (existing.ApprovedBy || ''),
+    ApprovedAt: lower(requestedStatus) === 'approved' ? nowIso() : (existing.ApprovedAt || ''), UpdatedAt: nowIso()
   };
   if (lower(requestedStatus) === 'posted') {
     const journal = await saveAccountingJournal(env, {
@@ -3426,13 +3537,16 @@ async function seedAccountingApprovalLimits(env) {
 
 async function requireAccountingApprovalLimit(env, body, transactionType, amount) {
   const role = clean(body.UserRole || body.userRole);
-  if (!['Super Admin', 'Management'].includes(role)) {
-    const err = new Error(`Only Management or Super Admin can approve ${transactionType.toLowerCase()} transactions.`); err.status = 403; throw err;
-  }
-  await seedAccountingApprovalLimits(env);
-  const limit = (await listCollection(env, 'accountingApprovalLimits')).find((row) => sameText(row.Role, role) && sameText(row.TransactionType, transactionType) && yesNo(row.Active ?? 'YES') === 'YES');
-  if (!limit || asMoneyNumber(amount) > asMoneyNumber(limit.MaxAmount)) {
-    const err = new Error(`${role} approval limit is insufficient for this ${transactionType.toLowerCase()} amount.`); err.status = 403; throw err;
+  if (role === 'Super Admin') return;
+  const username = clean(body.UserUsername || body.userUsername);
+  const users = await listCollection(env, 'staffUsers');
+  const user = users.find((row) => sameText(row.Username || row.__id, username));
+  const enabled = user && yesNo(user.ApprovalEnabled ?? 'NO') === 'YES';
+  const maximum = user ? asMoneyNumber(user.ApprovalMaxAmount) : 0;
+  const allowedAccounts = Array.isArray(user?.ApprovalAccounts) ? user.ApprovalAccounts.map(clean) : clean(user?.ApprovalAccounts).split(',').map(clean).filter(Boolean);
+  const accountCode = clean(transactionType === 'Expense' ? (body.ExpenseAccount || body.expenseAccount) : (body.AccountCode || body.accountCode || body.ExpenseAccount));
+  if (!enabled || maximum <= 0 || asMoneyNumber(amount) > maximum || !allowedAccounts.some((code) => sameText(code, accountCode))) {
+    const err = new Error('This user does not have administrator-granted approval rights for this account and amount.'); err.status = 403; throw err;
   }
 }
 
@@ -4228,6 +4342,26 @@ async function routeAction(env, action, body = {}) {
         backend: 'firestore',
         projectId: env.FIREBASE_PROJECT_ID
       };
+    case 'exportBackup': {
+      const rootCollections = [
+        'accounts', 'payments', 'invoices', 'ledger', 'feeItems', 'billingCategories',
+        'settings', 'formSales', 'staffUsers', 'staffSecurityAudit',
+        'accountingExpenses', 'accountingSupplierBills', 'accountingApprovalLimits',
+        'accountingAudit', 'accountingJournals', 'accountingBudgets', 'accountingBanks', 'chartOfAccounts',
+        'accountingPayrollProfiles', 'accountingPayrollRuns', 'clinicRecords',
+        'clinicInventory', 'clinicMovements', 'kitchenInventory', 'kitchenMovements',
+        'tuckShopPurchases', 'storeItems', 'storeOrders'
+      ];
+      const schoolCollections = ['applications', 'students'];
+      const [rootGroups, schoolGroups] = await Promise.all([
+        Promise.all(rootCollections.map((name) => listCollection(env, name).catch(() => []))),
+        Promise.all(schoolCollections.map((name) => listSchoolCollection(env, name).catch(() => [])))
+      ]);
+      const collections = {};
+      rootCollections.forEach((name, index) => { collections[name] = rootGroups[index]; });
+      schoolCollections.forEach((name, index) => { collections[name] = schoolGroups[index]; });
+      return { ok: true, message: 'Complete Firestore backup prepared.', exportedAt: nowIso(), collections };
+    }
     case 'getApplications':
       return {
         ok: true,
@@ -4250,6 +4384,14 @@ async function routeAction(env, action, body = {}) {
       return saveSchoolClasses(env, body);
     case 'saveFeeItem':
       return saveFeeItem(env, body);
+    case 'saveBillingCategory':
+      return saveBillingCategory(env, body);
+    case 'getStoreOverview':
+      return getStoreOverview(env, body);
+    case 'saveStoreItem':
+      return saveStoreItem(env, body);
+    case 'updateStoreOrderStatus':
+      return updateStoreOrderStatus(env, body);
     case 'deleteFeeItem':
       return deleteFeeItem(env, body);
     case 'seedDefaultFeeItems':

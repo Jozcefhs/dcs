@@ -11,6 +11,7 @@ const welcomeTitle = document.getElementById('staffWelcomeTitle');
 const signOutButton = document.getElementById('staffSignOut');
 const refreshButton = document.getElementById('staffRefresh');
 const summaryEl = document.getElementById('adminSummary');
+const dashboardChartsEl = document.getElementById('dashboardCharts');
 const tabsEl = document.getElementById('adminTabs');
 const panelEl = document.getElementById('adminPanel');
 const passwordDialog = document.getElementById('staffPasswordDialog');
@@ -27,6 +28,7 @@ let activeSection = '';
 let financeData = null;
 let staffUsersData = [];
 let staffAuditData = [];
+let staffApprovalAccounts = [];
 
 const tabConfig = [
   ['admissions', 'Admissions'],
@@ -153,6 +155,7 @@ async function loadDashboard() {
     currentUser = data.user || currentUser;
     showDashboard(currentUser);
     renderSummary(data.summary || {});
+    renderDashboardCharts(data.charts || {});
     const allowed = data.allowedSections || currentUser.allowedSections || [];
     if (!activeSection || !allowed.includes(activeSection)) activeSection = allowed[0] || '';
     renderTabs(allowed);
@@ -163,6 +166,21 @@ async function loadDashboard() {
   } finally {
     setButtonLoading(refreshButton, false, 'Refreshing...', 'Refresh Dashboard');
   }
+}
+
+function renderDashboardCharts(charts) {
+  if (!dashboardChartsEl) return;
+  const groups = [
+    ['Students by Gender', charts.studentGender || [], false],
+    ['New Intake / Returning', charts.studentCategory || [], false],
+    ['Fee Balance by Class', charts.classBalances || [], true],
+    ['Top 10 Defaulters', charts.topDefaulters || [], true]
+  ];
+  dashboardChartsEl.innerHTML = groups.map(([title, rows, currency]) => {
+    const max = Math.max(1, ...rows.map((row) => Number(row.value || 0)));
+    const bars = rows.length ? rows.map((row) => `<div class="chart-row"><span title="${escapeHtml(row.label)}">${escapeHtml(row.label)}${row.secondary ? `<small>${escapeHtml(row.secondary)}</small>` : ''}</span><i><b style="width:${Math.max(2, Math.round(Number(row.value || 0) / max * 100))}%"></b></i><strong>${currency ? money(row.value) : escapeHtml(row.value)}</strong></div>`).join('') : '<p class="muted">No data yet.</p>';
+    return `<article><h3>${escapeHtml(title)}</h3>${bars}</article>`;
+  }).join('');
 }
 
 function renderSummary(summary) {
@@ -412,6 +430,10 @@ function financeRecordCard(record, type, capabilities) {
     actions += `<button type="button" class="workflow-approve" data-workflow-action="review" data-decision="Approved" data-record-type="${type}" data-record-id="${escapeHtml(id)}">Approve</button>`;
     actions += `<button type="button" class="workflow-reject" data-workflow-action="review" data-decision="Rejected" data-record-type="${type}" data-record-id="${escapeHtml(id)}">Reject</button>`;
   }
+  if (capabilities.canAdminOverride && clean(status).toLowerCase() === 'approved' && !record.AdminReviewedAt) {
+    actions += `<button type="button" class="workflow-approve" data-workflow-action="review" data-decision="Approved" data-record-type="${type}" data-record-id="${escapeHtml(id)}">Admin OK</button>`;
+    actions += `<button type="button" class="workflow-reject" data-workflow-action="review" data-decision="Rejected" data-record-type="${type}" data-record-id="${escapeHtml(id)}">Admin Reject</button>`;
+  }
   if (capabilities.canAccountsReview && clean(status).toLowerCase() === 'approved' && !accountsReviewed) {
     actions += `<button type="button" data-workflow-action="accountsReview" data-record-type="${type}" data-record-id="${escapeHtml(id)}">Mark Accounts Reviewed</button>`;
   }
@@ -648,6 +670,9 @@ function renderStaffUsers() {
         <label>Department<input name="Department" placeholder="Required for Department User"></label>
         <label>Branch ID<input name="BranchId" placeholder="Blank allows all branches"></label>
         <label>School section<select name="SchoolSectionAccess"><option>All</option><option>Primary</option><option>Secondary</option></select></label>
+        <label class="check-row"><input name="ApprovalEnabled" type="checkbox"> Administrator grants finance approval right</label>
+        <label>Maximum approval amount<input name="ApprovalMaxAmount" type="number" min="0" step="0.01" value="0"><small>Zero blocks approval. Super Admin is unrestricted.</small></label>
+        <fieldset class="approval-account-list"><legend>Accounts this user may approve directly from</legend>${staffApprovalAccounts.length ? staffApprovalAccounts.map((account) => `<label class="check-row"><input type="checkbox" name="ApprovalAccountOption" value="${escapeHtml(account.Code)}"> ${escapeHtml(account.Code)} - ${escapeHtml(account.Name || '')}</label>`).join('') : '<small>Create active Chart of Accounts entries in the desktop Finance tab first.</small>'}</fieldset>
         <label>New or reset password<input name="Password" type="password" minlength="6" autocomplete="new-password"><small>Required for a new account. Leave blank when editing unless resetting it.</small></label>
         <label class="check-row"><input name="Active" type="checkbox" checked> Account active</label>
         <label class="check-row"><input name="MustChangePassword" type="checkbox" checked> Require password change at next sign-in</label>
@@ -673,11 +698,16 @@ function openStaffUserDialog(username = '') {
     form.elements.Department.value = user.Department || '';
     form.elements.BranchId.value = user.BranchId || '';
     form.elements.SchoolSectionAccess.value = user.SchoolSectionAccess || 'All';
+    form.elements.ApprovalEnabled.checked = yes(user.ApprovalEnabled);
+    form.elements.ApprovalMaxAmount.value = user.ApprovalMaxAmount || 0;
+    const allowedAccounts = new Set(user.ApprovalAccounts || []);
+    form.querySelectorAll('[name="ApprovalAccountOption"]').forEach((input) => { input.checked = allowedAccounts.has(input.value); });
     form.elements.Active.checked = yes(user.Active);
     form.elements.MustChangePassword.checked = yes(user.MustChangePassword);
   } else {
     form.elements.Active.checked = true;
     form.elements.MustChangePassword.checked = true;
+    form.elements.ApprovalEnabled.checked = false;
   }
   dialog.showModal();
 }
@@ -712,6 +742,8 @@ function bindStaffUserEvents() {
     const payload = Object.fromEntries(new FormData(form).entries());
     payload.Active = form.elements.Active.checked;
     payload.MustChangePassword = form.elements.MustChangePassword.checked;
+    payload.ApprovalEnabled = form.elements.ApprovalEnabled.checked;
+    payload.ApprovalAccounts = Array.from(form.querySelectorAll('[name="ApprovalAccountOption"]:checked')).map((input) => input.value);
     setButtonLoading(button, true, 'Saving...', 'Save Staff Account');
     try {
       const data = await staffUserRequest('save', payload);
@@ -744,7 +776,7 @@ function parseCsv(text) {
 }
 
 function downloadStaffCsvTemplate() {
-  const content = 'Username,DisplayName,Role,Department,BranchId,SchoolSectionAccess,Password,Active,MustChangePassword\nexample.user,Example User,Front Desk,Administration,main,All,ChangeMe123,YES,YES\n';
+  const content = 'Username,DisplayName,Role,Department,BranchId,SchoolSectionAccess,Password,Active,MustChangePassword,ApprovalEnabled,ApprovalMaxAmount,ApprovalAccounts\nexample.user,Example User,Front Desk,Administration,main,All,ChangeMe123,YES,YES,NO,0,"6010,6090"\n';
   const url = URL.createObjectURL(new Blob([content], { type: 'text/csv' }));
   const link = document.createElement('a'); link.href = url; link.download = 'staff_upload_template.csv'; link.click(); URL.revokeObjectURL(url);
 }
@@ -755,7 +787,13 @@ async function importStaffCsv(event) {
   try {
     const users = parseCsv(await file.text());
     if (!users.length) throw new Error('The CSV has no staff data rows. Download the template and try again.');
-    const data = await staffUserRequest('import', { users });
+    const data = { imported: 0, failures: [], message: '' };
+    for (let offset = 0; offset < users.length; offset += 25) {
+      const result = await staffUserRequest('import', { users: users.slice(offset, offset + 25) });
+      data.imported += Number(result.imported || 0);
+      data.failures.push(...(result.failures || []).map((failure) => ({ ...failure, row: Number(failure.row || 2) + offset })));
+    }
+    data.message = `${data.imported} staff account(s) uploaded${data.failures.length ? `; ${data.failures.length} failed.` : '.'}`;
     await loadStaffUsers();
     const failureText = (data.failures || []).slice(0, 5).map((row) => `Row ${row.row}: ${row.message}`).join(' | ');
     setStatus(document.getElementById('staffUsersStatus'), `${data.message}${failureText ? ` ${failureText}` : ''}`, data.failures?.length ? 'bad' : 'ok');
@@ -772,6 +810,7 @@ async function loadStaffUsers() {
     const data = await staffUserRequest('list');
     staffUsersData = data.users || [];
     staffAuditData = data.audit || [];
+    staffApprovalAccounts = data.approvalAccounts || [];
     renderStaffUsers();
   } catch (error) {
     if (activeSection === 'staffUsers') panelEl.innerHTML = `<p class="status bad">${escapeHtml(error.message || String(error))}</p>`;

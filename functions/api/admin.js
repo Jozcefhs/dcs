@@ -172,12 +172,29 @@ export async function onRequestPost(context) {
     }
     if (allowed.has('tuckShop')) summary.tuckShopPurchases = walletPurchases.length;
 
+    const countBy = (rows, getter) => Object.entries(rows.reduce((out, row) => {
+      const key = clean(getter(row)) || 'Unspecified'; out[key] = (out[key] || 0) + 1; return out;
+    }, {})).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
+    const accountRows = accountOverview && accountOverview.ok ? accountOverview.accounts || [] : [];
+    const classBalances = Object.entries(accountRows.reduce((out, row) => {
+      const key = clean(row.ClassName) || 'Unspecified'; out[key] = (out[key] || 0) + Math.max(0, toNumber(row.OutstandingBalance ?? row.Balance)); return out;
+    }, {})).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
+    const charts = {
+      studentGender: countBy(visibleStudents, (row) => row.Gender),
+      studentCategory: countBy(visibleStudents, (row) => row.EnrollmentCategory || row.IntakeCategory || 'Returning'),
+      classBalances,
+      topDefaulters: accountRows.filter((row) => toNumber(row.OutstandingBalance ?? row.Balance) > 0)
+        .sort((a, b) => toNumber(b.OutstandingBalance ?? b.Balance) - toNumber(a.OutstandingBalance ?? a.Balance)).slice(0, 10)
+        .map((row) => ({ label: clean(row.DisplayName || row.AccountRef), secondary: clean(row.ClassName), value: toNumber(row.OutstandingBalance ?? row.Balance) }))
+    };
+
     return Response.json({
       ok: true,
       message: 'Staff dashboard loaded.',
       user,
       allowedSections: user.allowedSections,
       summary,
+      charts,
       departments
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err) {

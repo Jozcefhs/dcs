@@ -193,6 +193,39 @@ export async function upsertDocument(env, collectionPath, documentId, data) {
   });
 }
 
+export async function batchUpsertDocuments(env, writes) {
+  const items = Array.isArray(writes) ? writes : [];
+  if (!items.length) return { writeResults: [] };
+  if (items.length > 500) throw new Error('A Firestore batch may contain at most 500 writes.');
+  const token = await getFirestoreAccessToken(env);
+  const base = firestoreBaseUrl(env);
+  const body = {
+    writes: items.map((item) => {
+      const collection = String(item.collectionPath || '').replace(/^\/+|\/+$/g, '');
+      const id = encodeURIComponent(String(item.documentId || '').trim());
+      if (!collection || !id) throw new Error('Every batch write requires a collection path and document ID.');
+      return {
+        update: {
+          name: `${base}/${collection}/${id}`,
+          fields: objectToFirestoreFields(item.data || {})
+        }
+      };
+    })
+  };
+  const response = await fetch(`${base}:commit`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(data?.error?.message || `Firestore batch HTTP ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
+  return data;
+}
+
 export async function deleteDocument(env, collectionPath, documentId) {
   const cleanCollection = String(collectionPath || '').replace(/^\/+|\/+$/g, '');
   const encodedId = encodeURIComponent(String(documentId || '').trim());

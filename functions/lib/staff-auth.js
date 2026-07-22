@@ -111,6 +111,11 @@ function publicUser(user) {
     department: inferDepartment(user),
     branchId: clean(user.BranchId || user.branchId),
     schoolSectionAccess: clean(user.SchoolSectionAccess || user.schoolSectionAccess) || 'All',
+    approvalEnabled: !['no', 'false', '0', ''].includes(lower(user.ApprovalEnabled ?? user.approvalEnabled ?? false)),
+    approvalMaxAmount: Number(user.ApprovalMaxAmount || user.approvalMaxAmount || 0) || 0,
+    approvalAccounts: Array.isArray(user.ApprovalAccounts || user.approvalAccounts)
+      ? (user.ApprovalAccounts || user.approvalAccounts).map(clean).filter(Boolean)
+      : clean(user.ApprovalAccounts || user.approvalAccounts).split(',').map(clean).filter(Boolean),
     mustChangePassword: user.MustChangePassword === undefined && user.mustChangePassword === undefined
       ? false
       : !['no', 'false', '0'].includes(lower(user.MustChangePassword ?? user.mustChangePassword))

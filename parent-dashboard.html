@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Parent Dashboard</title>
-  <link rel="stylesheet" href="css/style.css?v=20260718-personalized-ui">
+  <link rel="stylesheet" href="css/style.css?v=20260722-stores-fees">
 </head>
 <body>
   <main class="page-wrap">
@@ -46,6 +46,7 @@
           <button type="button" data-dashboard-target="results" aria-selected="false">Results</button>
           <button type="button" data-dashboard-target="wallet" aria-selected="false">Wallet</button>
           <button type="button" data-dashboard-target="clinic" aria-selected="false">Clinic</button>
+          <button type="button" data-dashboard-target="stores" aria-selected="false">Bookstore & Uniforms</button>
         </nav>
 
         <div class="dashboard-grid">
@@ -111,6 +112,14 @@
             <h2>Clinic Visits</h2>
             <div id="clinicRecords" class="activity-list"></div>
           </section>
+
+          <section class="panel full-panel dashboard-view-panel" data-dashboard-view="stores" hidden>
+            <h2>Bookstore & Uniform Store</h2>
+            <p class="muted">Buy replacements or extra items. First-term items already included in school fees appear in your collection records after payment is confirmed.</p>
+            <div id="schoolStores" class="activity-list"></div>
+            <h3>My Orders & Collection</h3>
+            <div id="storeOrders" class="activity-list"></div>
+          </section>
         </div>
       </section>
 
@@ -119,6 +128,6 @@
   </main>
 
   <script src="js/site-config.js?v=20260718-personalized-ui"></script>
-  <script src="js/parent-dashboard.js?v=20260718-optional-payments"></script>
+  <script src="js/parent-dashboard.js?v=20260722-stores-fees"></script>
 </body>
 </html>

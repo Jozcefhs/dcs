@@ -2,7 +2,7 @@
 // Initializes Paystack checkout from the backend so the secret key stays private.
 
 import { getPayableFees, getSchoolCode } from './backend.js';
-import { requireFirestoreEnv } from '../lib/firestore.js';
+import { listCollection, requireFirestoreEnv } from '../lib/firestore.js';
 
 const PAYSTACK_INIT_URL = 'https://api.paystack.co/transaction/initialize';
 const SCHOOL_FEES_TOTAL_CODE = 'SCHOOL_FEES_TOTAL';
@@ -13,7 +13,7 @@ function cleanReference(value) {
 
 function toAmount(value) {
   const amount = Number(String(value || '0').replace(/,/g, ''));
-  return Number.isFinite(amount) ? amount : 0;
+  return Number.isFinite(amount) ? Math.round((amount + Number.EPSILON) * 100) / 100 : 0;
 }
 
 function isWalletFee(fee) {
@@ -29,13 +29,12 @@ function isYes(value) {
 }
 
 function schoolFeeInstallmentRules(components) {
-  const total = (components || []).reduce((sum, item) => sum + toAmount(item.Amount), 0);
-  const installmentItems = (components || []).filter((item) => isYes(item.AllowInstallment));
-  const installmentMinimum = (components || []).reduce((sum, item) => {
-    if (!isYes(item.AllowInstallment)) return sum;
-    const min = toAmount(item.MinAmount);
-    return sum + (min > 0 ? min : 0);
-  }, 0);
+  const total = toAmount((components || []).reduce((sum, item) => sum + toAmount(item.Amount), 0));
+  const installmentItems = (components || []).filter((item) => {
+    const mode = String(item.PartPaymentMode || 'Item').trim().toLowerCase();
+    return isYes(item.AllowInstallment) && (mode === 'total' || mode === 'both');
+  });
+  const installmentMinimum = installmentItems.reduce((max, item) => Math.max(max, toAmount(item.MinAmount)), 0);
   const minimumInstallmentPortion = installmentItems.length && installmentMinimum <= 0 ? 1 : installmentMinimum;
   const minAmount = Math.min(total, minimumInstallmentPortion);
   const allowInstallment = installmentItems.length > 0 && minAmount < total;
@@ -45,7 +44,8 @@ function schoolFeeInstallmentRules(components) {
 function allocateSchoolFeePayment(components, amount) {
   let remaining = toAmount(amount);
   const allocations = [];
-  const ordered = [
+  const totalMode = (components || []).some((item) => isYes(item.AllowInstallment) && ['total', 'both'].includes(String(item.PartPaymentMode || '').toLowerCase()));
+  const ordered = totalMode ? [...(components || [])] : [
     ...(components || []).filter((item) => !isYes(item.AllowInstallment)),
     ...(components || []).filter((item) => isYes(item.AllowInstallment))
   ];
@@ -53,12 +53,12 @@ function allocateSchoolFeePayment(components, amount) {
     const componentAmount = toAmount(item.Amount);
     if (componentAmount <= 0) return;
     let payAmount = 0;
-    if (!isYes(item.AllowInstallment)) {
+    if (!totalMode && !isYes(item.AllowInstallment)) {
       payAmount = componentAmount;
     } else if (remaining > 0) {
       payAmount = Math.min(componentAmount, remaining);
     }
-    remaining -= payAmount;
+    remaining = toAmount(remaining - payAmount);
     if (payAmount > 0) {
       allocations.push({
         FeeCode: item.FeeCode,
@@ -123,7 +123,22 @@ export async function onRequestPost(context) {
       return Response.json(feeData, { status: 400 });
     }
 
+    let storeCart = [];
     let fee = (feeData.fees || []).find((item) => String(item.FeeCode || '').trim() === feeCode);
+    if (feeCode === 'STORE_CART') {
+      const requestedCart = Array.isArray(body.storeCart) ? body.storeCart.slice(0, 25) : [];
+      const catalog = await listCollection(env, 'storeItems');
+      storeCart = requestedCart.map((entry) => {
+        const item = catalog.find((row) => String(row.ItemCode || '').trim() === String(entry.itemCode || '').trim() && String(row.StoreType || '').trim() === String(entry.storeType || '').trim());
+        if (!item || !isYes(item.Active === undefined ? 'YES' : item.Active)) throw new Error('A selected store item is no longer available.');
+        const quantity = Math.max(1, Math.floor(toAmount(entry.quantity || 1)));
+        if (quantity > toAmount(item.Quantity)) throw new Error(`${item.ItemName} does not have enough stock.`);
+        return { ItemCode: item.ItemCode, ItemName: item.ItemName, StoreType: item.StoreType, Size: item.Size || '', Gender: item.Gender || 'All', Quantity: quantity, UnitPrice: toAmount(item.Price), Amount: toAmount(item.Price) * quantity };
+      });
+      if (!storeCart.length) throw new Error('Choose at least one store item.');
+      const cartTotal = storeCart.reduce((sum, item) => sum + item.Amount, 0);
+      fee = { FeeCode: 'STORE_CART', FeeName: 'School Store Purchase', FeeCategory: 'Store', Amount: cartTotal, Currency: 'NGN', AllowInstallment: 'NO', StoreCart: storeCart };
+    }
     const schoolFeeComponents = (feeData.schoolFeeBreakdown || []).filter(isSchoolFee);
     if (feeCode === SCHOOL_FEES_TOTAL_CODE && schoolFeeComponents.length) {
       const rules = schoolFeeInstallmentRules(schoolFeeComponents);
@@ -151,6 +166,7 @@ export async function onRequestPost(context) {
           AcademicSession: item.AcademicSession || '',
           Term: item.Term || '',
           AllowInstallment: item.AllowInstallment || '',
+          PartPaymentMode: item.PartPaymentMode || 'Item',
           MinAmount: item.MinAmount || '',
           MaxAmount: item.MaxAmount || ''
         }))
@@ -180,9 +196,11 @@ export async function onRequestPost(context) {
     const configuredAmount = toAmount(fee.Amount);
     const schoolFeeRules = isSchoolFeesTotal ? schoolFeeInstallmentRules(fee.Components || []) : null;
     const canPartPaySchoolFees = Boolean(schoolFeeRules && schoolFeeRules.allowInstallment);
-    const amount = (isWallet || canPartPaySchoolFees) ? requestedAmount : configuredAmount;
+    const partMode = String(fee.PartPaymentMode || 'Item').trim().toLowerCase();
+    const canPartPayItem = !isSchoolFeesTotal && isYes(fee.AllowInstallment) && ['item', 'both'].includes(partMode);
+    const amount = (isWallet || canPartPaySchoolFees || canPartPayItem) ? requestedAmount : configuredAmount;
     if (!Number.isFinite(amount) || amount <= 0) {
-      return Response.json({ ok: false, message: (isWallet || canPartPaySchoolFees) ? 'Enter an amount greater than zero.' : 'This fee amount has not been configured.' }, { status: 400 });
+      return Response.json({ ok: false, message: (isWallet || canPartPaySchoolFees || canPartPayItem) ? 'Enter an amount greater than zero.' : 'This fee amount has not been configured.' }, { status: 400 });
     }
     const minAmount = toAmount(fee.MinAmount);
     const maxAmount = toAmount(fee.MaxAmount);
@@ -194,6 +212,12 @@ export async function onRequestPost(context) {
     }
     if (isWallet && maxAmount > 0 && amount > maxAmount) {
       return Response.json({ ok: false, message: `Maximum wallet top-up is ${maxAmount}.` }, { status: 400 });
+    }
+    if (canPartPayItem && minAmount > 0 && amount < minAmount) {
+      return Response.json({ ok: false, message: `Minimum part payment is ${minAmount}.` }, { status: 400 });
+    }
+    if (canPartPayItem && amount > configuredAmount) {
+      return Response.json({ ok: false, message: `Payment cannot exceed ${configuredAmount}.` }, { status: 400 });
     }
     if (isSchoolFeesTotal && !canPartPaySchoolFees && Math.abs(amount - configuredAmount) > 0.01) {
       return Response.json({ ok: false, message: 'Part payment is not enabled for this school fee.' }, { status: 400 });
@@ -243,6 +267,7 @@ export async function onRequestPost(context) {
           academicSession: account.AcademicSession,
           term: account.Term,
           verificationEmail: email
+          ,storeCart: storeCart.length ? storeCart : undefined
         }
       })
     });

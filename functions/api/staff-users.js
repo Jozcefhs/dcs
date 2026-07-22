@@ -1,4 +1,4 @@
-import { deleteDocument, listCollection, requireFirestoreEnv, upsertDocument } from '../lib/firestore.js';
+import { batchUpsertDocuments, deleteDocument, listCollection, requireFirestoreEnv, upsertDocument } from '../lib/firestore.js';
 import { hashStaffPassword, requireStaffSession } from '../lib/staff-auth.js';
 
 function clean(value) { return String(value ?? '').trim(); }
@@ -15,6 +15,9 @@ function publicUser(row) {
     Department: clean(row.Department || row.department),
     BranchId: clean(row.BranchId || row.branchId),
     SchoolSectionAccess: clean(row.SchoolSectionAccess || row.schoolSectionAccess) || 'All',
+    ApprovalEnabled: row.ApprovalEnabled === undefined ? false : activeValue(row.ApprovalEnabled),
+    ApprovalMaxAmount: Number(row.ApprovalMaxAmount || 0) || 0,
+    ApprovalAccounts: Array.isArray(row.ApprovalAccounts) ? row.ApprovalAccounts : clean(row.ApprovalAccounts).split(',').map(clean).filter(Boolean),
     Active: row.Active === undefined ? true : activeValue(row.Active),
     MustChangePassword: row.MustChangePassword === undefined ? false : activeValue(row.MustChangePassword),
     CreatedAt: clean(row.CreatedAt),
@@ -88,6 +91,9 @@ async function saveUser(env, actor, body) {
     Department: department,
     BranchId: clean(body.BranchId || body.branchId),
     SchoolSectionAccess: clean(body.SchoolSectionAccess || body.schoolSectionAccess) || 'All',
+    ApprovalEnabled: role === 'Super Admin' ? true : activeValue(body.ApprovalEnabled ?? false),
+    ApprovalMaxAmount: Math.max(0, Number(body.ApprovalMaxAmount || 0) || 0),
+    ApprovalAccounts: Array.isArray(body.ApprovalAccounts) ? body.ApprovalAccounts.map(clean).filter(Boolean) : clean(body.ApprovalAccounts).split(',').map(clean).filter(Boolean),
     Active: active,
     MustChangePassword: password ? activeValue(body.MustChangePassword === undefined ? true : body.MustChangePassword) : activeValue(existing?.MustChangePassword || false),
     ...passwordFields,
@@ -106,15 +112,46 @@ async function saveUser(env, actor, body) {
 async function importUsers(env, actor, body) {
   const users = Array.isArray(body.users) ? body.users.slice(0, 500) : [];
   if (!users.length) { const err = new Error('Choose a CSV containing at least one staff row.'); err.status = 400; throw err; }
-  let imported = 0; const failures = [];
+  const existingRows = await listCollection(env, 'staffUsers');
+  const existingByName = new Map(existingRows.map((row) => [lower(row.Username || row.__id), row]));
+  const writes = []; const failures = []; const seen = new Set();
   for (let index = 0; index < users.length; index += 1) {
     try {
-      await saveUser(env, actor, users[index]);
-      imported += 1;
+      const row = users[index] || {};
+      const username = clean(row.Username || row.username);
+      const id = safeId(username);
+      if (!username || !id) throw new Error('Username is required.');
+      if (seen.has(lower(username))) throw new Error('Duplicate username in this CSV.');
+      seen.add(lower(username));
+      const existing = existingByName.get(lower(username));
+      const password = String(row.Password || row.password || '');
+      if (!existing && !password) throw new Error('Password is required for a new staff account.');
+      const role = clean(row.Role || row.role) || 'Front Desk';
+      const department = clean(row.Department || row.department);
+      if (role === 'Department User' && !department) throw new Error('Department is required for a Department User.');
+      const payload = {
+        ...(existing || {}), Username: username,
+        DisplayName: clean(row.DisplayName || row.displayName) || username,
+        Role: role, Department: department,
+        BranchId: clean(row.BranchId || row.branchId),
+        SchoolSectionAccess: clean(row.SchoolSectionAccess || row.schoolSectionAccess) || 'All',
+        ApprovalEnabled: role === 'Super Admin' ? true : activeValue(row.ApprovalEnabled ?? false),
+        ApprovalMaxAmount: Math.max(0, Number(row.ApprovalMaxAmount || 0) || 0),
+        ApprovalAccounts: clean(row.ApprovalAccounts).split(/[;,]/).map(clean).filter(Boolean),
+        Active: activeValue(row.Active === undefined ? true : row.Active),
+        MustChangePassword: activeValue(row.MustChangePassword === undefined ? true : row.MustChangePassword),
+        ...(password ? await hashStaffPassword(password) : {}),
+        CreatedAt: existing?.CreatedAt || nowIso(), CreatedBy: existing?.CreatedBy || actor.displayName || actor.username,
+        UpdatedAt: nowIso(), UpdatedBy: actor.displayName || actor.username
+      };
+      delete payload.__id; delete payload.__name;
+      writes.push({ collectionPath: 'staffUsers', documentId: id, data: payload });
     } catch (error) {
       failures.push({ row: index + 2, username: clean(users[index]?.Username), message: error.message || String(error) });
     }
   }
+  if (writes.length) await batchUpsertDocuments(env, writes);
+  const imported = writes.length;
   await audit(env, actor, 'BULK IMPORT', `${imported} staff`, `${failures.length} failed`);
   return { ok: true, message: `${imported} staff account(s) uploaded${failures.length ? `; ${failures.length} failed.` : '.'}`, imported, failures };
 }
@@ -143,8 +180,8 @@ export async function onRequestPost(context) {
     const action = lower(body.action || 'list');
     let result;
     if (action === 'list') {
-      const [users, audit] = await Promise.all([listUsers(env), listSecurityAudit(env)]);
-      result = { ok: true, users, audit };
+      const [users, audit, accounts] = await Promise.all([listUsers(env), listSecurityAudit(env), listCollection(env, 'chartOfAccounts')]);
+      result = { ok: true, users, audit, approvalAccounts: accounts.filter((row) => activeValue(row.Active === undefined ? true : row.Active)).map((row) => ({ Code: clean(row.Code || row.__id), Name: clean(row.Name) })).filter((row) => row.Code).sort((a, b) => a.Code.localeCompare(b.Code)) };
     }
     else if (action === 'save') result = await saveUser(env, actor, body);
     else if (action === 'delete') result = await deleteUser(env, actor, body);

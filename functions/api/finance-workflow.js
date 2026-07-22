@@ -11,7 +11,7 @@ function lower(value) {
 
 function amount(value) {
   const number = Number(String(value ?? '0').replace(/,/g, ''));
-  return Number.isFinite(number) ? number : 0;
+  return Number.isFinite(number) ? Math.round((number + Number.EPSILON) * 100) / 100 : 0;
 }
 
 function safeId(value) {
@@ -54,7 +54,8 @@ function userDepartment(user) {
 function capabilities(user) {
   return {
     canSubmit: Boolean(userDepartment(user)),
-    canApprove: ['Super Admin', 'Management'].includes(clean(user.role)),
+    canApprove: clean(user.role) === 'Super Admin' || Boolean(user.approvalEnabled),
+    canAdminOverride: clean(user.role) === 'Super Admin',
     canAccountsReview: ['Super Admin', 'Accounts Officer'].includes(clean(user.role)),
     canViewAll: ['Super Admin', 'Management', 'Accounts Officer'].includes(clean(user.role))
   };
@@ -200,16 +201,23 @@ async function submitBill(env, user, body) {
 
 async function approvalLimitAllows(env, user, transactionType, value) {
   if (user.role === 'Super Admin') return true;
-  const limits = await listCollection(env, 'accountingApprovalLimits');
-  const limit = limits.find((row) => same(row.Role, user.role) && same(row.TransactionType, transactionType) && !['no', 'false', '0'].includes(lower(row.Active || 'YES')));
-  const maximum = limit ? amount(limit.MaxAmount) : 5000000;
-  return value <= maximum;
+  if (!user.approvalEnabled) return false;
+  const maximum = amount(user.approvalMaxAmount);
+  return maximum > 0 && value <= maximum;
+}
+
+function approvalAccountAllows(user, existing, isBill) {
+  if (user.role === 'Super Admin') return true;
+  const allowed = Array.isArray(user.approvalAccounts) ? user.approvalAccounts.map(lower).filter(Boolean) : [];
+  if (!allowed.length) return false;
+  const accountCode = clean(isBill ? existing.AccountCode : existing.ExpenseAccount);
+  return allowed.some((value) => value === lower(accountCode));
 }
 
 async function reviewRecord(env, user, body) {
   const access = capabilities(user);
   if (!access.canApprove) {
-    const err = new Error('Only Management or Super Admin can approve or reject finance requests.');
+    const err = new Error('Approval rights have not been enabled for this account by an administrator.');
     err.status = 403;
     throw err;
   }
@@ -231,13 +239,20 @@ async function reviewRecord(env, user, body) {
     err.status = 404;
     throw err;
   }
-  if (lower(existing.Status) !== 'submitted') {
-    const err = new Error(`Only Submitted records can be reviewed. This record is ${existing.Status || 'unknown'}.`);
+  const currentStatus = lower(existing.Status);
+  const isAdminOverride = user.role === 'Super Admin' && currentStatus === 'approved';
+  if (currentStatus !== 'submitted' && !isAdminOverride) {
+    const err = new Error(`Only Submitted records can be reviewed${user.role === 'Super Admin' ? ', or an Approved record can be overridden by an administrator' : ''}. This record is ${existing.Status || 'unknown'}.`);
     err.status = 409;
     throw err;
   }
   if (decision === 'Approved' && !(await approvalLimitAllows(env, user, isBill ? 'Supplier Bill' : 'Expense', amount(existing.Amount)))) {
     const err = new Error(`${user.role} approval limit is insufficient for this amount.`);
+    err.status = 403;
+    throw err;
+  }
+  if (!approvalAccountAllows(user, existing, isBill)) {
+    const err = new Error('This user is not permitted to review requests from the selected account code.');
     err.status = 403;
     throw err;
   }
@@ -248,7 +263,7 @@ async function reviewRecord(env, user, body) {
     ReviewNotes: clean(body.notes),
     UpdatedAt: timestamp,
     ...(decision === 'Approved'
-      ? { ApprovedAt: timestamp, ApprovedBy: actor(user), RejectedAt: '', RejectedBy: '' }
+      ? { ApprovedAt: existing.ApprovedAt || timestamp, ApprovedBy: existing.ApprovedBy || actor(user), AdminReviewedAt: user.role === 'Super Admin' ? timestamp : '', AdminReviewedBy: user.role === 'Super Admin' ? actor(user) : '', RejectedAt: '', RejectedBy: '' }
       : { RejectedAt: timestamp, RejectedBy: actor(user), ApprovedAt: '', ApprovedBy: '' })
   };
   delete payload.__id;

@@ -15,7 +15,7 @@ function lower(value) {
 
 function asMoneyNumber(value) {
   const number = Number(String(value ?? '0').replace(/,/g, ''));
-  return Number.isFinite(number) ? number : 0;
+  return Number.isFinite(number) ? Math.round((number + Number.EPSILON) * 100) / 100 : 0;
 }
 
 function safeDocumentId(value) {
@@ -204,14 +204,16 @@ async function appsScriptAction(env, action, payload = {}) {
 
 async function loadParentSources(env, scope = 'full') {
   const full = scope !== 'identity';
-  const [firestoreSales, firestoreApplications, firestoreStudents, firestoreLedger, firestoreInvoices, firestorePayments, firestoreClinic] = await Promise.all([
+  const [firestoreSales, firestoreApplications, firestoreStudents, firestoreLedger, firestoreInvoices, firestorePayments, firestoreClinic, firestoreStoreItems, firestoreStoreOrders] = await Promise.all([
     firestoreRows(env, 'formSales'),
-    firestoreRows(env, 'applications'),
-    firestoreRows(env, 'students'),
+    listSchoolCollection(env, 'applications').catch(() => []),
+    listSchoolCollection(env, 'students').catch(() => []),
     full ? firestoreRows(env, 'ledger') : Promise.resolve([]),
     full ? firestoreRows(env, 'invoices') : Promise.resolve([]),
     full ? firestoreRows(env, 'payments') : Promise.resolve([]),
-    full ? firestoreRows(env, 'clinicRecords') : Promise.resolve([])
+    full ? firestoreRows(env, 'clinicRecords') : Promise.resolve([]),
+    full ? firestoreRows(env, 'storeItems') : Promise.resolve([]),
+    full ? firestoreRows(env, 'storeOrders') : Promise.resolve([])
   ]);
   const [sheetSales, sheetApplications, sheetStudents, sheetFinance, sheetClinic] = await Promise.all([
     appsScriptAction(env, 'getFormSales'),
@@ -238,7 +240,9 @@ async function loadParentSources(env, scope = 'full') {
     ledger: preferFirestore(firestoreLedger, (sheetFinance && sheetFinance.ok && sheetFinance.ledger) || []),
     invoices: preferFirestore(firestoreInvoices, (sheetFinance && sheetFinance.ok && sheetFinance.invoices) || []),
     payments: preferFirestore(firestorePayments, (sheetFinance && sheetFinance.ok && sheetFinance.payments) || []),
-    clinic: preferFirestore(firestoreClinic, (sheetClinic && sheetClinic.ok && sheetClinic.records) || [])
+    clinic: preferFirestore(firestoreClinic, (sheetClinic && sheetClinic.ok && sheetClinic.records) || []),
+    storeItems: firestoreStoreItems,
+    storeOrders: firestoreStoreOrders
   };
 }
 
@@ -633,16 +637,12 @@ function buildEntranceResult(application, profile = {}) {
 function schoolFeeTotalItem(breakdown) {
   const items = (breakdown || []).filter(isSchoolFee);
   if (!items.length) return null;
-  const total = items.reduce((sum, fee) => sum + asMoneyNumber(fee.Amount), 0);
+  const total = asMoneyNumber(items.reduce((sum, fee) => sum + asMoneyNumber(fee.Amount), 0));
   if (total <= 0) return null;
-  const originalTotal = items.reduce((sum, fee) => sum + asMoneyNumber(fee.OriginalAmount || fee.Amount), 0);
+  const originalTotal = asMoneyNumber(items.reduce((sum, fee) => sum + asMoneyNumber(fee.OriginalAmount || fee.Amount), 0));
   const creditApplied = Math.max(0, originalTotal - total);
-  const installmentItems = items.filter((fee) => isYes(fee.AllowInstallment));
-  const installmentMinimum = items.reduce((sum, fee) => {
-    if (!isYes(fee.AllowInstallment)) return sum;
-    const min = asMoneyNumber(fee.MinAmount);
-    return sum + (min > 0 ? min : 0);
-  }, 0);
+  const installmentItems = items.filter((fee) => isYes(fee.AllowInstallment) && ['total', 'both'].includes(lower(fee.PartPaymentMode || 'Item')));
+  const installmentMinimum = installmentItems.reduce((max, fee) => Math.max(max, asMoneyNumber(fee.MinAmount)), 0);
   const minimumInstallmentPortion = installmentItems.length && installmentMinimum <= 0 ? 1 : installmentMinimum;
   const minAmount = Math.min(total, minimumInstallmentPortion);
   const allowInstallment = installmentItems.length > 0;
@@ -675,6 +675,7 @@ function schoolFeeTotalItem(breakdown) {
       AcademicSession: fee.AcademicSession || '',
       Term: fee.Term || '',
       AllowInstallment: fee.AllowInstallment || '',
+      PartPaymentMode: fee.PartPaymentMode || 'Item',
       MinAmount: fee.MinAmount || '',
       MaxAmount: fee.MaxAmount || '',
       DueDate: fee.DueDate || ''
@@ -932,7 +933,9 @@ async function getDashboard(env, body) {
     dueNotifications,
     showResultsOnline: schoolResultsAreVisible(schoolProfile),
     entranceResults,
-    clinicVisits
+    clinicVisits,
+    storeCatalog: (sources.storeItems || []).filter((row) => isYes(row.Active === undefined ? 'YES' : row.Active) && asMoneyNumber(row.Quantity) > 0),
+    storeOrders: (sources.storeOrders || []).filter((row) => children.some((child) => accountKeys(child).some((key) => anyKeyMatches(row.AccountRef || row.AdmissionNo, [key]))))
   };
 }
 

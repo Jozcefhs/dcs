@@ -13,6 +13,8 @@ const paymentRecords = document.getElementById('paymentRecords');
 const entranceResultPanel = document.getElementById('entranceResultPanel');
 const entranceResults = document.getElementById('entranceResults');
 const clinicRecords = document.getElementById('clinicRecords');
+const schoolStores = document.getElementById('schoolStores');
+const storeOrders = document.getElementById('storeOrders');
 const restrictionForm = document.getElementById('restrictionForm');
 const walletStatus = document.getElementById('walletStatus');
 const txnLimit = document.getElementById('txnLimit');
@@ -251,6 +253,11 @@ function isYes(value) {
 
 function isWalletFee(fee) {
   return String(fee.FeeCode || '').trim() === 'WALLET_TOPUP' || String(fee.FeeCategory || '').trim().toLowerCase() === 'wallet';
+}
+
+function allowsItemPartPayment(fee) {
+  const mode = String(fee.PartPaymentMode || 'Item').trim().toLowerCase();
+  return isYes(fee.AllowInstallment) && (mode === 'item' || mode === 'both');
 }
 
 function feeCategory(fee) {
@@ -624,7 +631,7 @@ function renderPayableItems(child) {
     const item = document.createElement('div');
     item.className = 'activity-item payment-action';
     const period = [fee.AcademicSession, fee.Term].filter(Boolean).join(' | ');
-    const allowAmountEntry = isWalletFee(fee) || isYes(fee.AllowInstallment);
+    const allowAmountEntry = isWalletFee(fee) || allowsItemPartPayment(fee);
     const defaultAmount = Number(fee.MinAmount || 0) > 0 ? fee.MinAmount : (isWalletFee(fee) ? '' : fee.Amount);
     const displayAmount = fee.OriginalAmount || fee.Amount;
     const creditApplied = Number(String(fee.CreditApplied || '0').replace(/,/g, ''));
@@ -634,7 +641,7 @@ function renderPayableItems(child) {
     item.innerHTML = `
       <strong>${fee.FeeName || fee.FeeCode}</strong>
       <span>${money(displayAmount)}${period ? ' | ' + period : ''}${fee.DueDate ? ' | Due: ' + fee.DueDate : ''}</span>
-      <small>${fee.FeeCategory || ''}${isYes(fee.AllowInstallment) ? ' | Part payment allowed' : ''}</small>
+      <small>${fee.FeeCategory || ''}${allowAmountEntry && !isWalletFee(fee) ? ' | Part payment allowed' : ''}</small>
       ${balanceNote}
     `;
     if (isWalletFee(fee) && Number(fee.WalletLimit || 0) > 0) {
@@ -786,6 +793,54 @@ function renderDashboard() {
   renderWallet(child);
   renderPayments(child);
   renderClinic(child);
+  renderStores(child);
+}
+
+function storeItemMatchesChild(item, child) {
+  const all = (value) => !value || ['all', '*'].includes(String(value).trim().toLowerCase());
+  const same = (left, right) => String(left || '').trim().toLowerCase() === String(right || '').trim().toLowerCase();
+  return (all(item.Gender) || same(item.Gender, child.Gender)) &&
+    (all(item.ClassName) || same(item.ClassName, child.ClassName || child.ClassAdmitted));
+}
+
+function renderStores(child) {
+  if (!schoolStores || !storeOrders) return;
+  const catalog = (dashboard.storeCatalog || []).filter((item) => storeItemMatchesChild(item, child));
+  schoolStores.innerHTML = catalog.length ? '' : '<p class="muted">No bookstore or uniform items are currently available.</p>';
+  const groups = ['Bookstore', 'Uniform Store'];
+  groups.forEach((storeType) => {
+    const items = catalog.filter((item) => item.StoreType === storeType);
+    if (!items.length) return;
+    const section = document.createElement('section');
+    section.className = 'store-catalog-section';
+    section.innerHTML = `<h3>${escapeHtml(storeType)}</h3>`;
+    items.forEach((item) => {
+      const row = document.createElement('div');
+      row.className = 'activity-item store-item-row';
+      row.innerHTML = `<strong>${escapeHtml(item.ItemName)}</strong><span>${escapeHtml([item.Category, item.Size, item.Gender].filter(Boolean).join(' | '))}</span><small>${money(item.Price)} | ${escapeHtml(item.Quantity)} available</small>`;
+      const qty = document.createElement('input'); qty.type = 'number'; qty.min = '1'; qty.max = String(item.Quantity || 1); qty.value = '1'; qty.className = 'store-quantity';
+      const buy = document.createElement('button'); buy.type = 'button'; buy.textContent = 'Buy Now';
+      buy.addEventListener('click', async () => {
+        const quantity = Math.max(1, Math.min(Number(item.Quantity || 1), Number(qty.value || 1)));
+        buy.disabled = true;
+        try {
+          const response = await fetch('/api/init-payment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...authPayload(), accountRef: child.AccountRef, feeCode: 'STORE_CART', amount: Number(item.Price) * quantity, storeCart: [{ itemCode: item.ItemCode, storeType: item.StoreType, quantity }] }) });
+          const data = await response.json();
+          if (!response.ok || !data.ok) throw new Error(data.message || 'Could not start store payment.');
+          window.location.href = data.authorizationUrl;
+        } catch (error) { setStatus(error.message || String(error), 'bad'); buy.disabled = false; }
+      });
+      row.append(qty, buy); section.appendChild(row);
+    });
+    schoolStores.appendChild(section);
+  });
+  const orders = (dashboard.storeOrders || []).filter((order) => String(order.AccountRef || order.AdmissionNo).toLowerCase() === String(child.AccountRef).toLowerCase());
+  storeOrders.innerHTML = orders.length ? '' : '<p class="muted">No store orders recorded for this student.</p>';
+  orders.forEach((order) => {
+    const row = document.createElement('div'); row.className = 'activity-item';
+    row.innerHTML = `<strong>${escapeHtml(order.StoreType || 'School Store')} - ${escapeHtml(order.OrderNo)}</strong><span>${escapeHtml(order.Status || 'Paid - Awaiting Collection')}</span><small>${money(order.Amount)} | ${escapeHtml(order.PaidAt || order.CreatedAt || '')}</small>`;
+    storeOrders.appendChild(row);
+  });
 }
 
 async function loadDashboard() {
