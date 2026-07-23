@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  acceptanceInvoicePayload,
   accountingDestinationForPayment,
   applyBillingCategoryOverrides,
   buildBudgetVsActual,
@@ -59,6 +60,43 @@ test('acceptance deposit and remaining school fee settle one school invoice with
   );
   assert.equal(summary.TotalDebit, 294600);
   assert.equal(summary.TotalCredit, 294600);
+  assert.equal(summary.OutstandingBalance, 0);
+  assert.equal(summary.CreditBalance, 0);
+});
+
+test('paid acceptance fee creates a settled operational invoice instead of excess account credit', () => {
+  const invoice = acceptanceInvoicePayload({
+    AccountRef: 'DCA/26/000002',
+    ApplicationReference: 'DCA/26/000002',
+    AdmissionNo: 'DCA/26/002',
+    DisplayName: 'Emmanuel Gloria',
+    ClassName: 'JSS 1 / Grade 7',
+    StudentType: 'Boarding Student',
+    FeeCode: 'ACCEPT_B_JSS1_TO_SS1_FIRST_TERM',
+    FeeName: 'Acceptance',
+    FeeCategory: 'Admission',
+    Amount: 150000,
+    AcademicSession: '2026/2027',
+    Term: 'First Term',
+    PaidAt: '2026-07-23T16:37:21.000Z'
+  }, {
+    Amount: 150000,
+    DueDate: '2026-12-09'
+  }, {}, 150000);
+
+  assert.equal(invoice.Debit, 150000);
+  assert.equal(invoice.Credit, 150000);
+  assert.equal(invoice.Balance, 0);
+  assert.equal(invoice.Status, 'Paid');
+
+  const summary = calculateAccountFinancialSummary([invoice], [{
+    AccountRef: 'DCA/26/000002',
+    FeeCode: invoice.FeeCode,
+    FeeCategory: 'Admission',
+    Credit: 150000
+  }], 'DCA/26/000002');
+  assert.equal(summary.TotalDebit, 150000);
+  assert.equal(summary.TotalCredit, 150000);
   assert.equal(summary.OutstandingBalance, 0);
   assert.equal(summary.CreditBalance, 0);
 });
