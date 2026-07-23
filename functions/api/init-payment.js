@@ -3,7 +3,7 @@
 
 import { getPayableFees, getSchoolCode } from './backend.js';
 import { listCollection, requireFirestoreEnv } from '../lib/firestore.js';
-import { classNamesMatch, normalizeClassKey } from '../lib/class-names.js';
+import { normalizeClassKey } from '../lib/class-names.js';
 import { legacyGoogleDataEnabled } from '../lib/backend-mode.js';
 
 const PAYSTACK_INIT_URL = 'https://api.paystack.co/transaction/initialize';
@@ -36,9 +36,26 @@ export function storeGenderMatches(configured, actual) {
   return String(configured).split(/[,;|]+/).map(normalizeStoreGender).filter(Boolean).includes(wanted);
 }
 
-function storeClassMatches(configured, actual) {
-  if (allScope(configured)) return true;
-  return String(configured).split(/[,;|]+/).map((value) => value.trim()).filter(Boolean).some((value) => classNamesMatch(value, actual));
+function normalizedStoreSection(record = {}) {
+  const classKey = normalizeClassKey(record.ClassName || record.ClassAdmitted || '');
+  if (/^(creche|prenursery|nursery[1-3]|primary[1-6])$/.test(classKey)) return 'primary';
+  if (/^(jss[1-3]|ss[1-3])$/.test(classKey)) return 'secondary';
+  return String(record.SchoolSection || '').trim().toLowerCase();
+}
+
+function normalizedStoreBranch(value) {
+  const key = String(value || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  return ['mainbranch', 'default'].includes(key) ? 'main' : key;
+}
+
+export function storeItemIsPurchasable(item = {}, account = {}) {
+  const itemSection = normalizedStoreSection(item);
+  const accountSection = normalizedStoreSection(account);
+  const sectionMatches = allScope(item.SchoolSection) || !accountSection || itemSection === accountSection;
+  const itemBranch = normalizedStoreBranch(item.BranchId);
+  const accountBranch = normalizedStoreBranch(account.BranchId);
+  const branchMatches = allScope(item.BranchId) || !accountBranch || itemBranch === accountBranch;
+  return branchMatches && sectionMatches;
 }
 
 function isWalletFee(fee) {
@@ -155,9 +172,7 @@ export async function onRequestPost(context) {
       const requestedCart = Array.isArray(body.storeCart) ? body.storeCart.slice(0, 25) : [];
       const catalog = await listCollection(env, 'storeItems');
       storeCart = requestedCart.map((entry) => {
-        const classKey = normalizeClassKey(payableAccount.ClassName || payableAccount.ClassAdmitted || '');
-        const accountSection = String(payableAccount.SchoolSection || (/^(creche|prenursery|nursery[1-3]|primary[1-6])$/.test(classKey) ? 'Primary' : 'Secondary')).toLowerCase();
-        const item = catalog.find((row) => String(row.ItemCode || '').trim() === String(entry.itemCode || '').trim() && String(row.StoreType || '').trim() === String(entry.storeType || '').trim() && (allScope(row.SchoolSection) || String(row.SchoolSection).trim().toLowerCase() === accountSection) && (allScope(row.BranchId) || !payableAccount.BranchId || String(row.BranchId).trim().toLowerCase() === String(payableAccount.BranchId).trim().toLowerCase()) && storeClassMatches(row.ClassName, payableAccount.ClassName || payableAccount.ClassAdmitted) && storeGenderMatches(row.Gender, payableAccount.Gender));
+        const item = catalog.find((row) => String(row.ItemCode || '').trim() === String(entry.itemCode || '').trim() && String(row.StoreType || '').trim() === String(entry.storeType || '').trim() && storeItemIsPurchasable(row, payableAccount));
         if (!item || !isYes(item.Active === undefined ? 'YES' : item.Active)) throw new Error('A selected store item is no longer available.');
         const quantity = Math.max(1, Math.floor(toAmount(entry.quantity || 1)));
         if (quantity > toAmount(item.Quantity)) throw new Error(`${item.ItemName} does not have enough stock.`);

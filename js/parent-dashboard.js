@@ -856,25 +856,19 @@ function renderDashboard() {
 function storeItemMatchesChild(item, child) {
   const all = (value) => !value || ['all', '*'].includes(String(value).trim().toLowerCase());
   const same = (left, right) => String(left || '').trim().toLowerCase() === String(right || '').trim().toLowerCase();
-  const normalizeGender = (value) => {
-    const text = String(value || '').trim().toLowerCase().replace(/[^a-z]/g, '');
-    if (['m', 'male', 'boy', 'boys', 'malestudent'].includes(text)) return 'male';
-    if (['f', 'female', 'girl', 'girls', 'femalestudent'].includes(text)) return 'female';
-    return text;
+  const sectionFor = (record) => {
+    const className = normalizePortalClass(record.ClassName || record.ClassAdmitted || '');
+    if (/^(creche|prenursery|nursery[1-3]|primary[1-6])$/.test(className)) return 'primary';
+    if (/^(jss[1-3]|ss[1-3])$/.test(className)) return 'secondary';
+    return String(record.SchoolSection || '').trim().toLowerCase();
   };
-  const configuredMatches = (configured, actual, normalize = (value) => String(value || '').trim().toLowerCase()) => {
-    if (all(configured)) return true;
-    const wanted = normalize(actual);
-    if (!wanted) return false;
-    return String(configured).split(/[,;|]+/).map(normalize).filter(Boolean).includes(wanted);
+  const branchFor = (value) => {
+    const key = String(value || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    return ['mainbranch', 'default'].includes(key) ? 'main' : key;
   };
-  const childSection = String(child.SchoolSection || (/creche|nursery|primary|grade\s*[1-6]/i.test(child.ClassName || child.ClassAdmitted || '') ? 'Primary' : 'Secondary'));
-  const itemSection = String(item.SchoolSection || 'Secondary');
-  const branchMatches = all(item.BranchId) || !child.BranchId || same(item.BranchId, child.BranchId);
-  const sectionMatches = all(item.SchoolSection) || same(itemSection, childSection);
-  const genderMatches = configuredMatches(item.Gender, child.Gender, normalizeGender);
-  const classMatches = configuredMatches(item.ClassName, child.ClassName || child.ClassAdmitted, normalizePortalClass);
-  return branchMatches && sectionMatches && genderMatches && classMatches;
+  const branchMatches = all(item.BranchId) || !child.BranchId || branchFor(item.BranchId) === branchFor(child.BranchId);
+  const sectionMatches = all(item.SchoolSection) || !sectionFor(child) || same(sectionFor(item), sectionFor(child));
+  return branchMatches && sectionMatches;
 }
 
 function normalizePortalClass(value) {
