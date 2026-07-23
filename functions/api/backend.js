@@ -4419,10 +4419,11 @@ async function getAccountingOverview(env, body = {}) {
       approvalLimits: [], closeChecklist: [], bankStatementItems: [], reports: {}
     };
   }
-  const synchronized = await syncRevenueToAccounting(env);
-  await seedAccountingApprovalLimits(env);
-  const periodsForChecklist = await listCollection(env, 'accountingPeriods');
-  for (const period of periodsForChecklist) await seedAccountingCloseChecklist(env, clean(period.PeriodId || period.__id));
+  // Keep the overview read-only. Revenue synchronization and accounting setup
+  // can perform many Firestore reads/writes and previously ran on every refresh,
+  // causing Cloudflare Workers to exceed their per-request subrequest quota.
+  // Administrators can still run the explicit "Synchronize Revenue" action.
+  const synchronized = 0;
   const [chart, journals, expenses, budgets, banks, reconciliations, periods, audit, vendors, supplierBills, supplierPayments, assets, adjustments, approvalLimits, closeChecklist, bankStatementItems, invoices, payments, payrollProfiles, payrollRuns, payrollItems, payrollPayments, payrollAudit, payrollTaxProfiles, payrollTaxOverrides, payrollSalaryComponents, payrollTaxBands, payrollTaxReliefs, payrollLedgerMappings] = await Promise.all([
     listCollection(env, 'chartOfAccounts'), listCollection(env, 'accountingJournals'), listCollection(env, 'accountingExpenses'),
     listCollection(env, 'accountingBudgets'), listCollection(env, 'accountingBanks'), listCollection(env, 'accountingReconciliations'),
