@@ -151,6 +151,21 @@ function applicationKeys(application) {
   ].map(clean).filter(Boolean);
 }
 
+export function parentOwnsApplication(application, email) {
+  const wantedEmail = lower(email);
+  if (!wantedEmail || !application) return false;
+  return [
+    pick(application, ['VerificationEmail', 'verificationEmail']),
+    pick(application, ['ParentEmail', 'parentEmail']),
+    pick(application, ['Email', 'email'])
+  ].some((value) => lower(value) === wantedEmail);
+}
+
+export function findParentOwnedApplication(applications, accountRef, email) {
+  return (applications || []).find((row) => parentOwnsApplication(row, email) && applicationKeys(row)
+    .some((ref) => sameText(ref, accountRef) || referencesMatch(ref, accountRef))) || null;
+}
+
 function applicationMatchesChild(application, child) {
   const appKeys = applicationKeys(application);
   const childKeys = accountKeys(child);
@@ -759,18 +774,33 @@ async function loadStoredAdmissionDocument(env, url) {
 async function resolveParentAdmissionApplication(env, body, email, code, accountRef) {
   const sourceType = lower(body.sourceType || body.SourceType);
   const collection = sourceType === 'application' ? 'applications' : 'students';
+  let familyAccessPromise = null;
+  const authenticateFamily = () => {
+    if (!familyAccessPromise) {
+      familyAccessPromise = loadParentSources(env, 'identity', body).then(async (sources) => {
+        await assertParentAccess(sources, email, code);
+        return sources;
+      });
+    }
+    return familyAccessPromise;
+  };
   const selected = await getSelectedIdentityRow(env, collection, accountRef, body.scopePath || body.ScopePath);
   if (selected && collection === 'applications') {
-    const emailMatches = [selected.VerificationEmail, selected.ParentEmail, selected.Email].some((value) => lower(value) === email);
+    const emailMatches = parentOwnsApplication(selected, email);
     const codeMatches = clean(selected.VerificationCode).toUpperCase() === code;
     if (emailMatches && codeMatches) return selected;
+    if (emailMatches) {
+      await authenticateFamily();
+      return selected;
+    }
   }
   if (selected && collection === 'students') {
     const student = normalizeStudent(selected, await getSchoolProfile(env));
     const emailMatches = lower(student.ParentEmail || student.Email || student.VerificationEmail) === email;
     const codeMatches = [student.ParentLoginCode, student.VerificationCode, student.LoginCode]
       .map((value) => clean(value).toUpperCase()).includes(code);
-    if (emailMatches && codeMatches) {
+    if (emailMatches) {
+      if (!codeMatches) await authenticateFamily();
       const applicationRef = clean(student.ApplicationReference);
       const applicationScope = clean(selected.__scopePath).replace(/\/students$/i, '/applications');
       if (applicationRef) {
@@ -786,10 +816,8 @@ async function resolveParentAdmissionApplication(env, body, email, code, account
       }
     }
   }
-  const identitySources = await loadParentSources(env, 'identity', body);
-  const { applications, matchingApplications } = await assertParentAccess(identitySources, email, code);
-  return applications.find((row) => matchingApplications.includes(row) && applicationKeys(row)
-    .some((ref) => sameText(ref, accountRef) || referencesMatch(ref, accountRef))) || null;
+  const identitySources = await authenticateFamily();
+  return findParentOwnedApplication(identitySources.applications, accountRef, email);
 }
 
 async function getParentAdmissionDocument(env, body) {
