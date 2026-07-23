@@ -149,6 +149,7 @@ img{max-width:100%}
   .card,.hero-card{padding:14px;border-radius:10px;box-shadow:none}
   .form-header{display:grid;grid-template-columns:52px minmax(0,1fr);gap:10px;align-items:center;padding-bottom:12px;margin-bottom:14px}
   .form-header .logo.small{width:52px;max-height:58px;margin:0}
+  .form-header .logo.small[style*="display: none"]+div{grid-column:1/-1}
   .form-header h1{font-size:24px;margin-bottom:5px}
   .form-header .muted{font-size:14px}
   fieldset{padding:12px;margin:14px 0}

@@ -18,6 +18,29 @@ function toAmount(value) {
   return Number.isFinite(amount) ? Math.round((amount + Number.EPSILON) * 100) / 100 : 0;
 }
 
+function allScope(value) {
+  return !String(value || '').trim() || ['all', '*'].includes(String(value).trim().toLowerCase());
+}
+
+export function normalizeStoreGender(value) {
+  const text = String(value || '').trim().toLowerCase().replace(/[^a-z]/g, '');
+  if (['m', 'male', 'boy', 'boys', 'malestudent'].includes(text)) return 'male';
+  if (['f', 'female', 'girl', 'girls', 'femalestudent'].includes(text)) return 'female';
+  return text;
+}
+
+export function storeGenderMatches(configured, actual) {
+  if (allScope(configured)) return true;
+  const wanted = normalizeStoreGender(actual);
+  if (!wanted) return false;
+  return String(configured).split(/[,;|]+/).map(normalizeStoreGender).filter(Boolean).includes(wanted);
+}
+
+function storeClassMatches(configured, actual) {
+  if (allScope(configured)) return true;
+  return String(configured).split(/[,;|]+/).map((value) => value.trim()).filter(Boolean).some((value) => classNamesMatch(value, actual));
+}
+
 function isWalletFee(fee) {
   return fee && (String(fee.FeeCode || '').trim() === 'WALLET_TOPUP' || String(fee.FeeCategory || '').trim().toLowerCase() === 'wallet');
 }
@@ -134,7 +157,7 @@ export async function onRequestPost(context) {
       storeCart = requestedCart.map((entry) => {
         const classKey = normalizeClassKey(payableAccount.ClassName || payableAccount.ClassAdmitted || '');
         const accountSection = String(payableAccount.SchoolSection || (/^(creche|prenursery|nursery[1-3]|primary[1-6])$/.test(classKey) ? 'Primary' : 'Secondary')).toLowerCase();
-        const item = catalog.find((row) => String(row.ItemCode || '').trim() === String(entry.itemCode || '').trim() && String(row.StoreType || '').trim() === String(entry.storeType || '').trim() && (!row.SchoolSection || ['all', '*'].includes(String(row.SchoolSection).trim().toLowerCase()) || String(row.SchoolSection).trim().toLowerCase() === accountSection) && (!row.BranchId || !payableAccount.BranchId || String(row.BranchId).trim().toLowerCase() === String(payableAccount.BranchId).trim().toLowerCase()) && (!row.ClassName || ['all', '*'].includes(String(row.ClassName).trim().toLowerCase()) || classNamesMatch(row.ClassName, payableAccount.ClassName || payableAccount.ClassAdmitted)) && (!row.Gender || ['all', '*'].includes(String(row.Gender).trim().toLowerCase()) || String(row.Gender).trim().toLowerCase() === String(payableAccount.Gender || '').trim().toLowerCase()));
+        const item = catalog.find((row) => String(row.ItemCode || '').trim() === String(entry.itemCode || '').trim() && String(row.StoreType || '').trim() === String(entry.storeType || '').trim() && (allScope(row.SchoolSection) || String(row.SchoolSection).trim().toLowerCase() === accountSection) && (allScope(row.BranchId) || !payableAccount.BranchId || String(row.BranchId).trim().toLowerCase() === String(payableAccount.BranchId).trim().toLowerCase()) && storeClassMatches(row.ClassName, payableAccount.ClassName || payableAccount.ClassAdmitted) && storeGenderMatches(row.Gender, payableAccount.Gender));
         if (!item || !isYes(item.Active === undefined ? 'YES' : item.Active)) throw new Error('A selected store item is no longer available.');
         const quantity = Math.max(1, Math.floor(toAmount(entry.quantity || 1)));
         if (quantity > toAmount(item.Quantity)) throw new Error(`${item.ItemName} does not have enough stock.`);

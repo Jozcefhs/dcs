@@ -856,11 +856,25 @@ function renderDashboard() {
 function storeItemMatchesChild(item, child) {
   const all = (value) => !value || ['all', '*'].includes(String(value).trim().toLowerCase());
   const same = (left, right) => String(left || '').trim().toLowerCase() === String(right || '').trim().toLowerCase();
+  const normalizeGender = (value) => {
+    const text = String(value || '').trim().toLowerCase().replace(/[^a-z]/g, '');
+    if (['m', 'male', 'boy', 'boys', 'malestudent'].includes(text)) return 'male';
+    if (['f', 'female', 'girl', 'girls', 'femalestudent'].includes(text)) return 'female';
+    return text;
+  };
+  const configuredMatches = (configured, actual, normalize = (value) => String(value || '').trim().toLowerCase()) => {
+    if (all(configured)) return true;
+    const wanted = normalize(actual);
+    if (!wanted) return false;
+    return String(configured).split(/[,;|]+/).map(normalize).filter(Boolean).includes(wanted);
+  };
   const childSection = String(child.SchoolSection || (/creche|nursery|primary|grade\s*[1-6]/i.test(child.ClassName || child.ClassAdmitted || '') ? 'Primary' : 'Secondary'));
   const itemSection = String(item.SchoolSection || 'Secondary');
-  const branchMatches = !item.BranchId || !child.BranchId || same(item.BranchId, child.BranchId);
-  return branchMatches && same(itemSection, childSection) && (all(item.Gender) || same(item.Gender, child.Gender)) &&
-    (all(item.ClassName) || normalizePortalClass(item.ClassName) === normalizePortalClass(child.ClassName || child.ClassAdmitted));
+  const branchMatches = all(item.BranchId) || !child.BranchId || same(item.BranchId, child.BranchId);
+  const sectionMatches = all(item.SchoolSection) || same(itemSection, childSection);
+  const genderMatches = configuredMatches(item.Gender, child.Gender, normalizeGender);
+  const classMatches = configuredMatches(item.ClassName, child.ClassName || child.ClassAdmitted, normalizePortalClass);
+  return branchMatches && sectionMatches && genderMatches && classMatches;
 }
 
 function normalizePortalClass(value) {
