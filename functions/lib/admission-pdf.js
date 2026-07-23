@@ -1,4 +1,5 @@
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import QRCode from 'qrcode';
 
 const LETTER = [612, 792];
 const BLUE = rgb(31 / 255, 78 / 255, 121 / 255);
@@ -191,6 +192,25 @@ function centeredX(font, text, size, pageWidth = LETTER[0]) {
   return Math.max(36, (pageWidth - font.widthOfTextAtSize(text, size)) / 2);
 }
 
+function drawQrCode(page, value, x, y, size) {
+  const qr = QRCode.create(value, { errorCorrectionLevel: 'M' });
+  const margin = 2;
+  const moduleSize = size / (qr.modules.size + (margin * 2));
+  page.drawRectangle({ x, y, width: size, height: size, color: rgb(1, 1, 1) });
+  for (let row = 0; row < qr.modules.size; row += 1) {
+    for (let column = 0; column < qr.modules.size; column += 1) {
+      if (!qr.modules.get(row, column)) continue;
+      page.drawRectangle({
+        x: x + ((column + margin) * moduleSize),
+        y: y + size - ((row + margin + 1) * moduleSize),
+        width: moduleSize + 0.05,
+        height: moduleSize + 0.05,
+        color: rgb(0, 0, 0)
+      });
+    }
+  }
+}
+
 async function createAssets(profile) {
   const pdf = await PDFDocument.create();
   const regular = await pdf.embedFont(StandardFonts.Helvetica);
@@ -278,6 +298,8 @@ async function resultPdf(profile, application, issuedAt) {
     page.drawText(label, { x: 70, y, size: 12, font: bold, color: TEXT });
     page.drawText(value, { x: 200, y, size: 12, font: regular, color: TEXT });
   });
+  drawQrCode(page, `Name: ${context.name}, Score: ${score}, Status: ${context.status}`, 400, 560, 100);
+  page.drawText('Result verification QR', { x: 390, y: 545, size: 8, font: regular, color: TEXT });
   page.drawText('Remark:', { x: 70, y: 505, size: 12, font: bold, color: TEXT });
   let y = 505;
   wrapText(resultRemark(context.status), regular, 12, 340).forEach((line) => {
