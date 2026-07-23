@@ -883,6 +883,11 @@ function isSchoolFeesTotalPayment(row) {
   return normalizeMatchText(metadata.paymentType || nested.paymentType) === 'schoolfeestotal';
 }
 
+export function isSchoolFeeCategory(value) {
+  const category = normalizeReferenceText(value);
+  return !category || ['schoolfee', 'schoolfees', 'tuition'].includes(category);
+}
+
 function isGeneralFeeCredit(row) {
   if (!row || isWalletLedger(row) || isAcceptanceFeeLike(row) || isSchoolFeesTotalPayment(row)) return false;
   const feeCode = normalizeMatchText(row.FeeCode);
@@ -2630,7 +2635,9 @@ export async function recordManualPayment(env, body) {
   }
   const existingPayment = (await listCollection(env, 'payments')).find((row) => sameText(row.Reference, reference) || sameText(row.GatewayReference, reference));
   if (existingPayment) return { ok: true, message: 'Payment was already recorded.', duplicate: true, payment: normalizePayment(existingPayment) };
-  const fee = (await listCollection(env, 'feeItems')).map(normalizeFeeItem).find((item) => sameText(item.FeeCode, feeCode)) || {};
+  const configuredFees = (await listCollection(env, 'feeItems')).map(normalizeFeeItem);
+  const fee = configuredFees.find((item) => sameText(item.FeeCode, feeCode)) || {};
+  const schoolFeeCodes = new Set(configuredFees.filter((item) => isSchoolFeeCategory(item.FeeCategory)).map((item) => normalizeReferenceText(item.FeeCode)));
   const student = await findStudentByAccountRef(env, accountRef);
   const paymentId = ledgerDocumentId('PAY');
   const grossAmount = asMoneyNumber(body.GrossAmount || amount);
@@ -2700,7 +2707,7 @@ export async function recordManualPayment(env, body) {
   const matchingInvoices = (await listCollection(env, 'invoices')).map(normalizeInvoice).filter((invoice) => {
     return sameText(invoice.AccountRef, accountRef) &&
       (isSchoolFeesTotalPayment(payment)
-        ? normalizeMatchText(invoice.FeeCategory || 'school fee') === 'school fee'
+        ? isSchoolFeeCategory(invoice.FeeCategory) || schoolFeeCodes.has(normalizeReferenceText(invoice.FeeCode))
         : sameText(invoice.FeeCode, feeCode)) &&
       sameFinancialPeriod(invoice, academicSession, term) &&
       normalizeMatchText(invoice.Status) !== 'paid';
