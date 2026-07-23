@@ -642,7 +642,9 @@ function normalizeAccountSummary(row) {
   };
 }
 
-function accountSummaryForKeys(accounts, keys, ledgerEntries) {
+function accountSummaryForKeys(accounts, keys, ledgerEntries, invoiceEntries = []) {
+  const liveFinancialRows = [...(invoiceEntries || []), ...(ledgerEntries || [])];
+  if (liveFinancialRows.length) return feeAccountSummary(liveFinancialRows);
   const account = (accounts || []).find((row) => {
     const rowKeys = [
       pick(row, ['AccountRef', 'accountRef', '__id']),
@@ -1259,7 +1261,7 @@ async function getChildActivity(env, body) {
   const walletEntries = ledger.filter((entry) => financialReferenceMatches(entry.AccountRef, child) && lower(entry.FeeCategory) === 'wallet')
     .sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
   const childLedger = ledger.filter((entry) => financialReferenceMatches(entry.AccountRef, child));
-  const accountSummary = accountSummaryForKeys(summaryRows.filter(Boolean), keys, childLedger);
+  const accountSummary = accountSummaryForKeys(summaryRows.filter(Boolean), keys, childLedger, invoices);
   child.TotalDebit = accountSummary.TotalDebit;
   child.TotalCredit = accountSummary.TotalCredit;
   child.OutstandingBalance = accountSummary.OutstandingBalance;

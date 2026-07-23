@@ -9,6 +9,7 @@ import {
   calculateAccountFinancialSummary,
   calculateInvoiceCreditAllocations,
   financialRowMatchesAccount,
+  financialRowMatchesLinkedApplication,
   formSaleFinancialAmounts,
   isNewIntakeApplication,
   isSchoolInvoiceCredit,
@@ -144,6 +145,25 @@ test('identity matching does not cross AccountRef and AdmissionNo fields', () =>
   ), false);
 });
 
+test('pre-enrollment payments follow the exact application reference into the enrolled account', () => {
+  const payment = {
+    AccountRef: 'DCA/26/000002',
+    ApplicationReference: 'DCA/26/000002',
+    Credit: 150000
+  };
+  const enrolledAccount = {
+    AccountRef: 'DCA/26/002',
+    AdmissionNo: 'DCA/26/002',
+    ApplicationReference: 'DCA/26/000002'
+  };
+  assert.equal(financialRowMatchesAccount(payment, enrolledAccount), false);
+  assert.equal(financialRowMatchesLinkedApplication(payment, enrolledAccount), true);
+  assert.equal(financialRowMatchesLinkedApplication(payment, {
+    AccountRef: 'DCA/26/002',
+    ApplicationReference: 'DCA/26/000003'
+  }), false);
+});
+
 test('Paystack credits the student with the net amount requested by policy', () => {
   assert.equal(paymentCreditedAmount({
     Amount: 100000, GrossAmount: 100000, GatewayFee: 1500, NetAmount: 98500
@@ -219,6 +239,39 @@ test('school-fees-total payment is allocated FIFO across component invoices in t
   assert.equal(ageing[0].Reference, 'INV-2');
   assert.equal(ageing[0].PaidAmount, 10000);
   assert.equal(ageing[0].Balance, 30000);
+});
+
+test('receivables ageing applies acceptance deposits and remaining payments to enrolled invoices', () => {
+  const ageing = buildReceivablesAgeing([{
+    InvoiceId: 'INV-SCHOOL-1',
+    AccountRef: 'DCA/26/002',
+    ApplicationReference: 'DCA/26/000002',
+    FeeCode: 'TUITION',
+    FeeCategory: 'School Fee',
+    AcademicSession: '2026/2027',
+    Term: 'First Term',
+    Amount: 294600
+  }], [{
+    AccountRef: 'DCA/26/000002',
+    ApplicationReference: 'DCA/26/000002',
+    FeeCode: 'ACCEPT_B_JSS1',
+    FeeName: 'Acceptance',
+    FeeCategory: 'Admission',
+    AcademicSession: '2026/2027',
+    Term: 'First Term',
+    Amount: 150000,
+    Status: 'Paid'
+  }, {
+    AccountRef: 'DCA/26/002',
+    ApplicationReference: 'DCA/26/000002',
+    FeeCode: 'SCHOOL_FEES_TOTAL',
+    FeeCategory: 'School Fee',
+    AcademicSession: '2026/2027',
+    Term: 'First Term',
+    Amount: 144600,
+    Status: 'Paid'
+  }], '2026-07-23');
+  assert.deepEqual(ageing, []);
 });
 
 test('part payment updates multiple component invoices without over-crediting', () => {

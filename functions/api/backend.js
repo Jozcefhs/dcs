@@ -658,6 +658,14 @@ export function financialRowMatchesAccount(row, account) {
   return Boolean(rowApplication && sameReferenceIdentity(rowApplication, accountApplication));
 }
 
+export function financialRowMatchesLinkedApplication(row, account) {
+  if (financialRowMatchesAccount(row, account)) return true;
+  const rowApplication = clean(row && (row.ApplicationReference || row.ApplicationID));
+  const accountApplication = clean(account && (account.ApplicationReference || account.ApplicationID));
+  return Boolean(rowApplication && accountApplication &&
+    sameReferenceIdentity(rowApplication, accountApplication));
+}
+
 function displayNameFromApplication(app) {
   return clean(pick(app, ['ApplicantName', 'DisplayName', 'Name'])) ||
     [pick(app, ['Surname']), pick(app, ['FirstName']), pick(app, ['MiddleName'])].map(clean).filter(Boolean).join(' ');
@@ -1857,7 +1865,7 @@ export async function getAccountsOverview(env) {
     let lastPaymentAt = clean(account.LastPaymentAt);
     const countedLedgerKeys = new Set();
     ledgerRows.forEach((row) => {
-      const matched = financialRowMatchesAccount(row, account);
+      const matched = financialRowMatchesLinkedApplication(row, account);
       if (!matched) return;
       const ledgerKey = clean(row.LedgerNo || row.Reference || `${row.Date}|${row.AccountRef}|${row.FeeCode}|${row.Debit}|${row.Credit}`);
       if (ledgerKey && countedLedgerKeys.has(ledgerKey)) return;
@@ -1866,7 +1874,10 @@ export async function getAccountsOverview(env) {
         .map((ref) => applicationCreatedMap.get(safeDocumentId(ref).toLowerCase()) || 0)
         .filter(Boolean)
         .sort((a, b) => b - a)[0] || 0;
-      if (accountCreatedAt && timestampMs(row.RawDate || row.Date) && timestampMs(row.RawDate || row.Date) < accountCreatedAt) return;
+      const linkedApplicationPayment = clean(row.ApplicationReference) && clean(account.ApplicationReference) &&
+        sameReferenceIdentity(row.ApplicationReference, account.ApplicationReference);
+      if (accountCreatedAt && timestampMs(row.RawDate || row.Date) &&
+        timestampMs(row.RawDate || row.Date) < accountCreatedAt && !linkedApplicationPayment) return;
       if (clean(row.AcademicSession) && clean(account.AcademicSession) && !feeFieldMatches(row.AcademicSession, account.AcademicSession)) return;
       if (clean(row.Term) && clean(account.Term) && !feeFieldMatches(row.Term, account.Term)) return;
       const debit = asMoneyNumber(row.Debit);
@@ -4702,16 +4713,18 @@ function buildAgeing(rows, asOf, kind) {
 }
 
 export function buildReceivablesAgeing(invoices, payments, asOf) {
-  const specificKeyFor = (row) => [referenceIdentityKey(row.AccountRef), row.FeeCode, row.AcademicSession, row.Term].map((value) => lower(value)).join('|');
-  const generalKeyFor = (row) => [referenceIdentityKey(row.AccountRef), row.AcademicSession, row.Term].map((value) => lower(value)).join('|');
+  const billingIdentity = (row) => referenceIdentityKey(row.ApplicationReference || row.ApplicationID || row.AccountRef);
+  const specificKeyFor = (row) => [billingIdentity(row), row.FeeCode, row.AcademicSession, row.Term].map((value) => lower(value)).join('|');
+  const generalKeyFor = (row) => [billingIdentity(row), row.AcademicSession, row.Term].map((value) => lower(value)).join('|');
   const specificAvailable = new Map();
   const generalAvailable = new Map();
   payments.map(normalizePayment).forEach((row) => {
     if (lower(row.Status) && !['paid', 'success', 'successful', 'completed'].includes(lower(row.Status))) return;
-    if (isWalletLedger(row) || isStorePurchase(row) || isAcceptanceFeeLike(row)) return;
+    if (isWalletLedger(row) || isStorePurchase(row)) return;
     const amount = paymentCreditedAmount(row);
-    const pool = isSchoolFeesTotalPayment(row) ? generalAvailable : specificAvailable;
-    const key = isSchoolFeesTotalPayment(row) ? generalKeyFor(row) : specificKeyFor(row);
+    const isGeneralSchoolCredit = isSchoolFeesTotalPayment(row) || isAcceptanceFeeLike(row);
+    const pool = isGeneralSchoolCredit ? generalAvailable : specificAvailable;
+    const key = isGeneralSchoolCredit ? generalKeyFor(row) : specificKeyFor(row);
     pool.set(key, asMoneyNumber((pool.get(key) || 0) + amount));
   });
   const consume = (pool, key, wanted) => {
