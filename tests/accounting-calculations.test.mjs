@@ -4,6 +4,7 @@ import {
   accountingDestinationForPayment,
   applyBillingCategoryOverrides,
   buildBudgetVsActual,
+  buildGatewayCollectionsReport,
   buildReceivablesAgeing,
   calculateAccountFinancialSummary,
   calculateInvoiceCreditAllocations,
@@ -73,12 +74,12 @@ test('acceptance deposit is not duplicated as a standalone invoice', () => {
     Term: 'First Term'
   };
   assert.equal(isStandaloneAcceptanceInvoiceForPayment({
-    AccountRef: 'DCA/26/000002',
-    FeeCode: 'ACCEPT_B_JSS1_TO_SS1_FIRST_TERM',
+    ApplicationReference: 'DCA/26/000002',
+    FeeCode: 'LEGACY_ACCEPTANCE',
     FeeName: 'Acceptance fee',
     FeeCategory: 'Admission',
-    AcademicSession: '2026/2027',
-    Term: 'First Term',
+    AcademicSession: '',
+    Term: '',
     Debit: 150000
   }, payment), true);
   assert.equal(isStandaloneAcceptanceInvoiceForPayment({
@@ -90,6 +91,40 @@ test('acceptance deposit is not duplicated as a standalone invoice', () => {
     Term: 'First Term',
     Debit: 294600
   }, payment), false);
+});
+
+test('finance reports expose gross collections, Paystack charges, and net form revenue separately', () => {
+  const report = buildGatewayCollectionsReport([{
+    ReceiptNo: 'FORM-1',
+    ApplicantName: 'Test Applicant',
+    PaymentDate: '2026-07-23',
+    PaymentMethod: 'Online',
+    PaymentReference: 'PS-FORM-1',
+    FormAmount: 10000,
+    AmountPaid: 10000,
+    GrossAmount: 10300,
+    GatewayFee: 300,
+    NetAmount: 10000
+  }], [{
+    ChargeId: 'PAYSTACK-FORM-FEE-PS-FORM-1',
+    Date: '2026-07-23',
+    Reference: 'PS-FORM-1',
+    Source: 'Paystack Admission Form',
+    GrossCollection: 10300,
+    Amount: 300,
+    NetSettlement: 10000,
+    Treatment: 'DeductedBeforeRevenueRecognition',
+    Status: 'Recorded'
+  }]);
+
+  assert.equal(report.summary.FormSalesGross, 10300);
+  assert.equal(report.summary.FormSalesCharges, 300);
+  assert.equal(report.summary.FormSalesNet, 10000);
+  assert.equal(report.summary.PaystackCharges, 300);
+  assert.deepEqual(
+    report.formSales.map((row) => [row.GrossCollection, row.PaystackCharge, row.NetRevenue]),
+    [[10300, 300, 10000]]
+  );
 });
 
 test('a padded account reference cannot receive another student payment', () => {

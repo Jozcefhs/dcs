@@ -3038,10 +3038,12 @@ async function refreshAccountFinancialSummary(env, accountRef, linkedReferences 
 }
 
 export function isStandaloneAcceptanceInvoiceForPayment(invoice, payment) {
-  return isAcceptanceFeeLike(invoice) &&
-    sameText(invoice.AccountRef, payment.AccountRef) &&
-    sameText(invoice.FeeCode, payment.FeeCode) &&
-    sameFinancialPeriod(invoice, payment.AcademicSession, payment.Term);
+  if (!isAcceptanceFeeLike(invoice)) return false;
+  const invoiceReferences = accountRefsFrom(invoice);
+  const paymentReferences = accountRefsFrom(payment);
+  return invoiceReferences.some((left) => paymentReferences.some((right) =>
+    sameReferenceIdentity(left, right)
+  ));
 }
 
 async function removeStandaloneAcceptanceInvoices(env, payment) {
@@ -4901,6 +4903,54 @@ function buildAccountingReport(chart, journals, expenses, budgets, filter = {}) 
   };
 }
 
+export function buildGatewayCollectionsReport(formSales = [], gatewayCharges = [], filter = {}) {
+  const charges = gatewayCharges.filter((row) => accountingRowMatches(row, filter)).map((row) => ({
+    Date: clean(row.Date || row.CreatedAt).slice(0, 10),
+    Reference: clean(row.Reference || row.ChargeId || row.__id),
+    Source: clean(row.Source) || 'Paystack',
+    Description: clean(row.Description),
+    GrossCollection: asMoneyNumber(row.GrossCollection),
+    PaystackCharge: asMoneyNumber(row.Amount),
+    NetSettlement: asMoneyNumber(row.NetSettlement),
+    Treatment: clean(row.Treatment),
+    Status: clean(row.Status)
+  }));
+  const sales = formSales.filter((row) => accountingRowMatches({
+    ...row,
+    Date: row.PaymentDate || row.Date || row.Time || row.CreatedAt
+  }, filter)).map((row) => {
+    const amounts = formSaleFinancialAmounts(row);
+    return {
+      Date: clean(row.PaymentDate || row.Date || row.Time || row.CreatedAt).slice(0, 10),
+      ReceiptNo: clean(row.ReceiptNo || row.ReceiptNumber || row.__id),
+      ApplicantName: clean(row.ApplicantName || row.DisplayName),
+      PaymentMethod: clean(row.PaymentMethod || row.Method || row.Gateway),
+      Reference: clean(row.PaymentReference || row.Reference),
+      GrossCollection: amounts.GrossAmount,
+      PaystackCharge: amounts.GatewayFee,
+      NetRevenue: amounts.RecognizedAmount,
+      Currency: clean(row.Currency) || 'NGN'
+    };
+  });
+  const total = (rows, key) => asMoneyNumber(rows.reduce((sum, row) => sum + asMoneyNumber(row[key]), 0));
+  const formCharges = charges.filter((row) => lower(row.Source).includes('form'));
+  const feeCharges = charges.filter((row) => !lower(row.Source).includes('form'));
+  return {
+    summary: {
+      GrossCollections: total(charges, 'GrossCollection'),
+      PaystackCharges: total(charges, 'PaystackCharge'),
+      NetSettlements: total(charges, 'NetSettlement'),
+      FormSalesGross: total(sales, 'GrossCollection'),
+      FormSalesCharges: total(sales, 'PaystackCharge'),
+      FormSalesNet: total(sales, 'NetRevenue'),
+      FeePaymentCharges: total(feeCharges, 'PaystackCharge'),
+      FormPaymentCharges: total(formCharges, 'PaystackCharge')
+    },
+    formSales: sales.sort((a, b) => clean(b.Date).localeCompare(clean(a.Date))),
+    gatewayCharges: charges.sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)))
+  };
+}
+
 async function getAccountingOverview(env, body = {}) {
   if (isDepartmentAccountingUser(body)) {
     const department = accountingDepartment(body);
@@ -4924,13 +4974,14 @@ async function getAccountingOverview(env, body = {}) {
   // causing Cloudflare Workers to exceed their per-request subrequest quota.
   // Administrators can still run the explicit "Synchronize Revenue" action.
   const synchronized = 0;
-  const [chart, journals, expenses, budgets, banks, reconciliations, periods, audit, vendors, supplierBills, supplierPayments, assets, adjustments, approvalLimits, closeChecklist, bankStatementItems, invoices, payments, payrollProfiles, payrollRuns, payrollItems, payrollPayments, payrollAudit, payrollTaxProfiles, payrollTaxOverrides, payrollSalaryComponents, payrollTaxBands, payrollTaxReliefs, payrollLedgerMappings] = await Promise.all([
+  const [chart, journals, expenses, budgets, banks, reconciliations, periods, audit, vendors, supplierBills, supplierPayments, assets, adjustments, approvalLimits, closeChecklist, bankStatementItems, invoices, payments, formSales, gatewayCharges, payrollProfiles, payrollRuns, payrollItems, payrollPayments, payrollAudit, payrollTaxProfiles, payrollTaxOverrides, payrollSalaryComponents, payrollTaxBands, payrollTaxReliefs, payrollLedgerMappings] = await Promise.all([
     listCollection(env, 'chartOfAccounts'), listCollection(env, 'accountingJournals'), listCollection(env, 'accountingExpenses'),
     listCollection(env, 'accountingBudgets'), listCollection(env, 'accountingBanks'), listCollection(env, 'accountingReconciliations'),
     listCollection(env, 'accountingPeriods'), listCollection(env, 'accountingAudit'), listCollection(env, 'accountingVendors'),
     listCollection(env, 'accountingSupplierBills'), listCollection(env, 'accountingSupplierPayments'), listCollection(env, 'accountingAssets'),
     listCollection(env, 'accountingAdjustments'), listCollection(env, 'accountingApprovalLimits'), listCollection(env, 'accountingCloseChecklist'),
     listCollection(env, 'accountingBankStatementItems'), listCollection(env, 'invoices'), listCollection(env, 'payments'),
+    listCollection(env, 'formSales').catch(() => []), listCollection(env, 'paymentGatewayCharges').catch(() => []),
     listCollection(env, 'payrollProfiles'), listCollection(env, 'payrollRuns'), listCollection(env, 'payrollItems'),
     listCollection(env, 'payrollPayments'), listCollection(env, 'payrollAudit'), listCollection(env, PAYROLL_TAX_COLLECTIONS.profiles).catch(() => []), listCollection(env, PAYROLL_TAX_COLLECTIONS.overrides).catch(() => []),
     listCollection(env, PAYROLL_TAX_COLLECTIONS.components).catch(() => []), listCollection(env, PAYROLL_TAX_COLLECTIONS.bands).catch(() => []),
@@ -4944,10 +4995,11 @@ async function getAccountingOverview(env, body = {}) {
   const reports = buildAccountingReport(chart, journals, expenses, budgets, filter);
   reports.receivablesAgeing = buildReceivablesAgeing(invoices, payments, filter.DateTo || nowIso().slice(0, 10));
   reports.payablesAgeing = buildAgeing(supplierBills, filter.DateTo || nowIso().slice(0, 10), 'payable');
+  const gatewayReport = buildGatewayCollectionsReport(formSales, gatewayCharges, filter);
   return { ok: true, message: 'Finance and accounting records loaded.', synchronized, filter, chart, journals, expenses, budgets, banks, reconciliations, periods, audit,
     vendors, supplierBills, supplierPayments, assets, adjustments, approvalLimits, closeChecklist, bankStatementItems,
     payrollProfiles, payrollRuns, payrollItems, payrollPayments, payrollAudit, payrollTaxProfiles: payrollTaxProfilesWithUsage, payrollTaxOverrides,
-    payrollSalaryComponents, payrollTaxBands, payrollTaxReliefs, payrollLedgerMappings, reports };
+    payrollSalaryComponents, payrollTaxBands, payrollTaxReliefs, payrollLedgerMappings, gatewayReport, reports };
 }
 
 function payrollComponents(value) {
