@@ -3037,68 +3037,24 @@ async function refreshAccountFinancialSummary(env, accountRef, linkedReferences 
   return summary;
 }
 
-export function acceptanceInvoicePayload(payment, fee, existing = {}, creditedAmount = 0) {
-  const debit = asMoneyNumber(fee && fee.Amount) || asMoneyNumber(payment && payment.Amount);
-  const credit = Math.min(debit, Math.max(0, asMoneyNumber(creditedAmount)));
-  const balance = Math.max(0, debit - credit);
-  const status = balance <= 0 ? 'Paid' : credit > 0 ? 'Part Paid' : 'Unpaid';
-  const invoiceId = clean(existing.InvoiceId) || `INV-ACCEPT-${safeDocumentId([
-    payment.AccountRef,
-    payment.FeeCode,
-    payment.AcademicSession,
-    payment.Term
-  ].map(clean).filter(Boolean).join('-'))}`;
-  return {
-    ...existing,
-    InvoiceId: invoiceId,
-    AccountRef: clean(payment.AccountRef),
-    AccountRefNormalized: normalizeReferenceText(payment.AccountRef),
-    ApplicationReference: clean(payment.ApplicationReference),
-    AdmissionNo: clean(payment.AdmissionNo),
-    DisplayName: clean(payment.DisplayName),
-    ClassName: clean(payment.ClassName),
-    StudentType: clean(payment.StudentType),
-    BillingCategory: clean(payment.BillingCategory) || 'Regular',
-    FeeCode: clean(payment.FeeCode),
-    FeeName: clean(payment.FeeName || (fee && fee.FeeName)),
-    FeeCategory: clean(payment.FeeCategory || (fee && fee.FeeCategory)) || 'Admission',
-    Amount: debit,
-    Debit: debit,
-    Credit: credit,
-    Balance: balance,
-    Currency: clean(payment.Currency || (fee && fee.Currency)) || 'NGN',
-    AcademicSession: clean(payment.AcademicSession),
-    Term: clean(payment.Term),
-    DueDate: clean((fee && fee.DueDate) || existing.DueDate),
-    Status: status,
-    Date: clean(existing.Date || payment.PaidAt) || nowIso(),
-    CreatedAt: clean(existing.CreatedAt) || nowIso(),
-    UpdatedAt: nowIso(),
-    RecordedBy: clean(payment.RecordedBy) || 'Accounts Office'
-  };
+export function isStandaloneAcceptanceInvoiceForPayment(invoice, payment) {
+  return isAcceptanceFeeLike(invoice) &&
+    sameText(invoice.AccountRef, payment.AccountRef) &&
+    sameText(invoice.FeeCode, payment.FeeCode) &&
+    sameFinancialPeriod(invoice, payment.AcademicSession, payment.Term);
 }
 
-async function ensureAcceptanceFeeInvoice(env, payment, fee, reconcileExistingPayment = false) {
-  if (!isAcceptanceFeeLike(payment)) return null;
-  const existing = (await queryAccountRows(env, 'invoices', payment.AccountRef)).map(normalizeInvoice)
-    .find((invoice) => sameText(invoice.AccountRef, payment.AccountRef) &&
-      sameText(invoice.FeeCode, payment.FeeCode) &&
-      sameFinancialPeriod(invoice, payment.AcademicSession, payment.Term));
-  let creditedAmount = 0;
-  if (reconcileExistingPayment) {
-    const ledgerRows = (await queryAccountRowsForReferences(env, 'ledger', [
-      payment.AccountRef,
-      payment.ApplicationReference
-    ])).map(normalizeLedger);
-    creditedAmount = ledgerRows.filter((row) =>
-      asMoneyNumber(row.Credit) > 0 &&
-      sameText(row.FeeCode, payment.FeeCode) &&
-      sameFinancialPeriod(row, payment.AcademicSession, payment.Term)
-    ).reduce((sum, row) => sum + asMoneyNumber(row.Credit), 0);
+async function removeStandaloneAcceptanceInvoices(env, payment) {
+  if (!isAcceptanceFeeLike(payment)) return 0;
+  const invoices = await queryAccountRows(env, 'invoices', payment.AccountRef);
+  const standalone = invoices.filter((invoice) => isStandaloneAcceptanceInvoiceForPayment(
+    normalizeInvoice(invoice),
+    payment
+  ));
+  for (const invoice of standalone) {
+    await deleteDocument(env, 'invoices', invoice.__id || safeDocumentId(invoice.InvoiceId));
   }
-  const invoice = acceptanceInvoicePayload(payment, fee, existing || {}, creditedAmount);
-  await upsertDocument(env, 'invoices', safeDocumentId(invoice.InvoiceId), invoice);
-  return invoice;
+  return standalone.length;
 }
 
 export async function recordManualPayment(env, body) {
@@ -3131,7 +3087,7 @@ export async function recordManualPayment(env, body) {
   if (existingPayment) {
     const normalizedExisting = normalizePayment(existingPayment);
     if (isAcceptanceFeeLike(normalizedExisting)) {
-      await ensureAcceptanceFeeInvoice(env, normalizedExisting, fee, true);
+      await removeStandaloneAcceptanceInvoices(env, normalizedExisting);
       await refreshAccountFinancialSummary(env, normalizedExisting.AccountRef, [normalizedExisting.ApplicationReference]);
     }
     return { ok: true, message: 'Payment was already recorded.', duplicate: true, payment: normalizedExisting };
@@ -3211,7 +3167,7 @@ export async function recordManualPayment(env, body) {
     Source: payment.Gateway || payment.Method,
     Metadata: payment.Metadata
   });
-  await ensureAcceptanceFeeInvoice(env, payment, fee);
+  await removeStandaloneAcceptanceInvoices(env, payment);
   const matchingInvoices = (await queryAccountRows(env, 'invoices', accountRef)).map(normalizeInvoice).filter((invoice) => {
     return sameText(invoice.AccountRef, accountRef) &&
       (isSchoolFeesTotalPayment(payment)
@@ -3258,10 +3214,7 @@ export async function recordManualPayment(env, body) {
       CreatedAt: nowIso(), UpdatedAt: nowIso()
     });
   }
-  // Acceptance is recognized as admission revenue when paid. Its operational
-  // invoice keeps the family account balanced but must not reroute the receipt
-  // journal to receivables without a separate invoice-recognition journal.
-  await writePaymentAccountingJournal(env, payment, matchingInvoices.length > 0 && !isAcceptanceFeeLike(payment));
+  await writePaymentAccountingJournal(env, payment, matchingInvoices.length > 0);
   let invoicePostingWarning = '';
   const shouldGenerateSchoolInvoices = Boolean(student) && (
     isSchoolFeesTotalPayment(payment) ||
