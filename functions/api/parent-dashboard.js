@@ -714,6 +714,9 @@ function buildEntranceResult(application, profile = {}) {
     ,OfferSent: pick(application, ['OfferSent', 'offerSent'], 'NO')
     ,AdmissionLetterSent: pick(application, ['AdmissionLetterSent', 'admissionLetterSent'], 'NO')
     ,AcceptanceFeePaid: pick(application, ['AcceptanceFeePaid', 'acceptanceFeePaid'], 'NO')
+    ,EntranceResultPdfAvailable: Boolean(clean(pick(application, ['EntranceResultPdfUrl', 'entranceResultPdfUrl'])))
+    ,OfferPdfAvailable: Boolean(clean(pick(application, ['OfferPdfUrl', 'offerPdfUrl'])))
+    ,AdmissionLetterPdfAvailable: Boolean(clean(pick(application, ['AdmissionLetterPdfUrl', 'admissionLetterPdfUrl'])))
   };
 }
 

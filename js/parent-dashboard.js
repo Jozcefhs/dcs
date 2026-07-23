@@ -811,9 +811,9 @@ function renderEntranceResults(child) {
     const documentFlow = document.createElement('div');
     documentFlow.className = 'admission-document-flow';
     const documents = [
-      { type: 'result', label: 'Entrance Result', buttonLabel: 'Download Result', sent: isYes(record.ResultSent), enabled: true },
-      { type: 'offer', label: 'Offer of Admission', buttonLabel: 'Download Offer', sent: isYes(record.OfferSent), enabled: String(record.ResultStatus || '').toLowerCase() === 'admitted' && isYes(record.ResultSent) },
-      { type: 'admission', label: 'Admission Letter', buttonLabel: 'Download Admission Letter', sent: isYes(record.AdmissionLetterSent), enabled: isYes(record.OfferSent) && isYes(record.AcceptanceFeePaid) }
+      { type: 'result', label: 'Entrance Result', buttonLabel: 'Download Result', sent: isYes(record.ResultSent), available: Boolean(record.EntranceResultPdfAvailable), enabled: true },
+      { type: 'offer', label: 'Offer of Admission', buttonLabel: 'Download Offer', sent: isYes(record.OfferSent), available: Boolean(record.OfferPdfAvailable), enabled: String(record.ResultStatus || '').toLowerCase() === 'admitted' && isYes(record.ResultSent) },
+      { type: 'admission', label: 'Admission Letter', buttonLabel: 'Download Admission Letter', sent: isYes(record.AdmissionLetterSent), available: Boolean(record.AdmissionLetterPdfAvailable), enabled: isYes(record.OfferSent) && isYes(record.AcceptanceFeePaid) }
     ];
     documents.forEach((documentInfo) => {
       const card = document.createElement('div'); card.className = 'activity-item';
@@ -826,6 +826,13 @@ function renderEntranceResults(child) {
       button.disabled = !documentInfo.enabled;
       button.addEventListener('click', () => downloadAdmissionDocument(child, documentInfo.type, button));
       card.appendChild(button);
+      const actionStatus = document.createElement('small');
+      actionStatus.className = 'document-download-status';
+      actionStatus.setAttribute('aria-live', 'polite');
+      if (documentInfo.enabled && !documentInfo.available) {
+        actionStatus.textContent = 'The original customized PDF has not been archived yet. Send this document once from the desktop Bulk Email tab.';
+      }
+      card.appendChild(actionStatus);
       if (!documentInfo.enabled) {
         const note = document.createElement('small');
         note.textContent = documentInfo.type === 'offer' ? 'Download the entrance result first.' : 'Download the offer and complete acceptance payment first.';
@@ -839,7 +846,15 @@ function renderEntranceResults(child) {
 }
 
 async function downloadAdmissionDocument(child, documentType, button) {
+  const originalLabel = button.textContent;
+  const card = button.closest('.activity-item');
+  const actionStatus = card?.querySelector('.document-download-status');
   button.disabled = true;
+  button.textContent = 'Preparing download...';
+  if (actionStatus) {
+    actionStatus.textContent = 'Preparing the original customized PDF...';
+    actionStatus.classList.remove('bad', 'good');
+  }
   try {
     const response = await fetch('/api/parent-dashboard', {
       method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
@@ -866,13 +881,24 @@ async function downloadAdmissionDocument(child, documentType, button) {
     link.style.display = 'none';
     document.body.appendChild(link);
     link.click();
+    if (actionStatus) {
+      actionStatus.textContent = 'Download started.';
+      actionStatus.classList.add('good');
+    }
     window.setTimeout(() => {
       link.remove();
       URL.revokeObjectURL(url);
     }, 1000);
     await loadDashboard();
   } catch (error) {
-    setStatus(error.message || String(error), 'bad'); button.disabled = false;
+    const message = error.message || String(error);
+    setStatus(message, 'bad');
+    if (actionStatus) {
+      actionStatus.textContent = message;
+      actionStatus.classList.add('bad');
+    }
+    button.disabled = false;
+    button.textContent = originalLabel;
   }
 }
 
