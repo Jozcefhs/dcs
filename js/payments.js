@@ -179,11 +179,22 @@ function schoolFeeTotalItem(breakdown) {
   const minimumInstallmentPortion = installmentItems.length && installmentMinimum <= 0 ? 1 : installmentMinimum;
   const minAmount = Math.min(total, minimumInstallmentPortion);
   const allowInstallment = installmentItems.length > 0 && minAmount < total;
+  const originalTotal = items.reduce((sum, fee) => sum + toAmount(fee.OriginalAmount || fee.Amount), 0);
+  const acceptanceCreditApplied = items.reduce((sum, fee) => sum + toAmount(fee.AcceptanceCreditApplied), 0);
+  const schoolFeesTotalCreditApplied = items.reduce((sum, fee) => sum + toAmount(fee.SchoolFeesTotalCreditApplied), 0);
+  const generalFeeCreditApplied = items.reduce((sum, fee) => sum + toAmount(fee.GeneralFeeCreditApplied), 0);
+  const creditApplied = Math.max(0, originalTotal - total);
   return {
     FeeCode: SCHOOL_FEES_TOTAL_CODE,
     FeeName: 'School Fees Total',
     FeeCategory: 'School Fee',
     Amount: total,
+    OriginalAmount: originalTotal || total,
+    CreditApplied: creditApplied,
+    AcceptanceCreditApplied: acceptanceCreditApplied,
+    SchoolFeesTotalCreditApplied: schoolFeesTotalCreditApplied,
+    GeneralFeeCreditApplied: generalFeeCreditApplied,
+    PreviousFeePaymentApplied: Math.max(0, creditApplied - acceptanceCreditApplied - schoolFeesTotalCreditApplied - generalFeeCreditApplied),
     Currency: items[0].Currency || 'NGN',
     AllowInstallment: allowInstallment ? 'YES' : 'NO',
     MinAmount: allowInstallment ? minAmount : '',
@@ -199,6 +210,8 @@ function schoolFeeTotalItem(breakdown) {
       OriginalAmount: fee.OriginalAmount || fee.Amount,
       PaidAmount: fee.PaidAmount || '',
       AcceptanceCreditApplied: fee.AcceptanceCreditApplied || '',
+      SchoolFeesTotalCreditApplied: fee.SchoolFeesTotalCreditApplied || '',
+      GeneralFeeCreditApplied: fee.GeneralFeeCreditApplied || '',
       BalanceAmount: fee.BalanceAmount || fee.Amount,
       Currency: fee.Currency || items[0].Currency || 'NGN',
       AcademicSession: fee.AcademicSession || '',

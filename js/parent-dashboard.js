@@ -642,9 +642,19 @@ function renderPayableItems(child) {
     const allowAmountEntry = isWalletFee(fee) || allowsItemPartPayment(fee);
     const defaultAmount = Number(fee.MinAmount || 0) > 0 ? fee.MinAmount : (isWalletFee(fee) ? '' : fee.Amount);
     const displayAmount = fee.OriginalAmount || fee.Amount;
-    const creditApplied = Number(String(fee.CreditApplied || '0').replace(/,/g, ''));
-    const balanceNote = Number.isFinite(creditApplied) && creditApplied > 0
-      ? `<small>Amount to pay is ${money(fee.Amount)} because acceptance fee credit of ${money(creditApplied)} has already been deducted.</small>`
+    const creditValue = (field) => Number(String(fee[field] || '0').replace(/,/g, '')) || 0;
+    const creditApplied = creditValue('CreditApplied');
+    const creditSources = [];
+    const acceptanceCredit = creditValue('AcceptanceCreditApplied');
+    const schoolFeePayment = creditValue('SchoolFeesTotalCreditApplied');
+    const generalCredit = creditValue('GeneralFeeCreditApplied');
+    const previousPayment = Math.max(creditValue('PreviousFeePaymentApplied'), creditApplied - acceptanceCredit - schoolFeePayment - generalCredit);
+    if (schoolFeePayment > 0) creditSources.push(`an earlier school-fee payment of ${money(schoolFeePayment)}`);
+    if (generalCredit > 0) creditSources.push(`account credit of ${money(generalCredit)}`);
+    if (acceptanceCredit > 0) creditSources.push(`acceptance-fee credit of ${money(acceptanceCredit)}`);
+    if (previousPayment > 0) creditSources.push(`previous component payments of ${money(previousPayment)}`);
+    const balanceNote = creditApplied > 0
+      ? `<small>Amount to pay is ${money(fee.Amount)} because ${creditSources.join(', ') || `previous payments or credits of ${money(creditApplied)}`} ${creditSources.length === 1 ? 'has' : 'have'} already been applied.</small>`
       : '';
     item.innerHTML = `
       <strong>${fee.FeeName || fee.FeeCode}</strong>

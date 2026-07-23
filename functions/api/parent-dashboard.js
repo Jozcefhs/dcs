@@ -713,13 +713,28 @@ async function getParentAdmissionDocument(env, body) {
   return { ok: true, message: `${title} opened and marked as sent.`, html, fileName: `${safeDocumentId(applicantName || accountRef)}-${safeDocumentId(title)}.html`, flag };
 }
 
+export function schoolFeeCreditSummary(items, total, originalTotal) {
+  const sum = (field) => asMoneyNumber((items || []).reduce((amount, fee) => amount + asMoneyNumber(fee[field]), 0));
+  const creditApplied = Math.max(0, asMoneyNumber(originalTotal) - asMoneyNumber(total));
+  const acceptanceCreditApplied = sum('AcceptanceCreditApplied');
+  const schoolFeesTotalCreditApplied = sum('SchoolFeesTotalCreditApplied');
+  const generalFeeCreditApplied = sum('GeneralFeeCreditApplied');
+  return {
+    CreditApplied: creditApplied,
+    AcceptanceCreditApplied: acceptanceCreditApplied,
+    SchoolFeesTotalCreditApplied: schoolFeesTotalCreditApplied,
+    GeneralFeeCreditApplied: generalFeeCreditApplied,
+    PreviousFeePaymentApplied: Math.max(0, creditApplied - acceptanceCreditApplied - schoolFeesTotalCreditApplied - generalFeeCreditApplied)
+  };
+}
+
 function schoolFeeTotalItem(breakdown) {
   const items = (breakdown || []).filter(isSchoolFee);
   if (!items.length) return null;
   const total = asMoneyNumber(items.reduce((sum, fee) => sum + asMoneyNumber(fee.Amount), 0));
   if (total <= 0) return null;
   const originalTotal = asMoneyNumber(items.reduce((sum, fee) => sum + asMoneyNumber(fee.OriginalAmount || fee.Amount), 0));
-  const creditApplied = Math.max(0, originalTotal - total);
+  const creditSummary = schoolFeeCreditSummary(items, total, originalTotal);
   const installmentItems = items.filter((fee) => isYes(fee.AllowInstallment) && ['total', 'both'].includes(lower(fee.PartPaymentMode || 'Item')));
   const installmentMinimum = installmentItems.reduce((max, fee) => Math.max(max, asMoneyNumber(fee.MinAmount)), 0);
   const minimumInstallmentPortion = installmentItems.length && installmentMinimum <= 0 ? 1 : installmentMinimum;
@@ -731,7 +746,7 @@ function schoolFeeTotalItem(breakdown) {
     FeeCategory: 'School Fee',
     Amount: total,
     OriginalAmount: originalTotal || total,
-    CreditApplied: creditApplied,
+    ...creditSummary,
     BalanceAmount: total,
     Currency: items[0].Currency || 'NGN',
     AllowInstallment: allowInstallment ? 'YES' : 'NO',
@@ -749,6 +764,8 @@ function schoolFeeTotalItem(breakdown) {
       OriginalAmount: fee.OriginalAmount || fee.Amount,
       PaidAmount: fee.PaidAmount || '',
       AcceptanceCreditApplied: fee.AcceptanceCreditApplied || '',
+      SchoolFeesTotalCreditApplied: fee.SchoolFeesTotalCreditApplied || '',
+      GeneralFeeCreditApplied: fee.GeneralFeeCreditApplied || '',
       BalanceAmount: fee.BalanceAmount || fee.Amount,
       Currency: fee.Currency || items[0].Currency || 'NGN',
       AcademicSession: fee.AcademicSession || '',
@@ -1140,6 +1157,10 @@ async function getChildPayable(env, body) {
       Amount: item.Amount,
       OriginalAmount: item.OriginalAmount || item.Amount,
       CreditApplied: item.CreditApplied || '',
+      AcceptanceCreditApplied: item.AcceptanceCreditApplied || '',
+      SchoolFeesTotalCreditApplied: item.SchoolFeesTotalCreditApplied || '',
+      GeneralFeeCreditApplied: item.GeneralFeeCreditApplied || '',
+      PreviousFeePaymentApplied: item.PreviousFeePaymentApplied || '',
       BalanceAmount: item.BalanceAmount || item.Amount,
       Currency: item.Currency || 'NGN',
       AcademicSession: item.AcademicSession || '',
