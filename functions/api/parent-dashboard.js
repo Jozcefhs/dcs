@@ -638,14 +638,16 @@ function schoolResultsAreVisible(profile = {}) {
 
 async function getSchoolProfile(env) {
   try {
-    const [profile, documentBranding] = await Promise.all([
+    const [profile, documentBranding, webBranding] = await Promise.all([
       getDocument(env, 'settings', 'schoolProfile'),
-      getDocument(env, 'settings', 'documentBranding').catch(() => null)
+      getDocument(env, 'settings', 'documentBranding').catch(() => null),
+      getDocument(env, 'settings', 'webBranding').catch(() => null)
     ]);
     if (profile) {
       return {
         ...profile,
         ...(documentBranding || {}),
+        DocumentLogoDataUrl: clean(documentBranding?.DocumentLogoDataUrl || webBranding?.WebLogoDataUrl),
         ShowResultsOnline: pick(profile, [
           'ShowResultsOnline', 'showResultsOnline', 'ResultsOnline', 'resultsOnline',
           'EntranceResultsOnline', 'entranceResultsOnline'
