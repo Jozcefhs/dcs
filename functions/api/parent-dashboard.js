@@ -3,9 +3,8 @@
 
 import { getPayableFees } from './backend.js';
 import { getDocument, listCollection, queryCollection, requireFirestoreEnv, upsertDocument } from '../lib/firestore.js';
-import { querySchoolCollection, upsertSchoolDocument } from '../lib/school-scope.js';
+import { getSchoolDocumentById, querySchoolCollection, upsertSchoolDocument } from '../lib/school-scope.js';
 import { legacyGoogleDataEnabled } from '../lib/backend-mode.js';
-import { createAdmissionPdf } from '../lib/admission-pdf.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -219,6 +218,24 @@ function uniqueRows(rows = []) {
   const unique = new Map();
   rows.filter(Boolean).forEach((row) => unique.set(clean(row.__name || row.__id) || JSON.stringify(row), row));
   return [...unique.values()];
+}
+
+function validatedIdentityScopePath(value, collection) {
+  const path = clean(value).replace(/^\/+|\/+$/g, '');
+  if (path === collection) return path;
+  const pattern = new RegExp(`^schoolBranches/[^/]+/sections/(?:primary|secondary)/${collection}$`, 'i');
+  return pattern.test(path) ? path : '';
+}
+
+async function getSelectedIdentityRow(env, collection, accountRef, scopePath = '') {
+  const documentId = safeDocumentId(accountRef);
+  if (!documentId) return null;
+  const path = validatedIdentityScopePath(scopePath, collection);
+  if (path) {
+    const row = await getDocument(env, path, documentId).catch(() => null);
+    if (row) return { ...row, __scopePath: path };
+  }
+  return getSchoolDocumentById(env, collection, documentId).catch(() => null);
 }
 
 async function querySchoolIdentity(env, collection, email, code) {
@@ -700,46 +717,111 @@ function buildEntranceResult(application, profile = {}) {
   };
 }
 
+function decodeBase64Bytes(value) {
+  const binary = atob(clean(value));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+async function loadStoredAdmissionDocument(env, url) {
+  if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
+    const err = new Error('Google Drive document storage is not configured.');
+    err.status = 500;
+    throw err;
+  }
+  const response = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({
+      Secret: env.GOOGLE_APPS_SCRIPT_SECRET,
+      Action: 'getStoredDocument',
+      DocumentUrl: url
+    })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok || !clean(data.fileBase64)) {
+    const err = new Error(data.message || 'The customized admission document could not be loaded.');
+    err.status = response.status >= 400 ? response.status : 502;
+    throw err;
+  }
+  return data;
+}
+
+async function resolveParentAdmissionApplication(env, body, email, code, accountRef) {
+  const sourceType = lower(body.sourceType || body.SourceType);
+  const collection = sourceType === 'application' ? 'applications' : 'students';
+  const selected = await getSelectedIdentityRow(env, collection, accountRef, body.scopePath || body.ScopePath);
+  if (selected && collection === 'applications') {
+    const emailMatches = [selected.VerificationEmail, selected.ParentEmail, selected.Email].some((value) => lower(value) === email);
+    const codeMatches = clean(selected.VerificationCode).toUpperCase() === code;
+    if (emailMatches && codeMatches) return selected;
+  }
+  if (selected && collection === 'students') {
+    const student = normalizeStudent(selected, await getSchoolProfile(env));
+    const emailMatches = lower(student.ParentEmail || student.Email || student.VerificationEmail) === email;
+    const codeMatches = [student.ParentLoginCode, student.VerificationCode, student.LoginCode]
+      .map((value) => clean(value).toUpperCase()).includes(code);
+    if (emailMatches && codeMatches) {
+      const applicationRef = clean(student.ApplicationReference);
+      const applicationScope = clean(selected.__scopePath).replace(/\/students$/i, '/applications');
+      if (applicationRef) {
+        const linked = await getSelectedIdentityRow(env, 'applications', applicationRef, applicationScope);
+        if (linked) return linked;
+      }
+      for (const field of ['AdmissionNo', 'admissionNo', 'AdmissionNumber']) {
+        const matches = await querySchoolCollection(env, 'applications', {
+          filters: [{ field, op: '==', value: clean(student.AdmissionNo || student.AccountRef) }],
+          limit: 1
+        }).catch(() => []);
+        if (matches[0]) return matches[0];
+      }
+    }
+  }
+  const identitySources = await loadParentSources(env, 'identity', body);
+  const { applications, matchingApplications } = await assertParentAccess(identitySources, email, code);
+  return applications.find((row) => matchingApplications.includes(row) && applicationKeys(row)
+    .some((ref) => sameText(ref, accountRef) || referencesMatch(ref, accountRef))) || null;
+}
+
 async function getParentAdmissionDocument(env, body) {
   const email = lower(body.email || body.ParentEmail || body.Email);
   const code = clean(body.code || body.VerificationCode).toUpperCase();
   const accountRef = clean(body.accountRef || body.AccountRef || body.ApplicationReference);
   const documentType = lower(body.documentType || body.DocumentType);
-  const sources = await loadParentSources(env, 'full', body);
   const profile = await getSchoolProfile(env);
-  const { applications, matchingApplications } = await assertParentAccess(sources, email, code);
-  const application = applications.find((row) => {
-    if (!matchingApplications.includes(row)) return false;
-    const refs = [pick(row, ['ApplicationReference', 'ApplicationID', '__id']), pick(row, ['AdmissionNo'])];
-    return refs.some((ref) => sameText(ref, accountRef) || referencesMatch(ref, accountRef));
-  });
+  const application = await resolveParentAdmissionApplication(env, body, email, code, accountRef);
   if (!application) { const err = new Error('That admission record is not linked to this parent.'); err.status = 404; throw err; }
   const resultStatus = lower(pick(application, ['ResultStatus', 'Status']));
   const admitted = resultStatus === 'admitted' || resultStatus === 'accepted';
   const now = new Date().toISOString();
-  let flag; let title;
+  let flag; let title; let urlField; let fileField;
   if (documentType === 'result') {
     if (!resultIsVisible(application, profile)) { const err = new Error('Entrance result is not available yet.'); err.status = 409; throw err; }
-    flag = 'ResultSent'; title = 'Entrance Result';
+    flag = 'ResultSent'; title = 'Entrance Result'; urlField = 'EntranceResultPdfUrl'; fileField = 'EntranceResultPdfFileName';
   } else if (documentType === 'offer') {
     if (!admitted || !isYes(application.ResultSent)) { const err = new Error('Download the entrance result before the offer of admission.'); err.status = 409; throw err; }
-    flag = 'OfferSent'; title = 'Offer of Admission';
+    flag = 'OfferSent'; title = 'Offer of Admission'; urlField = 'OfferPdfUrl'; fileField = 'OfferPdfFileName';
   } else if (documentType === 'admission') {
     if (!isYes(application.OfferSent) || !isYes(application.AcceptanceFeePaid)) { const err = new Error('The offer must be downloaded and acceptance fee confirmed before the admission letter.'); err.status = 409; throw err; }
-    flag = 'AdmissionLetterSent'; title = 'Admission Letter';
+    flag = 'AdmissionLetterSent'; title = 'Admission Letter'; urlField = 'AdmissionLetterPdfUrl'; fileField = 'AdmissionLetterPdfFileName';
   } else { const err = new Error('Unknown admission document.'); err.status = 400; throw err; }
-  const pdfBytes = await createAdmissionPdf(profile, application, documentType, now);
+  const storedUrl = clean(application[urlField]);
+  if (!storedUrl) {
+    const err = new Error(`${title} has not yet been archived from the desktop app. Send it once from Bulk Email to make the customized PDF available here.`);
+    err.status = 409;
+    throw err;
+  }
+  const storedFile = await loadStoredAdmissionDocument(env, storedUrl);
   const documentId = application.__id || safeDocumentId(pick(application, ['ApplicationReference', 'ApplicationID']));
   const updatedApplication = { ...application, [flag]: 'YES', [`${flag}At`]: now, [`${flag}OpenedByParent`]: 'YES', UpdatedAt: now };
   await upsertSchoolDocument(env, 'applications', documentId, updatedApplication);
-  const student = (sources.students || []).find((row) => applicationMatchesChild(application, normalizeStudent(row, profile)));
-  if (student) await upsertSchoolDocument(env, 'students', student.__id || safeDocumentId(pick(student, ['AdmissionNo', 'AccountRef'])), { ...student, [flag]: 'YES', [`${flag}At`]: now, UpdatedAt: now });
   const applicantName = pick(application, ['ApplicantName', 'DisplayName']);
   return {
     ok: true,
     message: `${title} downloaded and marked as sent.`,
-    pdfBytes,
-    fileName: `${safeDocumentId(applicantName || accountRef)}-${safeDocumentId(title)}.pdf`,
+    pdfBytes: decodeBase64Bytes(storedFile.fileBase64),
+    fileName: clean(application[fileField] || storedFile.fileName) || `${safeDocumentId(applicantName || accountRef)}-${safeDocumentId(title)}.pdf`,
     flag
   };
 }
@@ -1076,43 +1158,67 @@ async function getChildActivity(env, body) {
   const email = lower(body.email || body.ParentEmail || body.Email);
   const code = clean(body.code || body.VerificationCode).toUpperCase();
   const accountRef = clean(body.accountRef || body.AccountRef || body.AdmissionNo);
-  const sources = await loadParentSources(env, 'full', body);
+  const sourceType = lower(body.sourceType || body.SourceType);
+  const collection = sourceType === 'application' ? 'applications' : 'students';
+  const selectedRow = await getSelectedIdentityRow(env, collection, accountRef, body.scopePath || body.ScopePath);
   const schoolProfile = await getSchoolProfile(env);
-  const { applications, matchingApplications } = await assertParentAccess(sources, email, code);
-  const allStudents = (sources.students || []).map((row) => normalizeStudent(row, schoolProfile));
-  const children = allStudents.filter((student) => parentOwnsStudent(student, email, applications, matchingApplications));
-  const childRefs = new Set(children.flatMap((child) => accountKeys(child).map((key) => lower(key))));
-  applications
-    .filter((app) => {
-      const emailMatch = [
-        pick(app, ['VerificationEmail', 'verificationEmail']),
-        pick(app, ['ParentEmail', 'parentEmail']),
-        pick(app, ['Email', 'email'])
-      ].some((value) => lower(value) === email);
-      const codeMatch = clean(pick(app, ['VerificationCode', 'verificationCode'])).toUpperCase() === code;
-      return emailMatch || codeMatch;
-    })
-    .map((row) => normalizeApplicationChild(row, schoolProfile))
-    .filter((child) => child.AccountRef && !childRefs.has(lower(child.AccountRef)))
-    .forEach((child) => {
-      children.push(child);
-      accountKeys(child).forEach((key) => childRefs.add(lower(key)));
-    });
-  const child = children.find((row) => financialReferenceMatches(accountRef, row));
+  let child = null;
+  let applications = [];
+  if (selectedRow && collection === 'students') {
+    const student = normalizeStudent(selectedRow, schoolProfile);
+    const emailMatches = lower(student.ParentEmail || student.Email || student.VerificationEmail) === email;
+    const codeMatches = [student.ParentLoginCode, student.VerificationCode, student.LoginCode]
+      .map((value) => clean(value).toUpperCase()).includes(code);
+    if (emailMatches && codeMatches) child = student;
+  } else if (selectedRow) {
+    const application = selectedRow;
+    const emailMatches = [application.VerificationEmail, application.ParentEmail, application.Email]
+      .some((value) => lower(value) === email);
+    const codeMatches = clean(application.VerificationCode).toUpperCase() === code;
+    if (emailMatches && codeMatches) {
+      applications = [application];
+      child = normalizeApplicationChild(application, schoolProfile);
+    }
+  }
+  if (!child) {
+    const identitySources = await loadParentSources(env, 'identity', body);
+    const access = await assertParentAccess(identitySources, email, code);
+    applications = access.applications;
+    child = (identitySources.students || [])
+      .map((row) => normalizeStudent(row, schoolProfile))
+      .find((row) => parentOwnsStudent(row, email, applications, access.matchingApplications) && financialReferenceMatches(accountRef, row));
+    if (!child) {
+      child = applications.map((row) => normalizeApplicationChild(row, schoolProfile))
+        .find((row) => financialReferenceMatches(accountRef, row));
+    }
+  }
   if (!child) {
     const err = new Error('The selected child was not found for this parent account.');
     err.status = 404;
     throw err;
   }
   const keys = accountKeys(child);
-  const ledger = (sources.ledger || []).map(normalizeLedger);
-  const invoices = (sources.invoices || []).map(normalizeInvoice);
-  const payments = (sources.payments || []).map(normalizePayment);
-  const clinic = (sources.clinic || []).map(normalizeClinicRecord);
+  const [ledgerRows, invoiceRows, paymentRows, clinicRows, summaryRows, linkedApplication] = await Promise.all([
+    queryRowsForReferences(env, 'ledger', ['AccountRef', 'AdmissionNo', 'ApplicationReference'], keys),
+    queryRowsForReferences(env, 'invoices', ['AccountRef', 'AdmissionNo', 'ApplicationReference'], keys),
+    queryRowsForReferences(env, 'payments', ['AccountRef', 'AdmissionNo', 'ApplicationReference'], keys),
+    queryRowsForReferences(env, 'clinicRecords', ['AdmissionNo'], keys),
+    Promise.all(keys.slice(0, 3).map((key) => getDocument(env, 'accountSummaries', safeDocumentId(key)).catch(() => null))),
+    child.ApplicationReference
+      ? getSelectedIdentityRow(env, 'applications', child.ApplicationReference)
+      : Promise.resolve(null)
+  ]);
+  if (linkedApplication && !applications.some((row) => applicationMatchesChild(row, child))) {
+    applications.push(linkedApplication);
+  }
+  const ledger = ledgerRows.map(normalizeLedger);
+  const invoices = invoiceRows.map(normalizeInvoice);
+  const payments = paymentRows.map(normalizePayment);
+  const clinic = clinicRows.map(normalizeClinicRecord);
   const walletEntries = ledger.filter((entry) => financialReferenceMatches(entry.AccountRef, child) && lower(entry.FeeCategory) === 'wallet')
     .sort((a, b) => clean(b.Date).localeCompare(clean(a.Date)));
   const childLedger = ledger.filter((entry) => financialReferenceMatches(entry.AccountRef, child));
-  const accountSummary = accountSummaryForKeys(sources.accounts, keys, childLedger);
+  const accountSummary = accountSummaryForKeys(summaryRows.filter(Boolean), keys, childLedger);
   child.TotalDebit = accountSummary.TotalDebit;
   child.TotalCredit = accountSummary.TotalCredit;
   child.OutstandingBalance = accountSummary.OutstandingBalance;
@@ -1169,7 +1275,9 @@ async function getChildPayable(env, body) {
   const payable = await getPayableFees(env, {
     Email: body.email || body.ParentEmail || body.Email,
     VerificationCode: body.code || body.VerificationCode,
-    AccountRef: body.accountRef || body.AccountRef || body.AdmissionNo
+    AccountRef: body.accountRef || body.AccountRef || body.AdmissionNo,
+    SourceType: body.sourceType || body.SourceType,
+    ScopePath: body.scopePath || body.ScopePath
   });
   const items = buildPayableItems(payable.fees || [], payable.schoolFeeBreakdown || []);
   if (!items.some(isWalletFee) && clean(payable.account && payable.account.AdmissionNo)) {

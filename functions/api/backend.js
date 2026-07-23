@@ -170,6 +170,23 @@ async function findApplication(env, id) {
   return null;
 }
 
+async function findApplicationForAdmissionDocument(env, body = {}) {
+  const reference = clean(body.ApplicationReference || body.applicationReference || body.ApplicationID);
+  const admissionNo = clean(body.AdmissionNo || body.admissionNo);
+  const direct = await findApplication(env, reference || admissionNo);
+  if (direct) return direct;
+  if (admissionNo) {
+    for (const field of ['AdmissionNo', 'admissionNo', 'AdmissionNumber']) {
+      const rows = await querySchoolCollection(env, 'applications', {
+        filters: [{ field, op: '==', value: admissionNo }],
+        limit: 1
+      });
+      if (rows[0]) return rows[0];
+    }
+  }
+  return null;
+}
+
 async function findStudent(env, admissionNo, applicationReference = '') {
   if (admissionNo) {
     const direct = await getSchoolDocumentById(env, 'students', safeDocumentId(admissionNo));
@@ -986,6 +1003,96 @@ async function getAppsScriptPayableFees(env, body = {}) {
   }
 }
 
+const GENERATED_ADMISSION_DOCUMENTS = {
+  EntranceResult: {
+    label: 'Entrance Result',
+    urlField: 'EntranceResultPdfUrl',
+    fileField: 'EntranceResultPdfFileName'
+  },
+  OfferOfAdmission: {
+    label: 'Offer of Admission',
+    urlField: 'OfferPdfUrl',
+    fileField: 'OfferPdfFileName'
+  },
+  AdmissionLetter: {
+    label: 'Admission Letter',
+    urlField: 'AdmissionLetterPdfUrl',
+    fileField: 'AdmissionLetterPdfFileName'
+  }
+};
+
+async function storeGeneratedAdmissionDocument(env, body) {
+  const definition = GENERATED_ADMISSION_DOCUMENTS[clean(body.DocumentType)];
+  if (!definition) {
+    const err = new Error('A valid generated admission document type is required.');
+    err.status = 400;
+    throw err;
+  }
+  const fileBase64 = clean(body.FileBase64);
+  const fileName = clean(body.FileName) || `${definition.label}.pdf`;
+  if (!fileBase64) {
+    const err = new Error('The generated PDF file is required.');
+    err.status = 400;
+    throw err;
+  }
+  if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
+    const err = new Error('Google Drive document storage is not configured.');
+    err.status = 500;
+    throw err;
+  }
+  const application = await findApplicationForAdmissionDocument(env, body);
+  if (!application) {
+    const err = new Error('The matching Firestore application was not found.');
+    err.status = 404;
+    throw err;
+  }
+  const applicationReference = pick(application, ['ApplicationReference', 'ApplicationID', '__id']);
+  const existingUrl = clean(application[definition.urlField]);
+  const storageResponse = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({
+      Secret: env.GOOGLE_APPS_SCRIPT_SECRET,
+      Action: 'uploadParentDocument',
+      StorageOnly: 'YES',
+      ApplicationReference: applicationReference,
+      // StorageOnly uses the existing Drive uploader without changing any
+      // admission-document flags. The actual generated-document type is kept
+      // in Firestore below.
+      DocumentType: 'AcceptanceForm',
+      FileName: fileName,
+      MimeType: 'application/pdf',
+      FileBase64: fileBase64,
+      ReplaceExisting: existingUrl ? 'YES' : 'NO',
+      ExistingUrl: existingUrl
+    })
+  });
+  const stored = await storageResponse.json().catch(() => ({}));
+  if (!storageResponse.ok || !stored.ok || !clean(stored.documentUrl)) {
+    const err = new Error(stored.message || 'The customized PDF could not be stored in Google Drive.');
+    err.status = storageResponse.status >= 400 ? storageResponse.status : 502;
+    throw err;
+  }
+  const now = nowIso();
+  const updated = {
+    ...application,
+    [definition.urlField]: clean(stored.documentUrl),
+    [definition.fileField]: fileName,
+    GeneratedAdmissionDocumentUpdatedAt: now,
+    UpdatedAt: now
+  };
+  delete updated.__id;
+  delete updated.__name;
+  const saved = await saveApplication(env, updated);
+  return {
+    ok: true,
+    message: `${definition.label} customized PDF stored for parent download.`,
+    applicationReference,
+    documentUrl: clean(stored.documentUrl),
+    application: saved
+  };
+}
+
 async function getAppsScriptAccountsOverview(env) {
   if (!legacyGoogleDataEnabled(env)) return null;
   if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) return null;
@@ -1086,26 +1193,65 @@ async function queryParentIdentityRows(env, collection, email, code, fields = []
   return uniqueFirestoreRows((await Promise.all(queries)).flat());
 }
 
+function validatedIdentityScopePath(value, collection) {
+  const path = clean(value).replace(/^\/+|\/+$/g, '');
+  if (path === collection) return path;
+  const pattern = new RegExp(`^schoolBranches/[^/]+/sections/(?:primary|secondary)/${collection}$`, 'i');
+  return pattern.test(path) ? path : '';
+}
+
+async function getSelectedIdentityRow(env, collection, accountRef, scopePath = '') {
+  const documentId = safeDocumentId(accountRef);
+  if (!documentId) return null;
+  const path = validatedIdentityScopePath(scopePath, collection);
+  if (path) {
+    const row = await getDocument(env, path, documentId).catch(() => null);
+    if (row) return { ...row, __scopePath: path };
+  }
+  return getSchoolDocumentById(env, collection, documentId).catch(() => null);
+}
+
 export async function getPayableFees(env, body = {}) {
   const email = lower(body.Email || body.email);
   const code = clean(body.VerificationCode || body.code).toUpperCase();
   const requestedAccountRef = clean(body.AccountRef || body.accountRef || body.AdmissionNo || body.admissionNo);
+  const requestedSourceType = normalizeMatchText(body.SourceType || body.sourceType);
+  const requestedScopePath = clean(body.ScopePath || body.scopePath || body.__scopePath);
   if (!email || !code) {
     const err = new Error('Email and verification code are required.');
     err.status = 400;
     throw err;
   }
 
-  const [firestoreApplications, sheetApplications, firestoreStudents, sheetStudents, firestoreSales, sheetSales] = await Promise.all([
-    queryParentIdentityRows(env, 'applications', email, code, ['VerificationCode']),
-    getAppsScriptApplications(env),
-    queryParentIdentityRows(env, 'students', email, code, ['ParentLoginCode', 'VerificationCode', 'LoginCode']),
-    getAppsScriptStudents(env),
-    queryCollection(env, 'formSales', {
-      filters: [{ field: 'VerificationCode', op: '==', value: code }]
-    }).catch(() => []),
-    getAppsScriptFormSales(env)
-  ]);
+  const directCollection = requestedSourceType === 'application' ? 'applications' : 'students';
+  const directIdentity = requestedAccountRef
+    ? await getSelectedIdentityRow(env, directCollection, requestedAccountRef, requestedScopePath)
+    : null;
+  const directIdentityValid = directIdentity && directCollection === 'applications'
+    ? lower(directIdentity.VerificationEmail || directIdentity.ParentEmail || directIdentity.Email) === email &&
+      clean(directIdentity.VerificationCode).toUpperCase() === code
+    : directIdentity &&
+      lower(directIdentity.ParentEmail || directIdentity.Email || directIdentity.VerificationEmail) === email &&
+      studentLoginCodes(directIdentity).includes(code);
+  const [firestoreApplications, sheetApplications, firestoreStudents, sheetStudents, firestoreSales, sheetSales] = directIdentityValid
+    ? [
+      directCollection === 'applications' ? [directIdentity] : [],
+      [],
+      directCollection === 'students' ? [directIdentity] : [],
+      [],
+      [],
+      []
+    ]
+    : await Promise.all([
+      queryParentIdentityRows(env, 'applications', email, code, ['VerificationCode']),
+      getAppsScriptApplications(env),
+      queryParentIdentityRows(env, 'students', email, code, ['ParentLoginCode', 'VerificationCode', 'LoginCode']),
+      getAppsScriptStudents(env),
+      queryCollection(env, 'formSales', {
+        filters: [{ field: 'VerificationCode', op: '==', value: code }]
+      }).catch(() => []),
+      getAppsScriptFormSales(env)
+    ]);
   const applications = [...firestoreApplications, ...sheetApplications].map(normalizeApplication);
   const students = [...firestoreStudents, ...sheetStudents].map(normalizeStudent);
   const sales = [...firestoreSales, ...sheetSales];
@@ -1125,6 +1271,10 @@ export async function getPayableFees(env, body = {}) {
   let accountRef = requestedAccountRef || accountRefFromApplication(loginApp || {}) || loginStudent?.AdmissionNo || loginStudent?.AccountRef || '';
   let student = requestedAccountRef ? findStudentByAccountRefInRows(students, requestedAccountRef) : (loginStudent || null);
   let selectedApplication = null;
+  if (student && student.ApplicationReference && !applications.length) {
+    const linked = await getSelectedIdentityRow(env, 'applications', student.ApplicationReference);
+    if (linked) applications.push(normalizeApplication(linked));
+  }
   if (requestedAccountRef) {
     selectedApplication = applications.find((row) => {
       return sameText(row.ApplicationReference || row.ApplicationID || row.__id, requestedAccountRef) ||
@@ -5506,6 +5656,8 @@ async function routeAction(env, action, body = {}) {
       return markApplicationFlag(env, body, 'OfferSent', 'OfferSentAt', 'Offer marked as sent.');
     case 'markAdmissionLetterSent':
       return markApplicationFlag(env, body, 'AdmissionLetterSent', 'AdmissionLetterSentAt', 'Admission letter marked as sent.');
+    case 'storeGeneratedAdmissionDocument':
+      return storeGeneratedAdmissionDocument(env, body);
     case 'recordSale':
       return recordSale(env, body);
     case 'getFormSales':

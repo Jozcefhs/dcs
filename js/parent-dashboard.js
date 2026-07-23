@@ -482,7 +482,9 @@ async function loadPayablesForSelected(force = false) {
   try {
     const baseBody = {
       ...authPayload(),
-      accountRef: child.AccountRef
+      accountRef: child.AccountRef,
+      sourceType: child.SourceType || 'Student',
+      scopePath: child.__scopePath || ''
     };
     const payableRequest = fetch('/api/parent-dashboard', {
       method: 'POST',
@@ -841,7 +843,14 @@ async function downloadAdmissionDocument(child, documentType, button) {
   try {
     const response = await fetch('/api/parent-dashboard', {
       method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
-      body: freshBody({ action: 'getAdmissionDocument', ...authPayload(), accountRef: child.AccountRef, documentType })
+      body: freshBody({
+        action: 'getAdmissionDocument',
+        ...authPayload(),
+        accountRef: child.AccountRef,
+        sourceType: child.SourceType || 'Student',
+        scopePath: child.__scopePath || '',
+        documentType
+      })
     });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
