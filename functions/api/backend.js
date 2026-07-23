@@ -1217,6 +1217,12 @@ async function getSelectedIdentityRow(env, collection, accountRef, scopePath = '
   return getSchoolDocumentById(env, collection, documentId).catch(() => null);
 }
 
+export function shouldResolveStudentForPayable(application = {}, requestedSourceType = '') {
+  return normalizeMatchText(requestedSourceType) === 'student' ||
+    yesNo(application.Enrolled) === 'YES' ||
+    normalizeMatchText(application.Status) === 'enrolled';
+}
+
 export async function getPayableFees(env, body = {}) {
   const email = lower(body.Email || body.email);
   const code = clean(body.VerificationCode || body.code).toUpperCase();
@@ -1341,7 +1347,9 @@ export async function getPayableFees(env, body = {}) {
     err.status = 404;
     throw err;
   }
-  if (!student) student = await findStudentForApplication(env, app);
+  if (!student && shouldResolveStudentForPayable(app, requestedSourceType)) {
+    student = await findStudentForApplication(env, app);
+  }
   if (student) accountRef = student.AdmissionNo || student.AccountRef || student.ApplicationReference || accountRef;
   const billingApp = { ...app };
   if (student) {

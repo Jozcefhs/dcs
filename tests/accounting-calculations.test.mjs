@@ -11,7 +11,8 @@ import {
   isNewIntakeApplication,
   paymentCreditedAmount,
   reconciliationDifference,
-  sameFinancialPeriod
+  sameFinancialPeriod,
+  shouldResolveStudentForPayable
 } from '../functions/api/backend.js';
 
 test('admitted applications without an explicit intake category are new intake', () => {
@@ -19,6 +20,12 @@ test('admitted applications without an explicit intake category are new intake',
   assert.equal(isNewIntakeApplication({ ResultStatus: 'Admitted', EnrollmentCategory: 'Returning' }), false);
   assert.equal(isNewIntakeApplication({ Status: 'Active' }), false);
   assert.equal(isNewIntakeApplication({ Status: 'Active', EnrollmentCategory: 'Imported' }), false);
+});
+
+test('acceptance-fee applicants do not trigger an enrolled-student collection search', () => {
+  assert.equal(shouldResolveStudentForPayable({ Status: 'Admitted', Enrolled: 'NO' }, 'Application'), false);
+  assert.equal(shouldResolveStudentForPayable({ Status: 'Enrolled', Enrolled: 'YES' }, 'Application'), true);
+  assert.equal(shouldResolveStudentForPayable({ Status: 'Active' }, 'Student'), true);
 });
 
 test('a padded account reference cannot receive another student payment', () => {
