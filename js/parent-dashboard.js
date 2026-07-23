@@ -801,9 +801,11 @@ function renderEntranceResults(child) {
     ];
     documents.forEach((documentInfo) => {
       const card = document.createElement('div'); card.className = 'activity-item';
+      card.dataset.admissionDocumentType = documentInfo.type;
       card.innerHTML = `<strong>${escapeHtml(documentInfo.label)}</strong><span>${documentInfo.sent ? 'Sent / opened by parent' : 'Not opened'}</span>`;
       ['view', 'download'].forEach((mode) => {
         const button = document.createElement('button'); button.type = 'button'; button.textContent = mode === 'view' ? 'Open' : 'Download';
+        button.dataset.documentMode = mode;
         button.disabled = !documentInfo.enabled;
         button.addEventListener('click', () => openAdmissionDocument(child, documentInfo.type, mode, button));
         card.appendChild(button);
@@ -822,6 +824,16 @@ function renderEntranceResults(child) {
 
 async function openAdmissionDocument(child, documentType, mode, button) {
   const previewWindow = mode === 'view' ? window.open('', '_blank') : null;
+  if (mode === 'view' && !previewWindow) {
+    setStatus('Your browser blocked the document window. Allow pop-ups for this portal and try again.', 'bad');
+    return;
+  }
+  if (previewWindow) {
+    previewWindow.opener = null;
+    previewWindow.document.open();
+    previewWindow.document.write('<!doctype html><html><head><title>Loading document...</title></head><body style="font:16px Arial;padding:32px">Loading document...</body></html>');
+    previewWindow.document.close();
+  }
   button.disabled = true;
   try {
     const response = await fetch('/api/parent-dashboard', {
@@ -830,14 +842,23 @@ async function openAdmissionDocument(child, documentType, mode, button) {
     });
     const data = await response.json();
     if (!response.ok || !data.ok) throw new Error(data.message || 'Could not open that document.');
-    const url = URL.createObjectURL(new Blob([data.html], { type: 'text/html' }));
     if (mode === 'view') {
-      if (previewWindow) previewWindow.location.href = url;
-      else window.open(url, '_blank');
+      previewWindow.document.open();
+      previewWindow.document.write(data.html);
+      previewWindow.document.close();
     } else {
-      const link = document.createElement('a'); link.href = url; link.download = data.fileName || 'admission-document.html'; link.click();
+      const url = URL.createObjectURL(new Blob([data.html], { type: 'text/html;charset=utf-8' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = data.fileName || 'admission-document.html';
+      link.style.display = 'none';
+      document.body.appendChild(link);
+      link.click();
+      window.setTimeout(() => {
+        link.remove();
+        URL.revokeObjectURL(url);
+      }, 1000);
     }
-    window.setTimeout(() => URL.revokeObjectURL(url), 60000);
     await loadDashboard();
   } catch (error) {
     if (previewWindow) previewWindow.close();
