@@ -888,6 +888,10 @@ export function isSchoolFeeCategory(value) {
   return !category || ['schoolfee', 'schoolfees', 'tuition'].includes(category);
 }
 
+export function calculateSchoolFeeOutstanding(expectedDebit, appliedCredit) {
+  return Math.max(0, asMoneyNumber(expectedDebit) - asMoneyNumber(appliedCredit));
+}
+
 function isGeneralFeeCredit(row) {
   if (!row || isWalletLedger(row) || isAcceptanceFeeLike(row) || isSchoolFeesTotalPayment(row)) return false;
   const feeCode = normalizeMatchText(row.FeeCode);
@@ -1610,6 +1614,8 @@ export async function getAccountsOverview(env) {
     let totalCredit = 0;
     let totalReceipts = 0;
     let accountCreditDebit = 0;
+    let schoolFeeCredit = 0;
+    let schoolFeeExpectedDebit = 0;
     let walletBalance = asMoneyNumber(account.WalletBalance);
     let lastPaymentAt = clean(account.LastPaymentAt);
     const countedLedgerKeys = new Set();
@@ -1649,6 +1655,9 @@ export async function getAccountsOverview(env) {
       if (credit > 0) {
         totalCredit += credit;
         totalReceipts += credit;
+        if (isSchoolFeeCategory(row.FeeCategory) || isSchoolFeesTotalPayment(row) || isGeneralFeeCredit(row) || isAcceptanceFeeLike(row)) {
+          schoolFeeCredit += credit;
+        }
       }
       if (credit > 0 && row.Date && (!lastPaymentAt || String(row.Date) > String(lastPaymentAt))) {
         lastPaymentAt = row.Date;
@@ -1675,6 +1684,7 @@ export async function getAccountsOverview(env) {
         })
         .filter((fee) => feeMatchesAccountPeriod(fee, account)), account);
       const expectedFeeDebit = asMoneyNumber(matchingExpectedFees.reduce((sum, fee) => sum + asMoneyNumber(fee.Amount), 0));
+      schoolFeeExpectedDebit = asMoneyNumber(matchingExpectedFees.filter((fee) => isSchoolFeeCategory(fee.FeeCategory)).reduce((sum, fee) => sum + asMoneyNumber(fee.Amount), 0));
       if (expectedFeeDebit > totalDebit) {
         totalDebit = expectedFeeDebit;
       }
@@ -1690,6 +1700,7 @@ export async function getAccountsOverview(env) {
       AccountCreditDebits: accountCreditDebit,
       Balance: netBalance,
       OutstandingBalance: Math.max(0, netBalance),
+      SchoolFeeOutstanding: calculateSchoolFeeOutstanding(schoolFeeExpectedDebit, schoolFeeCredit),
       ExcessCredit: Math.max(0, -netBalance),
       WalletBalance: asMoneyNumber(walletBalance),
       LastPaymentAt: lastPaymentAt
