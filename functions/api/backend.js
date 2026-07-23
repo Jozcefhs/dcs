@@ -12,6 +12,7 @@ import { calculateConfigurablePayroll, calculateLegacyPayroll } from '../lib/pay
 import { assertPayrollCanRegenerate, buildFinalizedRunSnapshot, validatePayrollForSubmission } from '../lib/payroll/payroll-run-guards.js';
 import { buildPayrollJournalLines } from '../lib/payroll/payroll-ledger-service.js';
 import { applyAuthoritativeActor, resolveAuthoritativeDesktopActor, secureTextEqual } from '../lib/backend-security.js';
+import { legacyGoogleDataEnabled } from '../lib/backend-mode.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -925,6 +926,7 @@ async function findStudentForApplication(env, app) {
 }
 
 async function getAppsScriptPayableFees(env, body = {}) {
+  if (!legacyGoogleDataEnabled(env)) return null;
   if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) return null;
   const response = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
     method: 'POST',
@@ -950,6 +952,7 @@ async function getAppsScriptPayableFees(env, body = {}) {
 }
 
 async function getAppsScriptAccountsOverview(env) {
+  if (!legacyGoogleDataEnabled(env)) return null;
   if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) return null;
   const response = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
     method: 'POST',
@@ -969,6 +972,7 @@ async function getAppsScriptAccountsOverview(env) {
 }
 
 async function getAppsScriptApplications(env) {
+  if (!legacyGoogleDataEnabled(env)) return [];
   if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) return [];
   const url = new URL(env.GOOGLE_APPS_SCRIPT_URL);
   url.searchParams.set('secret', env.GOOGLE_APPS_SCRIPT_SECRET);
@@ -984,6 +988,7 @@ async function getAppsScriptApplications(env) {
 }
 
 async function getAppsScriptStudents(env) {
+  if (!legacyGoogleDataEnabled(env)) return [];
   if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) return [];
   try {
     const response = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
@@ -1003,6 +1008,7 @@ async function getAppsScriptStudents(env) {
 }
 
 async function getAppsScriptFormSales(env) {
+  if (!legacyGoogleDataEnabled(env)) return [];
   if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) return [];
   try {
     const response = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {

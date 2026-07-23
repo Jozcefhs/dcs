@@ -1,6 +1,7 @@
 import { listCollection, requireFirestoreEnv, upsertDocument } from '../lib/firestore.js';
 import { getSchoolCode } from './backend.js';
 import { getSchoolStructure, listSchoolCollection, schoolSectionFor, upsertSchoolDocument } from '../lib/school-scope.js';
+import { legacyGoogleDataEnabled } from '../lib/backend-mode.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -163,11 +164,16 @@ export async function onRequestPost(context) {
       if (firestoreResult) {
         return Response.json(firestoreResult, { status: firestoreResult.ok ? 200 : 400 });
       }
-    } catch (_err) {
-      // Fall back to Apps Script if Firestore is not configured or does not contain the sale.
+      if (!legacyGoogleDataEnabled(env)) {
+        return Response.json({ ok: false, message: 'No Firestore form purchase matches that email and verification code.' }, { status: 404 });
+      }
+    } catch (firestoreErr) {
+      if (!legacyGoogleDataEnabled(env)) {
+        return Response.json({ ok: false, message: firestoreErr.message || String(firestoreErr) }, { status: firestoreErr.status || 500 });
+      }
     }
 
-    if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
+    if (!legacyGoogleDataEnabled(env) || !env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
       return Response.json({ ok: false, message: 'Server submission is not configured yet.' }, { status: 500 });
     }
 

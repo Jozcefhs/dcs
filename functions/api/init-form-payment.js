@@ -4,6 +4,7 @@
 import { getAdmissionClasses, getSchoolCode } from './backend.js';
 import { requireFirestoreEnv } from '../lib/firestore.js';
 import { normalizeClassKey } from '../lib/class-names.js';
+import { legacyGoogleDataEnabled } from '../lib/backend-mode.js';
 
 const PAYSTACK_INIT_URL = 'https://api.paystack.co/transaction/initialize';
 
@@ -40,11 +41,11 @@ async function getAdmissionClassSetup(env, className) {
       };
     }
     return { open: false, amount: 0 };
-  } catch (_firestoreErr) {
-    // Fall through to Apps Script/env fallback.
+  } catch (firestoreErr) {
+    if (!legacyGoogleDataEnabled(env)) throw firestoreErr;
   }
 
-  if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
+  if (!legacyGoogleDataEnabled(env) || !env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
     return { open: true, amount: toAmount(env.ADMISSION_FORM_AMOUNT) };
   }
 

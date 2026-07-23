@@ -3,6 +3,7 @@
 
 import { getSchoolCode, recordSale as recordSaleInFirestore } from './backend.js';
 import { listCollection, requireFirestoreEnv } from '../lib/firestore.js';
+import { legacyGoogleDataEnabled } from '../lib/backend-mode.js';
 
 function extractMetadata(data) {
   const metadata = data && data.metadata;
@@ -179,7 +180,7 @@ async function recordSale(env, payload) {
     });
     return { response: { ok: true, status: 200 }, data };
   } catch (firestoreErr) {
-    if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
+    if (!legacyGoogleDataEnabled(env) || !env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
       return {
         response: { ok: false, status: firestoreErr.status || 500 },
         data: { ok: false, message: firestoreErr.message || String(firestoreErr) }

@@ -1,4 +1,5 @@
 import { listCollection, requireFirestoreEnv } from '../lib/firestore.js';
+import { legacyGoogleDataEnabled } from '../lib/backend-mode.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -43,7 +44,7 @@ async function verifyFromFirestore(env, email, code) {
 }
 
 async function verifyFromAppsScript(env, email, code) {
-  if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
+  if (!legacyGoogleDataEnabled(env) || !env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
     return { ok: false, message: 'Server verification is not configured yet.' };
   }
   const url = new URL(env.GOOGLE_APPS_SCRIPT_URL);
@@ -71,8 +72,13 @@ export async function onRequestPost(context) {
       if (firestoreResult) {
         return Response.json(firestoreResult, { status: firestoreResult.ok ? 200 : 400 });
       }
-    } catch (_err) {
-      // Fall back to Apps Script if Firestore is not configured or does not contain the sale.
+      if (!legacyGoogleDataEnabled(env)) {
+        return Response.json({ ok: false, message: 'No Firestore form purchase matches that email and verification code.' }, { status: 404 });
+      }
+    } catch (firestoreErr) {
+      if (!legacyGoogleDataEnabled(env)) {
+        return Response.json({ ok: false, message: firestoreErr.message || String(firestoreErr) }, { status: firestoreErr.status || 500 });
+      }
     }
 
     const data = await verifyFromAppsScript(env, email, code);

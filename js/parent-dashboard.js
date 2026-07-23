@@ -130,6 +130,9 @@ function showDashboardView(view, scrollToContent = false) {
     const selected = button.dataset.dashboardTarget === activeDashboardView;
     button.classList.toggle('selected', selected);
     button.setAttribute('aria-selected', selected ? 'true' : 'false');
+    if (selected && window.matchMedia('(max-width: 680px)').matches) {
+      window.requestAnimationFrame(() => button.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' }));
+    }
   });
   if (scrollToContent && window.matchMedia('(max-width: 680px)').matches) {
     const targetPanel = dashboardViewPanels.find((panel) => panel.dataset.dashboardView === activeDashboardView);

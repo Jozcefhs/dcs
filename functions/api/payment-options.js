@@ -3,6 +3,7 @@
 
 import { getPayableFees } from './backend.js';
 import { requireFirestoreEnv } from '../lib/firestore.js';
+import { legacyGoogleDataEnabled } from '../lib/backend-mode.js';
 
 export async function onRequestPost(context) {
   try {
@@ -20,12 +21,12 @@ export async function onRequestPost(context) {
       const firestoreData = await getPayableFees(env, { Email: email, VerificationCode: code });
       return Response.json(firestoreData, { status: 200 });
     } catch (firestoreErr) {
-      if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
+      if (!legacyGoogleDataEnabled(env) || !env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
         return Response.json({ ok: false, message: firestoreErr.message || String(firestoreErr) }, { status: firestoreErr.status || 500 });
       }
     }
 
-    if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
+    if (!legacyGoogleDataEnabled(env) || !env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
       return Response.json({ ok: false, message: 'Server payment lookup is not configured yet.' }, { status: 500 });
     }
 

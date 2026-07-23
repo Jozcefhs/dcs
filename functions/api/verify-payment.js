@@ -3,6 +3,7 @@
 
 import { recordManualPayment } from './backend.js';
 import { getDocument, listCollection, upsertDocument } from '../lib/firestore.js';
+import { legacyGoogleDataEnabled } from '../lib/backend-mode.js';
 
 function safeId(value) { return String(value || '').replace(/[\/\\?#\[\]]/g, '-').replace(/\s+/g, '_').slice(0, 140); }
 
@@ -39,7 +40,7 @@ export async function onRequestPost(context) {
     }
 
     const firestoreConfigured = env.FIREBASE_PROJECT_ID && env.FIREBASE_CLIENT_EMAIL && env.FIREBASE_PRIVATE_KEY;
-    const appsScriptConfigured = env.GOOGLE_APPS_SCRIPT_URL && env.GOOGLE_APPS_SCRIPT_SECRET;
+    const appsScriptConfigured = legacyGoogleDataEnabled(env) && env.GOOGLE_APPS_SCRIPT_URL && env.GOOGLE_APPS_SCRIPT_SECRET;
 
     if (!env.PAYSTACK_SECRET_KEY || (!firestoreConfigured && !appsScriptConfigured)) {
       return Response.json({ ok: false, message: 'Online payment verification is not configured yet.' }, { status: 500 });

@@ -3,6 +3,7 @@
 
 import { getAdmissionClasses } from './backend.js';
 import { requireFirestoreEnv } from '../lib/firestore.js';
+import { legacyGoogleDataEnabled } from '../lib/backend-mode.js';
 
 const FALLBACK_CLASSES = [
   'Creche',
@@ -38,11 +39,13 @@ export async function onRequestGet(context) {
         formAmount: firestoreData.formAmount || '',
         backend: 'firestore'
       });
-    } catch (_firestoreErr) {
-      // Fall through to Apps Script or fallback classes.
+    } catch (firestoreErr) {
+      if (!legacyGoogleDataEnabled(env)) {
+        return Response.json({ ok: false, message: firestoreErr.message || String(firestoreErr) }, { status: firestoreErr.status || 500 });
+      }
     }
 
-    if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
+    if (!legacyGoogleDataEnabled(env) || !env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
       return Response.json({ ok: true, classes: FALLBACK_CLASSES, fallback: true });
     }
 

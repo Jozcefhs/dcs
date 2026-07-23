@@ -4,6 +4,7 @@
 import { getPayableFees, getSchoolCode } from './backend.js';
 import { listCollection, requireFirestoreEnv } from '../lib/firestore.js';
 import { classNamesMatch, normalizeClassKey } from '../lib/class-names.js';
+import { legacyGoogleDataEnabled } from '../lib/backend-mode.js';
 
 const PAYSTACK_INIT_URL = 'https://api.paystack.co/transaction/initialize';
 const SCHOOL_FEES_TOTAL_CODE = 'SCHOOL_FEES_TOTAL';
@@ -102,11 +103,11 @@ export async function onRequestPost(context) {
       requireFirestoreEnv(env);
       feeData = await getPayableFees(env, { Email: email, VerificationCode: code, AccountRef: accountRef });
     } catch (firestoreErr) {
-      if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
+      if (!legacyGoogleDataEnabled(env) || !env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
         return Response.json({ ok: false, message: firestoreErr.message || String(firestoreErr) }, { status: firestoreErr.status || 500 });
       }
     }
-    if (!feeData && env.GOOGLE_APPS_SCRIPT_URL && env.GOOGLE_APPS_SCRIPT_SECRET) {
+    if (!feeData && legacyGoogleDataEnabled(env) && env.GOOGLE_APPS_SCRIPT_URL && env.GOOGLE_APPS_SCRIPT_SECRET) {
       const feeRes = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

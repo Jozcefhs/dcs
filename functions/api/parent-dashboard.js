@@ -4,6 +4,7 @@
 import { getAccountsOverview, getPayableFees } from './backend.js';
 import { listCollection, requireFirestoreEnv, upsertDocument } from '../lib/firestore.js';
 import { listSchoolCollection, upsertSchoolDocument } from '../lib/school-scope.js';
+import { legacyGoogleDataEnabled } from '../lib/backend-mode.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -195,6 +196,7 @@ async function firestoreRows(env, collection) {
 }
 
 async function appsScriptAction(env, action, payload = {}) {
+  if (!legacyGoogleDataEnabled(env)) return null;
   if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) return null;
   try {
     if (action === 'getApplications') {
@@ -857,6 +859,7 @@ function paymentHistoryForChild(child, payments, ledger) {
 }
 
 async function getAppsScriptAccountsOverview(env) {
+  if (!legacyGoogleDataEnabled(env)) return null;
   if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) return null;
   try {
     const response = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
