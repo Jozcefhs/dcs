@@ -614,6 +614,8 @@ async function payItem(child, fee, container) {
       body: JSON.stringify({
         ...authPayload(),
         accountRef: child.AccountRef,
+        sourceType: child.SourceType || 'Student',
+        scopePath: child.__scopePath || '',
         feeCode: fee.FeeCode,
         components: fee.Components || undefined,
         amount: (isWalletFee(fee) || isYes(fee.AllowInstallment)) ? amount : undefined
@@ -1014,7 +1016,19 @@ function renderStoreCart(child) {
     if (storeCheckoutStatus) { storeCheckoutStatus.textContent = 'Connecting to Paystack...'; storeCheckoutStatus.className = 'status'; }
     try {
       const cart = entries.map(([, entry]) => ({ itemCode: entry.item.ItemCode, storeType: entry.item.StoreType, quantity: entry.quantity }));
-      const response = await fetch('/api/init-payment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...authPayload(), accountRef: child.AccountRef, feeCode: 'STORE_CART', amount: total, storeCart: cart }) });
+      const response = await fetch('/api/init-payment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...authPayload(),
+          accountRef: child.AccountRef,
+          sourceType: child.SourceType || 'Student',
+          scopePath: child.__scopePath || '',
+          feeCode: 'STORE_CART',
+          amount: total,
+          storeCart: cart
+        })
+      });
       const responseText = await response.text();
       let data = {};
       try { data = JSON.parse(responseText); } catch (_error) { throw new Error(`Checkout service returned an invalid response (HTTP ${response.status}). Please try again.`); }
