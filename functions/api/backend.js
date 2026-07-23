@@ -1197,18 +1197,26 @@ function uniqueFirestoreRows(rows = []) {
   return [...unique.values()];
 }
 
-async function queryParentIdentityRows(env, collection, email, code, fields = []) {
-  const queries = [];
-  if (code) {
-    fields.forEach((field) => queries.push(querySchoolCollection(env, collection, {
-      filters: [{ field, op: '==', value: code }]
-    }).catch(() => [])));
-  } else if (email) {
+export function parentIdentityLookupFilters(collection, email, code, fields = []) {
+  const lookups = [];
+  if (email) {
     const emailFields = collection === 'applications' ? ['VerificationEmail'] : ['ParentEmail'];
-    emailFields.forEach((field) => queries.push(querySchoolCollection(env, collection, {
-      filters: [{ field, op: '==', value: email }]
-    }).catch(() => [])));
+    emailFields.forEach((field) => lookups.push({ field, value: email }));
   }
+  if (code) {
+    fields.forEach((field) => lookups.push({ field, value: code }));
+  }
+  return lookups;
+}
+
+async function queryParentIdentityRows(env, collection, email, code, fields = []) {
+  // A parent login authenticates the family, not only the sibling whose
+  // verification code was used. Load all records owned by the parent email so
+  // a requested sibling is billed from that sibling's own profile.
+  const queries = parentIdentityLookupFilters(collection, email, code, fields)
+    .map(({ field, value }) => querySchoolCollection(env, collection, {
+      filters: [{ field, op: '==', value }]
+    }).catch(() => []));
   return uniqueFirestoreRows((await Promise.all(queries)).flat());
 }
 
