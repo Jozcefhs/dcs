@@ -835,7 +835,7 @@ function renderEntranceResults(child) {
       actionStatus.className = 'document-download-status';
       actionStatus.setAttribute('aria-live', 'polite');
       if (documentInfo.enabled && !documentInfo.available) {
-        actionStatus.textContent = 'The customized PDF will be generated and saved when you download it.';
+        actionStatus.textContent = 'The authorized customized PDF has not been archived yet. Generate it from the Applications or Bulk Email tab first.';
       }
       card.appendChild(actionStatus);
       if (!documentInfo.enabled) {

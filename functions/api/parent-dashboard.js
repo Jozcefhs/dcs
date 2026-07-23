@@ -5,7 +5,6 @@ import { getPayableFees } from './backend.js';
 import { getDocument, listCollection, queryCollection, requireFirestoreEnv, upsertDocument } from '../lib/firestore.js';
 import { getSchoolDocumentById, querySchoolCollection, upsertSchoolDocument } from '../lib/school-scope.js';
 import { legacyGoogleDataEnabled } from '../lib/backend-mode.js';
-import { createAdmissionPdf } from '../lib/admission-pdf.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -733,15 +732,6 @@ function decodeBase64Bytes(value) {
   return bytes;
 }
 
-function encodeBase64Bytes(value) {
-  const bytes = value instanceof Uint8Array ? value : new Uint8Array(value || []);
-  let binary = '';
-  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-  }
-  return btoa(binary);
-}
-
 async function loadStoredAdmissionDocument(env, url) {
   if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
     const err = new Error('Google Drive document storage is not configured.');
@@ -764,38 +754,6 @@ async function loadStoredAdmissionDocument(env, url) {
     throw err;
   }
   return data;
-}
-
-async function archiveGeneratedAdmissionDocument(env, application, title, fileName, existingUrl, pdfBytes) {
-  if (!env.GOOGLE_APPS_SCRIPT_URL || !env.GOOGLE_APPS_SCRIPT_SECRET) {
-    const err = new Error('Document storage is not configured. Configure Google document storage in Settings.');
-    err.status = 500;
-    throw err;
-  }
-  const applicationReference = pick(application, ['ApplicationReference', 'ApplicationID', '__id']);
-  const response = await fetch(env.GOOGLE_APPS_SCRIPT_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({
-      Secret: env.GOOGLE_APPS_SCRIPT_SECRET,
-      Action: 'uploadParentDocument',
-      StorageOnly: 'YES',
-      ApplicationReference: applicationReference,
-      DocumentType: 'AcceptanceForm',
-      FileName: fileName,
-      MimeType: 'application/pdf',
-      FileBase64: encodeBase64Bytes(pdfBytes),
-      ReplaceExisting: existingUrl ? 'YES' : 'NO',
-      ExistingUrl: existingUrl
-    })
-  });
-  const stored = await response.json().catch(() => ({}));
-  if (!response.ok || !stored.ok || !clean(stored.documentUrl)) {
-    const err = new Error(stored.message || `${title} was generated but could not be saved to document storage.`);
-    err.status = response.status >= 400 ? response.status : 502;
-    throw err;
-  }
-  return clean(stored.documentUrl);
 }
 
 async function resolveParentAdmissionApplication(env, body, email, code, accountRef) {
@@ -856,36 +814,22 @@ async function getParentAdmissionDocument(env, body) {
     if (!isYes(application.OfferSent) || !isYes(application.AcceptanceFeePaid)) { const err = new Error('The offer must be downloaded and acceptance fee confirmed before the admission letter.'); err.status = 409; throw err; }
     flag = 'AdmissionLetterSent'; title = 'Admission Letter'; urlField = 'AdmissionLetterPdfUrl'; fileField = 'AdmissionLetterPdfFileName';
   } else { const err = new Error('Unknown admission document.'); err.status = 400; throw err; }
-  let storedUrl = clean(application[urlField]);
-  let pdfBytes;
-  let fileName = clean(application[fileField]);
-  if (storedUrl) {
-    const storedFile = await loadStoredAdmissionDocument(env, storedUrl);
-    pdfBytes = decodeBase64Bytes(storedFile.fileBase64);
-    fileName = fileName || clean(storedFile.fileName);
-  } else {
-    const applicantName = pick(application, ['ApplicantName', 'DisplayName']);
-    fileName = fileName || `${safeDocumentId(applicantName || accountRef)}-${safeDocumentId(title)}.pdf`;
-    pdfBytes = await createAdmissionPdf(profile, application, documentType, now);
-    storedUrl = await archiveGeneratedAdmissionDocument(env, application, title, fileName, '', pdfBytes);
+  const storedUrl = clean(application[urlField]);
+  if (!storedUrl) {
+    const err = new Error(`${title} has not yet been archived from the desktop app. Generate and archive the authorized customized PDF from the Applications or Bulk Email tab first.`);
+    err.status = 409;
+    throw err;
   }
+  const storedFile = await loadStoredAdmissionDocument(env, storedUrl);
   const documentId = application.__id || safeDocumentId(pick(application, ['ApplicationReference', 'ApplicationID']));
-  const updatedApplication = {
-    ...application,
-    [urlField]: storedUrl,
-    [fileField]: fileName,
-    [flag]: 'YES',
-    [`${flag}At`]: now,
-    [`${flag}OpenedByParent`]: 'YES',
-    GeneratedAdmissionDocumentUpdatedAt: now,
-    UpdatedAt: now
-  };
+  const updatedApplication = { ...application, [flag]: 'YES', [`${flag}At`]: now, [`${flag}OpenedByParent`]: 'YES', UpdatedAt: now };
   await upsertSchoolDocument(env, 'applications', documentId, updatedApplication);
+  const applicantName = pick(application, ['ApplicantName', 'DisplayName']);
   return {
     ok: true,
-    message: `${title} generated, saved, downloaded, and marked as sent.`,
-    pdfBytes,
-    fileName,
+    message: `${title} downloaded and marked as sent.`,
+    pdfBytes: decodeBase64Bytes(storedFile.fileBase64),
+    fileName: clean(application[fileField] || storedFile.fileName) || `${safeDocumentId(applicantName || accountRef)}-${safeDocumentId(title)}.pdf`,
     flag
   };
 }
