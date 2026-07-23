@@ -1946,6 +1946,8 @@ async function saveSchoolProfile(env, body) {
     DeclarationStatement: clean(body.DeclarationStatement || body.declarationStatement) || 'I declare that the information supplied in this application is complete and correct.',
     ResultDisplayMode: clean(body.ResultDisplayMode || body.resultDisplayMode) || 'subjects',
     ShowResultsOnline: yesNo(body.ShowResultsOnline ?? body.showResultsOnline ?? 'NO') || 'NO',
+    OfferDocumentBodyTemplate: clean(body.OfferDocumentBodyTemplate || body.offerDocumentBodyTemplate),
+    AdmissionDocumentBodyTemplate: clean(body.AdmissionDocumentBodyTemplate || body.admissionDocumentBodyTemplate),
     UpdatedAt: nowIso(),
     UpdatedBy: clean(body.UserRole || body.UpdatedBy || body.updatedBy) || 'Super Admin'
   };
@@ -1957,6 +1959,22 @@ async function saveSchoolProfile(env, body) {
       throw error;
     }
     await upsertDocument(env, 'settings', 'webBranding', { WebLogoDataUrl: webLogo, UpdatedAt: nowIso() });
+  }
+  if (body.DocumentLogoDataUrl !== undefined || body.DocumentSignatureDataUrl !== undefined) {
+    const documentLogo = clean(body.DocumentLogoDataUrl);
+    const documentSignature = clean(body.DocumentSignatureDataUrl);
+    for (const [label, value] of [['document logo', documentLogo], ['document signature', documentSignature]]) {
+      if (value && (!/^data:image\/(png|jpeg);base64,/i.test(value) || value.length > 750000)) {
+        const error = new Error(`The ${label} must be a resized PNG or JPG image below the allowed size.`);
+        error.status = 400;
+        throw error;
+      }
+    }
+    await upsertDocument(env, 'settings', 'documentBranding', {
+      DocumentLogoDataUrl: documentLogo,
+      DocumentSignatureDataUrl: documentSignature,
+      UpdatedAt: nowIso()
+    });
   }
   await upsertDocument(env, 'settings', 'schoolStructure', {
     Branches: branches.length ? branches : [{ Id: 'main', Name: 'Main Branch' }], ActiveBranchId: activeBranchId,

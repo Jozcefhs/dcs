@@ -93,8 +93,10 @@ export async function onRequestPost(context) {
     requireFirestoreEnv(env);
 
     const incoming = body.profile || {};
+    const existing = await getProfile(env);
     const profile = {
       ...defaultProfile(env),
+      ...existing,
       SchoolName: clean(incoming.SchoolName) || 'Integrated School Management Suite',
       SchoolCode: normalizeSchoolCode(incoming.SchoolCode),
       SchoolAddress: clean(incoming.SchoolAddress),

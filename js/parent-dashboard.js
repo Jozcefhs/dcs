@@ -515,6 +515,9 @@ async function loadPayablesForSelected(force = false) {
       if (typeof activityData.showResultsOnline === 'boolean') {
         dashboard.showResultsOnline = activityData.showResultsOnline;
       }
+      if (activityData.resultDisplayMode) {
+        dashboard.resultDisplayMode = activityData.resultDisplayMode;
+      }
       dashboard.walletActivity[child.AccountRef] = activityData.walletActivity || [];
       if (activityData.accountSummary) {
         dashboard.accountSummaries[child.AccountRef] = activityData.accountSummary;
@@ -747,7 +750,7 @@ function renderPayments(child) {
 }
 
 function resultDisplayMode() {
-  return window.SCHOOL_PROFILE?.ResultDisplayMode || 'subjects';
+  return dashboard?.resultDisplayMode || window.SCHOOL_PROFILE?.ResultDisplayMode || 'subjects';
 }
 
 function resultsOnlineEnabled() {
@@ -795,24 +798,24 @@ function renderEntranceResults(child) {
     const documentFlow = document.createElement('div');
     documentFlow.className = 'admission-document-flow';
     const documents = [
-      { type: 'result', label: 'Entrance Result', sent: isYes(record.ResultSent), enabled: true },
-      { type: 'offer', label: 'Offer of Admission', sent: isYes(record.OfferSent), enabled: String(record.ResultStatus || '').toLowerCase() === 'admitted' && isYes(record.ResultSent) },
-      { type: 'admission', label: 'Admission Letter', sent: isYes(record.AdmissionLetterSent), enabled: isYes(record.OfferSent) && isYes(record.AcceptanceFeePaid) }
+      { type: 'result', label: 'Entrance Result', buttonLabel: 'Download Result', sent: isYes(record.ResultSent), enabled: true },
+      { type: 'offer', label: 'Offer of Admission', buttonLabel: 'Download Offer', sent: isYes(record.OfferSent), enabled: String(record.ResultStatus || '').toLowerCase() === 'admitted' && isYes(record.ResultSent) },
+      { type: 'admission', label: 'Admission Letter', buttonLabel: 'Download Admission Letter', sent: isYes(record.AdmissionLetterSent), enabled: isYes(record.OfferSent) && isYes(record.AcceptanceFeePaid) }
     ];
     documents.forEach((documentInfo) => {
       const card = document.createElement('div'); card.className = 'activity-item';
       card.dataset.admissionDocumentType = documentInfo.type;
-      card.innerHTML = `<strong>${escapeHtml(documentInfo.label)}</strong><span>${documentInfo.sent ? 'Sent / opened by parent' : 'Not opened'}</span>`;
-      ['view', 'download'].forEach((mode) => {
-        const button = document.createElement('button'); button.type = 'button'; button.textContent = mode === 'view' ? 'Open' : 'Download';
-        button.dataset.documentMode = mode;
-        button.disabled = !documentInfo.enabled;
-        button.addEventListener('click', () => openAdmissionDocument(child, documentInfo.type, mode, button));
-        card.appendChild(button);
-      });
+      card.innerHTML = `<strong>${escapeHtml(documentInfo.label)}</strong><span>${documentInfo.sent ? 'Sent / downloaded by parent' : 'Not downloaded'}</span>`;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = documentInfo.buttonLabel;
+      button.dataset.documentMode = 'download';
+      button.disabled = !documentInfo.enabled;
+      button.addEventListener('click', () => downloadAdmissionDocument(child, documentInfo.type, button));
+      card.appendChild(button);
       if (!documentInfo.enabled) {
         const note = document.createElement('small');
-        note.textContent = documentInfo.type === 'offer' ? 'Open the entrance result first.' : 'Open the offer and complete acceptance payment first.';
+        note.textContent = documentInfo.type === 'offer' ? 'Download the entrance result first.' : 'Download the offer and complete acceptance payment first.';
         card.appendChild(note);
       }
       documentFlow.appendChild(card);
@@ -822,46 +825,33 @@ function renderEntranceResults(child) {
   if (entranceResultPanel) entranceResultPanel.hidden = activeDashboardView !== 'results';
 }
 
-async function openAdmissionDocument(child, documentType, mode, button) {
-  const previewWindow = mode === 'view' ? window.open('', '_blank') : null;
-  if (mode === 'view' && !previewWindow) {
-    setStatus('Your browser blocked the document window. Allow pop-ups for this portal and try again.', 'bad');
-    return;
-  }
-  if (previewWindow) {
-    previewWindow.opener = null;
-    previewWindow.document.open();
-    previewWindow.document.write('<!doctype html><html><head><title>Loading document...</title></head><body style="font:16px Arial;padding:32px">Loading document...</body></html>');
-    previewWindow.document.close();
-  }
+async function downloadAdmissionDocument(child, documentType, button) {
   button.disabled = true;
   try {
     const response = await fetch('/api/parent-dashboard', {
       method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
       body: freshBody({ action: 'getAdmissionDocument', ...authPayload(), accountRef: child.AccountRef, documentType })
     });
-    const data = await response.json();
-    if (!response.ok || !data.ok) throw new Error(data.message || 'Could not open that document.');
-    if (mode === 'view') {
-      previewWindow.document.open();
-      previewWindow.document.write(data.html);
-      previewWindow.document.close();
-    } else {
-      const url = URL.createObjectURL(new Blob([data.html], { type: 'text/html;charset=utf-8' }));
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = data.fileName || 'admission-document.html';
-      link.style.display = 'none';
-      document.body.appendChild(link);
-      link.click();
-      window.setTimeout(() => {
-        link.remove();
-        URL.revokeObjectURL(url);
-      }, 1000);
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.message || 'Could not download that document.');
     }
+    const disposition = response.headers.get('Content-Disposition') || '';
+    const fileNameMatch = disposition.match(/filename="?([^";]+)"?/i);
+    const fileName = fileNameMatch?.[1] || `${documentType || 'admission-document'}.pdf`;
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    window.setTimeout(() => {
+      link.remove();
+      URL.revokeObjectURL(url);
+    }, 1000);
     await loadDashboard();
   } catch (error) {
-    if (previewWindow) previewWindow.close();
     setStatus(error.message || String(error), 'bad'); button.disabled = false;
   }
 }
