@@ -2,9 +2,38 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  accountSummaryForKeys,
   findParentOwnedApplication,
   parentOwnsApplication
 } from '../functions/api/parent-dashboard.js';
+
+test('parent account summary does not double-count invoice allocation and payment credit', () => {
+  const summary = accountSummaryForKeys([], ['DCA/26/002', 'DCA/26/000002'], [{
+    AccountRef: 'DCA/26/000002',
+    ApplicationReference: 'DCA/26/000002',
+    FeeCategory: 'Admission',
+    Credit: 150000
+  }, {
+    AccountRef: 'DCA/26/002',
+    ApplicationReference: 'DCA/26/000002',
+    FeeCategory: 'School Fee',
+    Credit: 144600
+  }], [{
+    AccountRef: 'DCA/26/002',
+    ApplicationReference: 'DCA/26/000002',
+    FeeCategory: 'School Fee',
+    Debit: 294600,
+    Credit: 294600
+  }]);
+
+  assert.deepEqual(summary, {
+    TotalDebit: 294600,
+    TotalCredit: 294600,
+    AccountCreditDebits: 0,
+    OutstandingBalance: 0,
+    CreditBalance: 0
+  });
+});
 
 test('a parent may select a second sibling application after family authentication', () => {
   const applications = [

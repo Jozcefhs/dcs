@@ -642,8 +642,12 @@ function normalizeAccountSummary(row) {
   };
 }
 
-function accountSummaryForKeys(accounts, keys, ledgerEntries, invoiceEntries = []) {
-  const liveFinancialRows = [...(invoiceEntries || []), ...(ledgerEntries || [])];
+export function accountSummaryForKeys(accounts, keys, ledgerEntries, invoiceEntries = []) {
+  // Invoice Credit is an allocation of the same cash receipt already present
+  // in the ledger. Use invoices for debit only so parent balances do not count
+  // one payment twice.
+  const invoiceDebits = (invoiceEntries || []).map((row) => ({ ...row, Credit: 0 }));
+  const liveFinancialRows = [...invoiceDebits, ...(ledgerEntries || [])];
   if (liveFinancialRows.length) return feeAccountSummary(liveFinancialRows);
   const account = (accounts || []).find((row) => {
     const rowKeys = [
