@@ -512,6 +512,17 @@ async function loadPayablesForSelected(force = false) {
       dashboard.dueNotifications[child.AccountRef] = payableData.dueNotifications || [];
     }
     if (activityResponse.ok && activityData.ok) {
+      const payableNotices = dashboard.dueNotifications[child.AccountRef] || [];
+      const activityNotices = activityData.dueNotifications || [];
+      dashboard.dueNotifications[child.AccountRef] = [...new Map(
+        [...payableNotices, ...activityNotices].map((notice) => [[
+          notice.FeeCode,
+          notice.FeeName,
+          notice.DueDate,
+          notice.AcademicSession,
+          notice.Term
+        ].map((value) => String(value || '').trim().toLowerCase()).join('|'), notice])
+      ).values()];
       if (typeof activityData.showResultsOnline === 'boolean') {
         dashboard.showResultsOnline = activityData.showResultsOnline;
       }

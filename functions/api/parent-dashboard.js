@@ -223,16 +223,15 @@ function uniqueRows(rows = []) {
 
 async function querySchoolIdentity(env, collection, email, code) {
   const requests = [];
-  if (email) {
-    requests.push(querySchoolCollection(env, collection, {
-      filters: [{ field: collection === 'applications' ? 'VerificationEmail' : 'ParentEmail', op: '==', value: email }]
-    }).catch(() => []));
-  }
   if (code) {
     const codeFields = collection === 'applications' ? ['VerificationCode'] : ['ParentLoginCode', 'VerificationCode'];
     codeFields.forEach((field) => requests.push(querySchoolCollection(env, collection, {
       filters: [{ field, op: '==', value: code }]
     }).catch(() => [])));
+  } else if (email) {
+    requests.push(querySchoolCollection(env, collection, {
+      filters: [{ field: collection === 'applications' ? 'VerificationEmail' : 'ParentEmail', op: '==', value: email }]
+    }).catch(() => []));
   }
   return uniqueRows((await Promise.all(requests)).flat());
 }
@@ -1176,13 +1175,6 @@ async function getChildPayable(env, body) {
   if (!items.some(isWalletFee) && clean(payable.account && payable.account.AdmissionNo)) {
     items.push(walletTopupItem(payable.account));
   }
-  const sources = await loadParentSources(env, 'full', body);
-  const accountSummary = accountSummaryForKeys(
-    sources.accounts || [],
-    [body.accountRef || body.AccountRef || body.AdmissionNo],
-    (sources.ledger || []).map(normalizeLedger)
-  );
-  const invoiceNotices = invoiceDueNotifications((sources.invoices || []).map(normalizeInvoice), [body.accountRef || body.AccountRef || body.AdmissionNo], accountSummary, payable.account || {});
   const itemNotices = items
     .filter((item) => clean(item.DueDate))
     .map((item) => ({
@@ -1212,7 +1204,7 @@ async function getChildPayable(env, body) {
     message: 'Payable items loaded.',
     accountRef: clean(body.accountRef || body.AccountRef || body.AdmissionNo),
     payableItems: items,
-    dueNotifications: [...invoiceNotices, ...itemNotices]
+    dueNotifications: itemNotices
   };
 }
 

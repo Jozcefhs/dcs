@@ -1073,15 +1073,14 @@ function uniqueFirestoreRows(rows = []) {
 
 async function queryParentIdentityRows(env, collection, email, code, fields = []) {
   const queries = [];
-  if (email) {
-    const emailFields = collection === 'applications' ? ['VerificationEmail'] : ['ParentEmail'];
-    emailFields.forEach((field) => queries.push(querySchoolCollection(env, collection, {
-      filters: [{ field, op: '==', value: email }]
-    }).catch(() => [])));
-  }
   if (code) {
     fields.forEach((field) => queries.push(querySchoolCollection(env, collection, {
       filters: [{ field, op: '==', value: code }]
+    }).catch(() => [])));
+  } else if (email) {
+    const emailFields = collection === 'applications' ? ['VerificationEmail'] : ['ParentEmail'];
+    emailFields.forEach((field) => queries.push(querySchoolCollection(env, collection, {
+      filters: [{ field, op: '==', value: email }]
     }).catch(() => [])));
   }
   return uniqueFirestoreRows((await Promise.all(queries)).flat());
