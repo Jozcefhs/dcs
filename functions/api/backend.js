@@ -698,7 +698,8 @@ function feeMatchesApplication(fee, app) {
   const appSession = app.AcademicSession || '';
   const appTerm = app.Term || '';
   const appGender = app.Gender || '';
-  const enrollmentCategory = app.EnrollmentCategory || app.IntakeCategory || 'Returning';
+  const enrollmentCategory = app.EnrollmentCategory || app.IntakeCategory ||
+    (isNewIntakeApplication(app) ? 'New Intake' : 'Returning');
   const academicProgress = app.AcademicProgress || app.ProgressCategory || 'Promoted';
   if (normalizeMatchText(academicProgress) === 'repeating' && /book|uniform|school wear/.test(normalizeMatchText(`${fee.FeeCategory || ''} ${fee.FeeName || ''}`))) return false;
   return (!clean(fee.ClassName) || ['all', '*'].includes(normalizeMatchText(fee.ClassName)) || classNamesMatch(fee.ClassName, appClass)) &&
@@ -711,9 +712,12 @@ function feeMatchesApplication(fee, app) {
     feeFieldMatches(fee.Term, appTerm);
 }
 
-function isNewIntakeApplication(app = {}) {
+export function isNewIntakeApplication(app = {}) {
   const value = normalizeMatchText(app.EnrollmentCategory || app.IntakeCategory || '');
-  return ['new intake', 'new', 'newly admitted', 'new admission'].includes(value);
+  if (value) return ['new intake', 'new', 'newly admitted', 'new admission'].includes(value);
+  const resultStatus = normalizeMatchText(app.ResultStatus || app.AdmissionDecision || '');
+  const applicationStatus = normalizeMatchText(app.Status || '');
+  return resultStatus === 'admitted' || ['admitted', 'accepted', 'admission letter sent'].includes(applicationStatus);
 }
 
 function termRank(value) {
@@ -736,7 +740,9 @@ function feeMatchesAccountPeriod(fee, app) {
   if (!feeFieldMatches(fee.StudentType, appType)) return false;
   if (!feeFieldMatches(fee.BillingCategory || 'All', appBillingCategory, true)) return false;
   if (!feeFieldMatches(fee.Gender || 'All', app.Gender || '')) return false;
-  if (!feeFieldMatches(fee.EnrollmentCategory || 'All', app.EnrollmentCategory || 'Returning', true)) return false;
+  const enrollmentCategory = app.EnrollmentCategory || app.IntakeCategory ||
+    (isNewIntakeApplication(app) ? 'New Intake' : 'Returning');
+  if (!feeFieldMatches(fee.EnrollmentCategory || 'All', enrollmentCategory, true)) return false;
   if (!feeFieldMatches(fee.AcademicProgress || 'All', app.AcademicProgress || 'Promoted', true)) return false;
   if (!feeFieldMatches(fee.AcademicSession, appSession)) return false;
   const feeTerm = normalizeMatchText(fee.Term || 'All');

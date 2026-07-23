@@ -1070,7 +1070,10 @@ function invoiceDueNotifications(invoices, keys, accountSummary = null, child = 
 async function getDashboard(env, body) {
   const email = lower(body.email || body.ParentEmail || body.Email);
   const code = clean(body.code || body.VerificationCode).toUpperCase();
-  const sources = await loadParentSources(env, 'full', body);
+  // The initial request only establishes the family/child list. Financial,
+  // clinic and store details are loaded for the selected child immediately
+  // afterwards, avoiding a duplicate full-data scan on every refresh.
+  const sources = await loadParentSources(env, 'identity', body);
   const schoolProfile = await getSchoolProfile(env);
   const { applications, matchingApplications } = await assertParentAccess(sources, email, code);
   const allStudents = (sources.students || []).map((row) => normalizeStudent(row, schoolProfile));
@@ -1206,7 +1209,7 @@ async function getChildActivity(env, body) {
     throw err;
   }
   const keys = accountKeys(child);
-  const [ledgerRows, invoiceRows, paymentRows, clinicRows, summaryRows, linkedApplication] = await Promise.all([
+  const [ledgerRows, invoiceRows, paymentRows, clinicRows, summaryRows, linkedApplication, storeItems, storeOrderRows] = await Promise.all([
     queryRowsForReferences(env, 'ledger', ['AccountRef', 'AdmissionNo', 'ApplicationReference'], keys),
     queryRowsForReferences(env, 'invoices', ['AccountRef', 'AdmissionNo', 'ApplicationReference'], keys),
     queryRowsForReferences(env, 'payments', ['AccountRef', 'AdmissionNo', 'ApplicationReference'], keys),
@@ -1214,7 +1217,9 @@ async function getChildActivity(env, body) {
     Promise.all(keys.slice(0, 3).map((key) => getDocument(env, 'accountSummaries', safeDocumentId(key)).catch(() => null))),
     child.ApplicationReference
       ? getSelectedIdentityRow(env, 'applications', child.ApplicationReference)
-      : Promise.resolve(null)
+      : Promise.resolve(null),
+    listCollection(env, 'storeItems').catch(() => []),
+    queryRowsForReferences(env, 'storeOrders', ['AccountRef', 'AdmissionNo', 'ApplicationReference'], keys)
   ]);
   if (linkedApplication && !applications.some((row) => applicationMatchesChild(row, child))) {
     applications.push(linkedApplication);
@@ -1245,7 +1250,9 @@ async function getChildActivity(env, body) {
     clinicVisits: clinic.filter((record) => financialReferenceMatches(record.AdmissionNo, child)).sort((a, b) => clean(b.Date).localeCompare(clean(a.Date))),
     showResultsOnline: schoolResultsAreVisible(schoolProfile),
     resultDisplayMode: lower(schoolProfile.ResultDisplayMode) === 'percentage' ? 'percentage' : 'subjects',
-    entranceResults: result ? [result] : []
+    entranceResults: result ? [result] : [],
+    storeCatalog: (storeItems || []).filter((row) => isYes(row.Active === undefined ? 'YES' : row.Active) && asMoneyNumber(row.Quantity) > 0),
+    storeOrders: (storeOrderRows || []).filter((row) => financialReferenceMatches(row.AccountRef || row.AdmissionNo, child))
   };
 }
 

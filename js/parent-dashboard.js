@@ -539,6 +539,8 @@ async function loadPayablesForSelected(force = false) {
       dashboard.paymentRecords[child.AccountRef] = activityData.paymentRecords || [];
       dashboard.clinicVisits[child.AccountRef] = activityData.clinicVisits || [];
       dashboard.entranceResults[child.AccountRef] = activityData.entranceResults || [];
+      dashboard.storeCatalog = activityData.storeCatalog || [];
+      dashboard.storeOrders = activityData.storeOrders || [];
       child.WalletBalance = activityData.walletBalance ?? child.WalletBalance;
     } else {
       dashboard.payableErrors[child.AccountRef] = dashboard.payableErrors[child.AccountRef] || activityData.message || 'Could not load child activity.';
@@ -555,6 +557,7 @@ async function loadPayablesForSelected(force = false) {
   renderPayments(child);
   renderClinic(child);
   renderEntranceResults(child);
+  renderStores(child);
 }
 
 function amountInputId(fee) {

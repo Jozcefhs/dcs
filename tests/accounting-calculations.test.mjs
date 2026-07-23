@@ -8,10 +8,18 @@ import {
   calculateInvoiceCreditAllocations,
   financialRowMatchesAccount,
   formSaleFinancialAmounts,
+  isNewIntakeApplication,
   paymentCreditedAmount,
   reconciliationDifference,
   sameFinancialPeriod
 } from '../functions/api/backend.js';
+
+test('admitted applications without an explicit intake category are new intake', () => {
+  assert.equal(isNewIntakeApplication({ ResultStatus: 'Admitted', Status: 'Accepted' }), true);
+  assert.equal(isNewIntakeApplication({ ResultStatus: 'Admitted', EnrollmentCategory: 'Returning' }), false);
+  assert.equal(isNewIntakeApplication({ Status: 'Active' }), false);
+  assert.equal(isNewIntakeApplication({ Status: 'Active', EnrollmentCategory: 'Imported' }), false);
+});
 
 test('a padded account reference cannot receive another student payment', () => {
   const payment = { AccountRef: 'DCA/26/001', Credit: 92843.92 };
