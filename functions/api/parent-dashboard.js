@@ -239,18 +239,23 @@ async function getSelectedIdentityRow(env, collection, accountRef, scopePath = '
 }
 
 async function querySchoolIdentity(env, collection, email, code) {
-  const requests = [];
-  if (code) {
-    const codeFields = collection === 'applications' ? ['VerificationCode'] : ['ParentLoginCode', 'VerificationCode'];
-    codeFields.forEach((field) => requests.push(querySchoolCollection(env, collection, {
-      filters: [{ field, op: '==', value: code }]
-    }).catch(() => [])));
-  } else if (email) {
-    requests.push(querySchoolCollection(env, collection, {
-      filters: [{ field: collection === 'applications' ? 'VerificationEmail' : 'ParentEmail', op: '==', value: email }]
-    }).catch(() => []));
+  // Load the complete family by its canonical parent email. The verification
+  // code is still checked by assertParentAccess(), but it must not be used as
+  // the family data filter because siblings legitimately have different
+  // application codes.
+  if (email) {
+    const emailField = collection === 'applications' ? 'VerificationEmail' : 'ParentEmail';
+    const familyRows = await querySchoolCollection(env, collection, {
+      filters: [{ field: emailField, op: '==', value: email }]
+    }).catch(() => []);
+    if (familyRows.length) return uniqueRows(familyRows);
   }
-  return uniqueRows((await Promise.all(requests)).flat());
+  if (!code) return [];
+  const codeFields = collection === 'applications' ? ['VerificationCode'] : ['ParentLoginCode', 'VerificationCode'];
+  const codeRows = await Promise.all(codeFields.map((field) => querySchoolCollection(env, collection, {
+    filters: [{ field, op: '==', value: code }]
+  }).catch(() => [])));
+  return uniqueRows(codeRows.flat());
 }
 
 async function queryRowsForReferences(env, collection, fields, references) {
