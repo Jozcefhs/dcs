@@ -40,7 +40,10 @@ function lower(value) {
 }
 
 function asMoneyNumber(value) {
-  const number = Number(String(value ?? '0').replace(/,/g, ''));
+  const raw = String(value ?? '0').trim();
+  const negative = /^\s*\(.*\)\s*$/.test(raw);
+  const normalized = raw.replace(/,/g, '').replace(/[^0-9.-]/g, '');
+  const number = Number(normalized || '0') * (negative ? -1 : 1);
   return Number.isFinite(number) ? Math.round((number + Number.EPSILON) * 100) / 100 : 0;
 }
 
@@ -2587,19 +2590,28 @@ async function markApplicationFlag(env, body, flagName, dateName, message) {
   return { ok: true, message, application: saved };
 }
 
-export function formSaleFinancialAmounts(body = {}) {
+export function formSaleFinancialAmounts(body = {}, configuredFormAmount = 0) {
   const recorded = asMoneyNumber(body.AmountPaid || body.Amount || body.amount);
-  const gross = asMoneyNumber(body.GrossAmount || body.grossAmount || recorded);
-  const gatewayFee = asMoneyNumber(body.GatewayFee || body.gatewayFee);
+  const configured = asMoneyNumber(configuredFormAmount);
+  const explicitForm = asMoneyNumber(body.FormAmount || body.formAmount);
+  const explicitGross = asMoneyNumber(body.GrossAmount || body.grossAmount);
+  const explicitGatewayFee = asMoneyNumber(body.GatewayFee || body.gatewayFee);
   const explicitNet = asMoneyNumber(body.NetAmount || body.netAmount);
-  const net = gatewayFee > 0 ? Math.max(0, explicitNet || gross - gatewayFee) : (explicitNet || recorded || gross);
-  const formAmount = asMoneyNumber(body.FormAmount || body.formAmount || recorded || net);
+  const isLegacy = !explicitForm && !explicitGross && !explicitGatewayFee && !explicitNet;
+  const gross = explicitGross || recorded || explicitForm || configured;
+  const inferredLegacyFee = isLegacy && configured > 0 && gross > configured
+    ? asMoneyNumber(gross - configured)
+    : 0;
+  const gatewayFee = explicitGatewayFee || inferredLegacyFee;
+  const net = explicitNet || (gatewayFee > 0 ? Math.max(0, gross - gatewayFee) : (recorded || gross));
+  const formAmount = explicitForm || configured || net || recorded || gross;
+  const recognized = explicitNet || (gatewayFee > 0 ? net : formAmount);
   return {
     FormAmount: formAmount,
     GrossAmount: gross || formAmount,
     GatewayFee: gatewayFee,
     NetAmount: net || formAmount,
-    RecognizedAmount: net || formAmount
+    RecognizedAmount: recognized || formAmount
   };
 }
 
@@ -3907,6 +3919,7 @@ const DEFAULT_CHART_OF_ACCOUNTS = [
   ['4080', 'Grants and Donations', 'Revenue', 'Other Income', 'Credit'],
   ['4090', 'Other Income', 'Revenue', 'Other Income', 'Credit'],
   ['4100', 'Discounts, Scholarships and Refunds', 'Revenue', 'Contra Revenue', 'Debit'],
+  ['4110', 'Acceptance Fee Revenue', 'Revenue', 'Operating Revenue', 'Credit'],
   ['5000', 'Academic Direct Costs', 'Expense', 'Direct Cost', 'Debit'],
   ['5010', 'Boarding Direct Costs', 'Expense', 'Direct Cost', 'Debit'],
   ['5020', 'Transport Direct Costs', 'Expense', 'Direct Cost', 'Debit'],
@@ -3983,7 +3996,8 @@ function accountingLines(value) {
 
 function accountingAccountCodeForRevenue(category, feeCode = '') {
   const text = `${clean(category)} ${clean(feeCode)}`.toLowerCase();
-  if (text.includes('form') || text.includes('admission')) return '4010';
+  if (text.includes('form')) return '4010';
+  if (text.includes('acceptance') || text.includes('admission')) return '4110';
   if (text.includes('board')) return '4020';
   if (text.includes('transport') || text.includes('bus')) return '4030';
   if (text.includes('book') || text.includes('uniform')) return '4040';
@@ -4005,9 +4019,12 @@ export function accountingDestinationForPayment(row = {}, hasMatchingInvoice = f
 function paymentHasMatchingInvoice(payment, invoices) {
   if (isWalletLedger(payment) || isStorePurchase(payment)) return false;
   return (invoices || []).map(normalizeInvoice).some((invoice) => {
-    if (!sameReferenceIdentity(invoice.AccountRef, payment.AccountRef)) return false;
+    const invoiceReferences = accountRefsFrom(invoice);
+    const paymentReferences = accountRefsFrom(payment);
+    if (!invoiceReferences.some((left) => paymentReferences.some((right) => sameReferenceIdentity(left, right)))) return false;
     if (!sameFinancialPeriod(invoice, payment.AcademicSession, payment.Term)) return false;
     if (isSchoolFeesTotalPayment(payment)) return normalizeMatchText(invoice.FeeCategory || 'school fee') === 'school fee';
+    if (isAcceptanceFeeLike(payment)) return normalizeMatchText(invoice.FeeCategory || 'school fee') === 'school fee';
     return sameText(invoice.FeeCode, payment.FeeCode);
   });
 }
@@ -4157,14 +4174,15 @@ async function saveAccountingJournal(env, body, system = false) {
 
 async function syncRevenueToAccounting(env) {
   await seedAccountingChart(env);
-  const [invoices, payments, sales, journals, ledgerRows, legacyGatewayExpenses, gatewayCharges] = await Promise.all([
+  const [invoices, payments, sales, journals, ledgerRows, legacyGatewayExpenses, gatewayCharges, admissionClasses] = await Promise.all([
     listCollection(env, 'invoices'),
     listCollection(env, 'payments'),
     listCollection(env, 'formSales').catch(() => []),
     listCollection(env, 'accountingJournals'),
     listCollection(env, 'ledger'),
     listCollection(env, 'accountingExpenses').catch(() => []),
-    listCollection(env, 'paymentGatewayCharges').catch(() => [])
+    listCollection(env, 'paymentGatewayCharges').catch(() => []),
+    listCollection(env, 'settings/admission/classes').catch(() => [])
   ]);
   const existing = new Set(journals.map((row) => clean(row.JournalNo || row.__id)));
   const journalsByNo = new Map(journals.map((row) => [clean(row.JournalNo || row.__id), row]));
@@ -4188,12 +4206,15 @@ async function syncRevenueToAccounting(env) {
     existing.add(journalNo); created += 1;
   }
   for (const row of payments) {
-    const sourceId = clean(row.PaymentId || row.PaymentNo || row.Reference || row.paymentId || row.__id);
-    const journalNo = `SYS-PAY-${safeDocumentId(sourceId)}`;
     const payment = normalizePayment(row);
+    const sourceId = clean(payment.Reference || payment.GatewayReference || payment.PaymentId || row.PaymentNo || row.__id);
+    const journalNo = `SYS-PAY-${safeDocumentId(sourceId)}`;
     const amount = paymentCreditedAmount(payment);
     if (!sourceId || amount <= 0) continue;
-    const paymentReferences = [payment.Reference, payment.GatewayReference, payment.PaymentId].map(clean).filter(Boolean);
+    const paymentReferences = [
+      payment.Reference, payment.GatewayReference, payment.PaymentId,
+      row.PaymentNo, row.__id
+    ].map(clean).filter(Boolean);
     const legacyLedger = ledgerRows.find((entry) => asMoneyNumber(entry.Credit) > 0 && paymentReferences.some((reference) => sameText(entry.Reference, reference)));
     if (legacyLedger && (Math.abs(asMoneyNumber(legacyLedger.Credit) - amount) > 0.005 ||
       !sameText(legacyLedger.AcademicSession, payment.AcademicSession) || !sameText(legacyLedger.Term, payment.Term))) {
@@ -4232,8 +4253,25 @@ async function syncRevenueToAccounting(env) {
       { AccountCode: cash, Debit: amount, Credit: 0, Description: clean(row.Method || row.Gateway || 'Payment received') },
       { AccountCode: destination, Debit: 0, Credit: amount, Description: clean(row.AccountRef || row.DisplayName) }
     ];
-    const prior = journalsByNo.get(journalNo);
-    if (prior && journalLineSignature(prior.Lines) === journalLineSignature(lines)) continue;
+    const relatedJournals = journals.filter((journal) => lower(journal.Source) === 'fee payment' && (
+      clean(journal.JournalNo || journal.__id) === journalNo ||
+      paymentReferences.some((reference) =>
+        sameText(journal.Reference, reference) || sameText(journal.SourceId, reference) ||
+        clean(journal.JournalNo || journal.__id) === `SYS-PAY-${safeDocumentId(reference)}`
+      )
+    ));
+    for (const duplicate of relatedJournals) {
+      const duplicateNo = clean(duplicate.JournalNo || duplicate.__id);
+      if (duplicateNo === journalNo) continue;
+      await deleteDocument(env, 'accountingJournals', clean(duplicate.__id) || safeDocumentId(duplicateNo));
+      existing.delete(duplicateNo);
+      journalsByNo.delete(duplicateNo);
+      created += 1;
+    }
+    const prior = relatedJournals.find((journal) => clean(journal.JournalNo || journal.__id) === journalNo) ||
+      journalsByNo.get(journalNo);
+    if (prior && journalLineSignature(prior.Lines) === journalLineSignature(lines) &&
+      sameText(prior.Reference, sourceId) && sameText(prior.SourceId, sourceId)) continue;
     await saveAccountingJournal(env, {
       JournalNo: journalNo, Date: row.PaidAt || row.PaymentDate || row.Date || nowIso(), Status: 'Posted',
       Description: `Receipt: ${clean(row.Reference || sourceId)}`, Reference: clean(row.Reference || sourceId),
@@ -4242,12 +4280,44 @@ async function syncRevenueToAccounting(env) {
     }, true);
     existing.add(journalNo); created += 1;
   }
+  const normalizedAdmissionClasses = admissionClasses.map(normalizeAdmissionClass);
+  const defaultConfiguredFormAmount = asMoneyNumber(
+    normalizedAdmissionClasses.find((item) => asMoneyNumber(item.FormAmount) > 0)?.FormAmount
+  );
   for (const row of sales) {
     const sourceId = clean(row.ReceiptNo || row.receiptNo || row.__id);
     const journalNo = `SYS-FORM-${safeDocumentId(sourceId)}`;
-    const amounts = formSaleFinancialAmounts(row);
+    const classConfiguration = normalizedAdmissionClasses.find((item) =>
+      classNamesMatch(item.ClassName, row.ClassApplyingFor || row.ClassName)
+    );
+    const configuredFormAmount = asMoneyNumber(classConfiguration?.FormAmount) || defaultConfiguredFormAmount;
+    const amounts = formSaleFinancialAmounts(row, configuredFormAmount);
     const amount = amounts.RecognizedAmount;
     if (!sourceId || amount <= 0) continue;
+    const normalizedSale = {
+      ...row,
+      AmountPaid: formatNairaAmount(amount),
+      FormAmount: amounts.FormAmount,
+      GrossAmount: amounts.GrossAmount,
+      GatewayFee: amounts.GatewayFee,
+      NetAmount: amounts.NetAmount,
+      Gateway: clean(row.Gateway) || (amounts.GatewayFee > 0 ? 'Paystack' : 'Manual'),
+      PaymentMethod: clean(row.PaymentMethod || row.Method) || (amounts.GatewayFee > 0 ? 'Online' : 'Manual'),
+      UpdatedAt: nowIso()
+    };
+    delete normalizedSale.__id; delete normalizedSale.__name;
+    if (journalLineSignature([{
+      AccountCode: 'FORM',
+      Debit: asMoneyNumber(row.GrossAmount),
+      Credit: asMoneyNumber(row.GatewayFee)
+    }]) !== journalLineSignature([{
+      AccountCode: 'FORM',
+      Debit: amounts.GrossAmount,
+      Credit: amounts.GatewayFee
+    }]) || !asMoneyNumber(row.FormAmount) || !asMoneyNumber(row.NetAmount)) {
+      await upsertDocument(env, 'formSales', clean(row.__id) || safeDocumentId(sourceId), normalizedSale);
+      created += 1;
+    }
     if (amounts.GatewayFee > 0) {
       const chargeId = safeDocumentId(`PAYSTACK-FORM-FEE-${row.PaymentReference || sourceId}`);
       const existingCharge = gatewayCharges.find((charge) => sameText(charge.ChargeId || charge.__id, chargeId));
@@ -4264,7 +4334,7 @@ async function syncRevenueToAccounting(env) {
       }
     }
     const lines = [
-      { AccountCode: accountingCashAccountFor(row.PaymentMethod, row.Gateway), Debit: amount, Credit: 0, Description: 'Form sale net receipt' },
+      { AccountCode: accountingCashAccountFor(normalizedSale.PaymentMethod, normalizedSale.Gateway), Debit: amount, Credit: 0, Description: 'Form sale net receipt' },
       { AccountCode: '4010', Debit: 0, Credit: amount, Description: 'Admission form revenue' }
     ];
     const prior = journalsByNo.get(journalNo);

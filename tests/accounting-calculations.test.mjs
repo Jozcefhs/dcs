@@ -187,12 +187,33 @@ test('admission form sales exclude Paystack charges from recognized revenue', ()
   });
 });
 
+test('legacy admission form currency strings are normalized without losing Paystack charges', () => {
+  assert.deepEqual(formSaleFinancialAmounts({
+    AmountPaid: 'â¦15,329.95'
+  }, 15000), {
+    FormAmount: 15000,
+    GrossAmount: 15329.95,
+    GatewayFee: 329.95,
+    NetAmount: 15000,
+    RecognizedAmount: 15000
+  });
+  assert.deepEqual(formSaleFinancialAmounts({
+    AmountPaid: 'â¦15,000'
+  }, 15000), {
+    FormAmount: 15000,
+    GrossAmount: 15000,
+    GatewayFee: 0,
+    NetAmount: 15000,
+    RecognizedAmount: 15000
+  });
+});
+
 test('payment accounting routes wallets, stores, receivables, and direct revenue correctly', () => {
   assert.equal(accountingDestinationForPayment({ FeeCode: 'WALLET_TOPUP' }), '2200');
   assert.equal(accountingDestinationForPayment({ FeeCode: 'STORE_CART' }), '4040');
   assert.equal(accountingDestinationForPayment({ FeeCode: 'TUITION', FeeCategory: 'School Fee' }, true), '1100');
   assert.equal(accountingDestinationForPayment({ FeeCode: 'TUITION', FeeCategory: 'School Fee' }, false), '4000');
-  assert.equal(accountingDestinationForPayment({ FeeCode: 'ACCEPTANCE_FEE', FeeCategory: 'Admission' }, false), '4010');
+  assert.equal(accountingDestinationForPayment({ FeeCode: 'ACCEPTANCE_FEE', FeeCategory: 'Admission' }, false), '4110');
 });
 
 test('financial periods require the same session and term', () => {
