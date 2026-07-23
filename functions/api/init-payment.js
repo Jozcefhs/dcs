@@ -1,14 +1,12 @@
 // Cloudflare Pages Function: /api/init-payment
 // Initializes Paystack checkout from the backend so the secret key stays private.
 
-import { getPayableFees, getSchoolCode } from './backend.js';
+import { getPayableFees, getSchoolCode, SCHOOL_FEES_TOTAL_CODE } from './backend.js';
 import { createDocumentIfAbsent, findOneByField, getDocument, requireFirestoreEnv } from '../lib/firestore.js';
 import { normalizeClassKey } from '../lib/class-names.js';
 import { legacyGoogleDataEnabled } from '../lib/backend-mode.js';
 
 const PAYSTACK_INIT_URL = 'https://api.paystack.co/transaction/initialize';
-const SCHOOL_FEES_TOTAL_CODE = 'SCHOOL_FEES_TOTAL';
-
 function cleanReference(value) {
   return String(value || '').replace(/[^A-Za-z0-9_.=-]/g, '-');
 }

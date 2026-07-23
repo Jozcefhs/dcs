@@ -9,6 +9,7 @@ import {
   financialRowMatchesAccount,
   formSaleFinancialAmounts,
   isNewIntakeApplication,
+  isSchoolFeesTotalCode,
   paymentCreditedAmount,
   reconciliationDifference,
   sameFinancialPeriod,
@@ -26,6 +27,12 @@ test('acceptance-fee applicants do not trigger an enrolled-student collection se
   assert.equal(shouldResolveStudentForPayable({ Status: 'Admitted', Enrolled: 'NO' }, 'Application'), false);
   assert.equal(shouldResolveStudentForPayable({ Status: 'Enrolled', Enrolled: 'YES' }, 'Application'), true);
   assert.equal(shouldResolveStudentForPayable({ Status: 'Active' }, 'Student'), true);
+});
+
+test('school-fees-total code is shared by payment initialization and recording', () => {
+  assert.equal(isSchoolFeesTotalCode('SCHOOL_FEES_TOTAL'), true);
+  assert.equal(isSchoolFeesTotalCode('school fees total'), true);
+  assert.equal(isSchoolFeesTotalCode('ACCEPTANCE_FEE'), false);
 });
 
 test('a padded account reference cannot receive another student payment', () => {

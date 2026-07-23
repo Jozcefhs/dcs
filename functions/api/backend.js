@@ -14,6 +14,8 @@ import { buildPayrollJournalLines } from '../lib/payroll/payroll-ledger-service.
 import { applyAuthoritativeActor, resolveAuthoritativeDesktopActor, secureTextEqual } from '../lib/backend-security.js';
 import { legacyGoogleDataEnabled } from '../lib/backend-mode.js';
 
+export const SCHOOL_FEES_TOTAL_CODE = 'SCHOOL_FEES_TOTAL';
+
 function clean(value) {
   return String(value ?? '').trim();
 }
@@ -931,6 +933,10 @@ function isSchoolFeesTotalPayment(row) {
   const metadata = parseMetadata(row && row.Metadata);
   const nested = metadata.metadata && typeof metadata.metadata === 'object' ? metadata.metadata : {};
   return normalizeMatchText(metadata.paymentType || nested.paymentType) === 'schoolfeestotal';
+}
+
+export function isSchoolFeesTotalCode(value) {
+  return normalizeReferenceText(value) === normalizeReferenceText(SCHOOL_FEES_TOTAL_CODE);
 }
 
 export function isSchoolFeeCategory(value) {
@@ -3022,7 +3028,7 @@ export async function recordManualPayment(env, body) {
   }
   const existingPayment = await findPaymentByReference(env, reference);
   if (existingPayment) return { ok: true, message: 'Payment was already recorded.', duplicate: true, payment: normalizePayment(existingPayment) };
-  const isTotalPayment = normalizeReferenceText(feeCode) === normalizeReferenceText(SCHOOL_FEES_TOTAL_CODE);
+  const isTotalPayment = isSchoolFeesTotalCode(feeCode);
   const directFee = await getDocument(env, 'feeItems', safeDocumentId(feeCode)).catch(() => null);
   const configuredFees = isTotalPayment
     ? (await listCollection(env, 'feeItems')).map(normalizeFeeItem)
