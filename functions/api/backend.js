@@ -944,6 +944,13 @@ export function isSchoolFeeCategory(value) {
   return !category || ['schoolfee', 'schoolfees', 'tuition'].includes(category);
 }
 
+export function isSchoolInvoiceCredit(row) {
+  return isAcceptanceFeeLike(row) ||
+    isSchoolFeesTotalPayment(row) ||
+    normalizeMatchText(row && row.FeeCategory) === 'school fee' ||
+    isGeneralFeeCredit(row);
+}
+
 export function calculateSchoolFeeOutstanding(expectedDebit, appliedCredit) {
   return Math.max(0, asMoneyNumber(expectedDebit) - asMoneyNumber(appliedCredit));
 }
@@ -2952,6 +2959,14 @@ async function queryAccountRows(env, collection, accountRef) {
   return [...unique.values()];
 }
 
+async function queryAccountRowsForReferences(env, collection, references = []) {
+  const wanted = [...new Set((references || []).map(clean).filter(Boolean))];
+  const groups = await Promise.all(wanted.map((reference) => queryAccountRows(env, collection, reference)));
+  const unique = new Map();
+  groups.flat().forEach((row) => unique.set(clean(row.__name || row.__id) || JSON.stringify(row), row));
+  return [...unique.values()];
+}
+
 async function findPaymentByReference(env, reference) {
   const documentId = safeDocumentId(reference);
   const direct = await getDocument(env, 'payments', documentId).catch(() => null);
@@ -2982,13 +2997,9 @@ async function writePaymentAccountingJournal(env, payment, hasMatchingInvoice) {
   });
 }
 
-async function refreshAccountFinancialSummary(env, accountRef) {
-  const [invoices, ledger] = await Promise.all([
-    queryAccountRows(env, 'invoices', accountRef),
-    queryAccountRows(env, 'ledger', accountRef)
-  ]);
-  const debit = invoices.map(normalizeInvoice).reduce((sum, row) => sum + asMoneyNumber(row.Debit || row.Amount), 0);
-  const normalizedLedger = ledger.map(normalizeLedger);
+export function calculateAccountFinancialSummary(invoiceRows = [], ledgerRows = [], accountRef = '') {
+  const debit = invoiceRows.map(normalizeInvoice).reduce((sum, row) => sum + asMoneyNumber(row.Debit || row.Amount), 0);
+  const normalizedLedger = ledgerRows.map(normalizeLedger);
   const nonWallet = normalizedLedger.filter((row) => !isWalletLedger(row));
   const credit = nonWallet.reduce((sum, row) => sum + asMoneyNumber(row.Credit), 0);
   const accountCreditDebits = nonWallet.filter((row) => normalizeMatchText(row.FeeCategory) === 'account credit')
@@ -2996,13 +3007,25 @@ async function refreshAccountFinancialSummary(env, accountRef) {
   const wallet = normalizedLedger.filter(isWalletLedger)
     .reduce((sum, row) => sum + asMoneyNumber(row.Credit) - asMoneyNumber(row.Debit), 0);
   const balance = debit + accountCreditDebits - credit;
-  const summary = {
+  return {
     AccountRef: clean(accountRef), AccountRefNormalized: normalizeReferenceText(accountRef),
     TotalDebit: debit, TotalCredit: credit, AccountCreditDebits: accountCreditDebits,
     OutstandingBalance: Math.max(0, balance), CreditBalance: Math.max(0, -balance),
     WalletBalance: wallet, UpdatedAt: nowIso()
   };
-  await upsertDocument(env, 'accountSummaries', safeDocumentId(accountRef), summary);
+}
+
+async function refreshAccountFinancialSummary(env, accountRef, linkedReferences = []) {
+  const references = [accountRef, ...linkedReferences];
+  const [invoices, ledger] = await Promise.all([
+    queryAccountRowsForReferences(env, 'invoices', references),
+    queryAccountRowsForReferences(env, 'ledger', references)
+  ]);
+  const summary = calculateAccountFinancialSummary(invoices, ledger, accountRef);
+  await upsertDocument(env, 'accountSummaries', safeDocumentId(accountRef), {
+    ...summary,
+    LinkedReferences: [...new Set(linkedReferences.map(clean).filter(Boolean))]
+  });
   return summary;
 }
 
@@ -3156,11 +3179,37 @@ export async function recordManualPayment(env, body) {
     });
   }
   await writePaymentAccountingJournal(env, payment, matchingInvoices.length > 0);
-  await refreshAccountFinancialSummary(env, accountRef);
+  let invoicePostingWarning = '';
+  const shouldGenerateSchoolInvoices = Boolean(student) && (
+    isSchoolFeesTotalPayment(payment) ||
+    isSchoolFeeCategory(payment.FeeCategory)
+  );
+  if (shouldGenerateSchoolInvoices) {
+    try {
+      await generateSchoolFeeInvoices(env, {
+        AccountRef: accountRef,
+        RecordedBy: payment.RecordedBy
+      });
+    } catch (error) {
+      invoicePostingWarning = error && error.message ? error.message : String(error);
+      await refreshAccountFinancialSummary(env, accountRef, [payment.ApplicationReference]);
+    }
+  } else {
+    await refreshAccountFinancialSummary(env, accountRef, [payment.ApplicationReference]);
+  }
   payment.ProcessingStatus = 'Completed';
   payment.CompletedAt = nowIso();
+  payment.InvoicePostingStatus = invoicePostingWarning ? 'Warning' : (shouldGenerateSchoolInvoices ? 'Completed' : 'Not Required');
+  payment.InvoicePostingWarning = invoicePostingWarning;
   await upsertDocument(env, 'payments', safeDocumentId(reference), payment);
-  return { ok: true, message: 'Payment recorded in Firestore.', payment };
+  return {
+    ok: true,
+    message: invoicePostingWarning
+      ? `Payment recorded, but invoice posting needs attention: ${invoicePostingWarning}`
+      : 'Payment recorded in Firestore.',
+    payment,
+    invoicePostingWarning
+  };
 }
 
 async function generateSchoolFeeInvoices(env, body) {
@@ -3197,17 +3246,17 @@ async function generateSchoolFeeInvoices(env, body) {
     throw err;
   }
   const existing = (await queryAccountRows(env, 'invoices', accountRef)).map(normalizeInvoice);
-  const ledgerRows = (await queryAccountRows(env, 'ledger', accountRef)).map(normalizeLedger).filter((row) => {
-    return sameReferenceIdentity(row.AccountRef, accountRef) && sameFinancialPeriod(row, billingSession, billingTerm);
+  const linkedReferences = [student.ApplicationReference].map(clean).filter(Boolean);
+  const ledgerRows = (await queryAccountRowsForReferences(env, 'ledger', [accountRef, ...linkedReferences])).map(normalizeLedger).filter((row) => {
+    const rowMatchesStudent = [row.AccountRef, row.AdmissionNo, row.ApplicationReference]
+      .some((value) => [accountRef, ...linkedReferences].some((reference) => sameReferenceIdentity(value, reference)));
+    return rowMatchesStudent && sameFinancialPeriod(row, billingSession, billingTerm);
   });
   let availableSchoolCredit = ledgerRows.reduce((sum, row) => {
     if (isWalletLedger(row)) return sum;
     const credit = asMoneyNumber(row.Credit);
     if (credit <= 0) return sum;
-    const schoolRelated = isSchoolFeesTotalPayment(row) ||
-      normalizeMatchText(row.FeeCategory) === 'school fee' ||
-      isGeneralFeeCredit(row);
-    return schoolRelated ? sum + credit : sum;
+    return isSchoolInvoiceCredit(row) ? sum + credit : sum;
   }, 0);
   availableSchoolCredit = Math.max(0, availableSchoolCredit - ledgerRows.reduce((sum, row) => {
     if (isWalletLedger(row)) return sum;
@@ -3260,7 +3309,7 @@ async function generateSchoolFeeInvoices(env, body) {
     if (duplicate) updated += 1;
     else created += 1;
   }
-  await refreshAccountFinancialSummary(env, accountRef);
+  await refreshAccountFinancialSummary(env, accountRef, linkedReferences);
   return { ok: true, message: `${created} school fee invoice item(s) generated, ${updated} updated.`, created, updated };
 }
 

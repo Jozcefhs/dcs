@@ -5,10 +5,12 @@ import {
   applyBillingCategoryOverrides,
   buildBudgetVsActual,
   buildReceivablesAgeing,
+  calculateAccountFinancialSummary,
   calculateInvoiceCreditAllocations,
   financialRowMatchesAccount,
   formSaleFinancialAmounts,
   isNewIntakeApplication,
+  isSchoolInvoiceCredit,
   isSchoolFeesTotalCode,
   paymentCreditedAmount,
   reconciliationDifference,
@@ -33,6 +35,32 @@ test('school-fees-total code is shared by payment initialization and recording',
   assert.equal(isSchoolFeesTotalCode('SCHOOL_FEES_TOTAL'), true);
   assert.equal(isSchoolFeesTotalCode('school fees total'), true);
   assert.equal(isSchoolFeesTotalCode('ACCEPTANCE_FEE'), false);
+});
+
+test('acceptance deposit and remaining school fee settle one school invoice without excess credit', () => {
+  assert.equal(isSchoolInvoiceCredit({
+    FeeCode: 'ACCEPT_DAY_JSS1',
+    FeeName: 'Acceptance fee',
+    FeeCategory: 'Admission',
+    Credit: 100000
+  }), true);
+  assert.equal(isSchoolInvoiceCredit({
+    FeeCode: 'SCHOOL_FEES_TOTAL',
+    FeeCategory: 'School Fee',
+    Credit: 194600
+  }), true);
+  const summary = calculateAccountFinancialSummary(
+    [{ AccountRef: 'DCA/26/001', FeeCode: 'TUITION', Debit: 294600, Amount: 294600 }],
+    [
+      { AccountRef: 'DCA/26/000001', FeeCode: 'ACCEPT_DAY_JSS1', FeeName: 'Acceptance fee', FeeCategory: 'Admission', Credit: 100000 },
+      { AccountRef: 'DCA/26/001', FeeCode: 'SCHOOL_FEES_TOTAL', FeeCategory: 'School Fee', Credit: 194600 }
+    ],
+    'DCA/26/001'
+  );
+  assert.equal(summary.TotalDebit, 294600);
+  assert.equal(summary.TotalCredit, 294600);
+  assert.equal(summary.OutstandingBalance, 0);
+  assert.equal(summary.CreditBalance, 0);
 });
 
 test('a padded account reference cannot receive another student payment', () => {
