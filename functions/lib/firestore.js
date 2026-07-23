@@ -193,6 +193,110 @@ export async function upsertDocument(env, collectionPath, documentId, data) {
   });
 }
 
+function collectionQueryLocation(collectionPath) {
+  const cleanPath = String(collectionPath || '').replace(/^\/+|\/+$/g, '');
+  const parts = cleanPath.split('/').filter(Boolean);
+  if (!parts.length || parts.length % 2 === 0) throw new Error('A Firestore collection path is required.');
+  return {
+    collectionId: parts.pop(),
+    parentPath: parts.join('/')
+  };
+}
+
+function structuredFieldFilter(filter = {}) {
+  const opMap = {
+    '==': 'EQUAL',
+    '=': 'EQUAL',
+    '!=': 'NOT_EQUAL',
+    '<': 'LESS_THAN',
+    '<=': 'LESS_THAN_OR_EQUAL',
+    '>': 'GREATER_THAN',
+    '>=': 'GREATER_THAN_OR_EQUAL',
+    in: 'IN',
+    'not-in': 'NOT_IN',
+    'array-contains': 'ARRAY_CONTAINS',
+    'array-contains-any': 'ARRAY_CONTAINS_ANY'
+  };
+  const field = String(filter.field || filter.fieldPath || '').trim();
+  const op = opMap[String(filter.op || '==').trim().toLowerCase()];
+  if (!field || !op) throw new Error('A supported Firestore query field and operator are required.');
+  return {
+    fieldFilter: {
+      field: { fieldPath: field },
+      op,
+      value: toFirestoreValue(filter.value, field)
+    }
+  };
+}
+
+export function buildStructuredQuery(collectionPath, options = {}) {
+  const location = collectionQueryLocation(collectionPath);
+  const filters = Array.isArray(options.filters) ? options.filters.filter(Boolean) : [];
+  const orderBy = Array.isArray(options.orderBy) ? options.orderBy.filter(Boolean) : [];
+  const structuredQuery = {
+    from: [{ collectionId: location.collectionId }]
+  };
+  if (filters.length === 1) {
+    structuredQuery.where = structuredFieldFilter(filters[0]);
+  } else if (filters.length > 1) {
+    structuredQuery.where = {
+      compositeFilter: {
+        op: 'AND',
+        filters: filters.map(structuredFieldFilter)
+      }
+    };
+  }
+  if (orderBy.length) {
+    structuredQuery.orderBy = orderBy.map((item) => ({
+      field: { fieldPath: String(item.field || item.fieldPath || '').trim() },
+      direction: String(item.direction || 'ASCENDING').toUpperCase() === 'DESCENDING' ? 'DESCENDING' : 'ASCENDING'
+    })).filter((item) => item.field.fieldPath);
+  }
+  const limit = Number(options.limit || 0);
+  if (Number.isInteger(limit) && limit > 0) structuredQuery.limit = limit;
+  const endpoint = location.parentPath ? `${location.parentPath}:runQuery` : ':runQuery';
+  return { endpoint, structuredQuery };
+}
+
+export async function queryCollection(env, collectionPath, options = {}) {
+  const { endpoint, structuredQuery } = buildStructuredQuery(collectionPath, options);
+  const rows = await firestoreRequest(env, endpoint, {
+    method: 'POST',
+    body: JSON.stringify({ structuredQuery })
+  });
+  return (Array.isArray(rows) ? rows : [])
+    .map((row) => row && row.document)
+    .filter(Boolean)
+    .map(firestoreDocumentToObject);
+}
+
+export async function findOneByField(env, collectionPath, field, value) {
+  const rows = await queryCollection(env, collectionPath, {
+    filters: [{ field, op: '==', value }],
+    limit: 1
+  });
+  return rows[0] || null;
+}
+
+export async function createDocumentIfAbsent(env, collectionPath, documentId, data) {
+  const location = collectionQueryLocation(collectionPath);
+  const id = String(documentId || '').trim();
+  if (!id) throw new Error('Document ID is required.');
+  const prefix = location.parentPath ? `${location.parentPath}/` : '';
+  try {
+    const document = await firestoreRequest(env, `${prefix}${location.collectionId}?documentId=${encodeURIComponent(id)}`, {
+      method: 'POST',
+      body: JSON.stringify({ fields: objectToFirestoreFields(data) })
+    });
+    return { created: true, document: firestoreDocumentToObject(document) };
+  } catch (error) {
+    if (error && [409, 412].includes(Number(error.status))) {
+      return { created: false, document: await getDocument(env, collectionPath, id) };
+    }
+    throw error;
+  }
+}
+
 export async function batchUpsertDocuments(env, writes) {
   const items = Array.isArray(writes) ? writes : [];
   if (!items.length) return { writeResults: [] };

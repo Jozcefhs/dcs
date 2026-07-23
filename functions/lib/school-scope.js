@@ -1,7 +1,10 @@
-import { deleteDocument, getDocument, listCollection, upsertDocument } from './firestore.js';
+import { deleteDocument, getDocument, listCollection, queryCollection, upsertDocument } from './firestore.js';
 import { normalizeClassKey } from './class-names.js';
 
 function clean(value) { return String(value ?? '').trim(); }
+
+let cachedStructure = null;
+let cachedStructureUntil = 0;
 
 export function safeScopeId(value, fallback = 'main') {
   return clean(value || fallback).toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || fallback;
@@ -19,6 +22,7 @@ export function schoolSectionFor(row = {}) {
 }
 
 export async function getSchoolStructure(env) {
+  if (cachedStructure && Date.now() < cachedStructureUntil) return cachedStructure;
   const saved = await getDocument(env, 'settings', 'schoolStructure').catch(() => null);
   const branches = Array.isArray(saved?.Branches) && saved.Branches.length
     ? saved.Branches.map((row) => typeof row === 'string' ? { Id: safeScopeId(row), Name: clean(row) } : {
@@ -28,11 +32,13 @@ export async function getSchoolStructure(env) {
   const sections = Array.isArray(saved?.Sections) && saved.Sections.length
     ? saved.Sections.map((value) => safeScopeId(typeof value === 'string' ? value : value.Id || value.id)).filter((value) => ['primary', 'secondary'].includes(value))
     : ['primary', 'secondary'];
-  return {
+  cachedStructure = {
     Branches: branches,
     Sections: [...new Set(sections.length ? sections : ['primary', 'secondary'])],
     ActiveBranchId: safeScopeId(saved?.ActiveBranchId || branches[0]?.Id || 'main')
   };
+  cachedStructureUntil = Date.now() + 15000;
+  return cachedStructure;
 }
 
 export function scopedCollectionPath(collection, branchId, section) {
@@ -47,6 +53,33 @@ export async function listSchoolCollection(env, collection) {
   }));
   const groups = await Promise.all(paths.map((path) => listCollection(env, path).catch(() => [])));
   return groups.flatMap((rows, index) => rows.map((row) => ({ ...row, __scopePath: paths[index] })));
+}
+
+export async function schoolCollectionPaths(env, collection) {
+  const structure = await getSchoolStructure(env);
+  const paths = [clean(collection)];
+  structure.Branches.forEach((branch) => structure.Sections.forEach((section) => {
+    paths.push(scopedCollectionPath(collection, branch.Id, section));
+  }));
+  return [...new Set(paths)];
+}
+
+export async function getSchoolDocumentById(env, collection, documentId) {
+  const paths = await schoolCollectionPaths(env, collection);
+  const groups = await Promise.all(paths.map(async (path) => {
+    const row = await getDocument(env, path, documentId).catch(() => null);
+    return row ? { ...row, __scopePath: path } : null;
+  }));
+  return groups.find(Boolean) || null;
+}
+
+export async function querySchoolCollection(env, collection, options = {}) {
+  const paths = await schoolCollectionPaths(env, collection);
+  const groups = await Promise.all(paths.map(async (path) => {
+    const rows = await queryCollection(env, path, options).catch(() => []);
+    return rows.map((row) => ({ ...row, __scopePath: path }));
+  }));
+  return groups.flat();
 }
 
 export async function upsertSchoolDocument(env, collection, documentId, data) {

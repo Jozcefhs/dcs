@@ -2,7 +2,7 @@
 // Starts Paystack checkout for admission form purchase.
 
 import { getAdmissionClasses, getSchoolCode } from './backend.js';
-import { requireFirestoreEnv } from '../lib/firestore.js';
+import { createDocumentIfAbsent, requireFirestoreEnv } from '../lib/firestore.js';
 import { normalizeClassKey } from '../lib/class-names.js';
 import { legacyGoogleDataEnabled } from '../lib/backend-mode.js';
 
@@ -100,6 +100,17 @@ export async function onRequestPost(context) {
     const origin = new URL(request.url).origin;
     const reference = cleanReference(`${await getSchoolCode(env)}-FORM-${Date.now()}`);
     const callbackUrl = `${origin}/payment-success.html?type=form&reference=${encodeURIComponent(reference)}`;
+    await createDocumentIfAbsent(env, 'paymentIntents', reference, {
+      Reference: reference,
+      PaymentType: 'AdmissionForm',
+      ApplicantName: applicantName,
+      ParentEmail: email,
+      ClassApplyingFor: classApplyingFor,
+      Amount: amount,
+      Currency: 'NGN',
+      Status: 'Pending',
+      CreatedAt: new Date().toISOString()
+    });
 
     const paystackRes = await fetch(PAYSTACK_INIT_URL, {
       method: 'POST',

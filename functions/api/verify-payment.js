@@ -2,7 +2,7 @@
 // Verifies Paystack payment and records it in the configured backend.
 
 import { recordManualPayment } from './backend.js';
-import { getDocument, listCollection, upsertDocument } from '../lib/firestore.js';
+import { createDocumentIfAbsent, getDocument, upsertDocument } from '../lib/firestore.js';
 import { legacyGoogleDataEnabled } from '../lib/backend-mode.js';
 
 function safeId(value) { return String(value || '').replace(/[\/\\?#\[\]]/g, '-').replace(/\s+/g, '_').slice(0, 140); }
@@ -59,6 +59,17 @@ export async function onRequestPost(context) {
     const amount = Number(tx.amount || 0) / 100;
     const gatewayFee = Math.max(0, Number(tx.fees || 0) / 100);
     const netAmount = Math.max(0, amount - gatewayFee);
+    const intent = firestoreConfigured ? await getDocument(env, 'paymentIntents', safeId(tx.reference || reference)).catch(() => null) : null;
+    if (intent) {
+      const requestedAmount = Number(tx.requested_amount || 0) / 100 || amount;
+      if (Math.abs(Number(intent.Amount || 0) - requestedAmount) > 0.01) {
+        return Response.json({ ok: false, message: 'The verified amount does not match the initialized payment.' }, { status: 409 });
+      }
+      if (String(intent.AccountRef || '').trim() && String(meta.accountRef || '').trim() &&
+          String(intent.AccountRef).trim().toLowerCase() !== String(meta.accountRef).trim().toLowerCase()) {
+        return Response.json({ ok: false, message: 'The verified payment belongs to a different student account.' }, { status: 409 });
+      }
+    }
     const paymentPayload = {
       Secret: env.GOOGLE_APPS_SCRIPT_SECRET,
       Action: 'recordOnlinePayment',
@@ -154,27 +165,37 @@ export async function onRequestPost(context) {
         })) : [];
       const orderItems = paidItems.length ? paidItems : includedItems;
       if (orderItems.length) {
-        const catalog = paidItems.length ? await listCollection(env, 'storeItems') : [];
         for (const storeType of [...new Set(orderItems.map((item) => item.StoreType || 'Bookstore'))]) {
           const items = orderItems.filter((item) => (item.StoreType || 'Bookstore') === storeType);
           const orderNo = `${tx.reference}-${storeType === 'Uniform Store' ? 'UNIFORM' : 'BOOKS'}`;
           const documentId = safeId(orderNo);
-          if (await getDocument(env, 'storeOrders', documentId)) continue;
-          await upsertDocument(env, 'storeOrders', documentId, {
+          const orderCreate = await createDocumentIfAbsent(env, 'storeOrders', documentId, {
             OrderNo: orderNo, StoreType: storeType, AccountRef: meta.accountRef || meta.admissionNo,
+            AccountRefNormalized: safeId(meta.accountRef || meta.admissionNo).toLowerCase(),
             AdmissionNo: meta.admissionNo || '', DisplayName: meta.displayName || '', ClassName: meta.className || '',
             BranchId: items[0]?.BranchId || 'main', SchoolSection: items[0]?.SchoolSection || '',
             ParentEmail: meta.verificationEmail || '', Items: items, Amount: items.reduce((sum, item) => sum + Number(item.Amount || 0), 0),
             PaymentReference: tx.reference, PaidAt: tx.paid_at || new Date().toISOString(), Status: 'Paid - Awaiting Collection', CreatedAt: new Date().toISOString()
           });
+          if (!orderCreate.created) continue;
           for (const item of items) {
-            const stock = catalog.find((row) => String(row.ItemCode) === String(item.ItemCode) && String(row.StoreType) === String(storeType));
+            const stock = await getDocument(env, 'storeItems', safeId(`${storeType}-${item.ItemCode}`)).catch(() => null);
             if (!stock) continue;
             const payload = { ...stock, Quantity: Math.max(0, Number(stock.Quantity || 0) - Number(item.Quantity || 1)), UpdatedAt: new Date().toISOString() };
             delete payload.__id; delete payload.__name;
             await upsertDocument(env, 'storeItems', stock.__id || safeId(`${storeType}-${item.ItemCode}`), payload);
           }
         }
+      }
+      if (intent) {
+        await upsertDocument(env, 'paymentIntents', safeId(tx.reference || reference), {
+          ...intent,
+          Status: 'Completed',
+          CompletedAt: new Date().toISOString(),
+          GrossAmount: amount,
+          GatewayFee: gatewayFee,
+          NetAmount: netAmount
+        });
       }
     }
 

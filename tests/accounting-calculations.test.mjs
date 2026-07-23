@@ -7,6 +7,7 @@ import {
   buildReceivablesAgeing,
   calculateInvoiceCreditAllocations,
   financialRowMatchesAccount,
+  formSaleFinancialAmounts,
   paymentCreditedAmount,
   reconciliationDifference,
   sameFinancialPeriod
@@ -34,6 +35,22 @@ test('Paystack credits the student with the net amount requested by policy', () 
     Amount: 100000, GrossAmount: 100000, GatewayFee: 1500, NetAmount: 98500
   }), 98500);
   assert.equal(paymentCreditedAmount({ Amount: 100000, GatewayFee: 0 }), 100000);
+});
+
+test('admission form sales exclude Paystack charges from recognized revenue', () => {
+  assert.deepEqual(formSaleFinancialAmounts({
+    FormAmount: 10000,
+    GrossAmount: 10300,
+    GatewayFee: 300,
+    NetAmount: 10000,
+    AmountPaid: 10300
+  }), {
+    FormAmount: 10000,
+    GrossAmount: 10300,
+    GatewayFee: 300,
+    NetAmount: 10000,
+    RecognizedAmount: 10000
+  });
 });
 
 test('payment accounting routes wallets, stores, receivables, and direct revenue correctly', () => {

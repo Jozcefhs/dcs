@@ -2,7 +2,7 @@
 // Verifies a Paystack admission form purchase, records the form sale, and sends the school email.
 
 import { getSchoolCode, recordSale as recordSaleInFirestore } from './backend.js';
-import { listCollection, requireFirestoreEnv } from '../lib/firestore.js';
+import { getDocument, listCollection, requireFirestoreEnv, upsertDocument } from '../lib/firestore.js';
 import { legacyGoogleDataEnabled } from '../lib/backend-mode.js';
 
 function extractMetadata(data) {
@@ -218,8 +218,22 @@ export async function onRequestPost(context) {
     }
 
     const origin = new URL(request.url).origin;
-    const amount = Number(tx.amount || 0) / 100;
-    const amountPaid = formatNairaAmount(amount);
+    const grossAmount = Number(tx.amount || 0) / 100;
+    const gatewayFee = Math.max(0, Number(tx.fees || 0) / 100);
+    const netAmount = Math.max(0, grossAmount - gatewayFee);
+    const formAmount = Number(meta.formAmount || tx.requested_amount || grossAmount);
+    const amountPaid = formatNairaAmount(netAmount);
+    const intent = await getDocument(env, 'paymentIntents', String(tx.reference || reference).replace(/[\/\\?#\[\]]/g, '-')).catch(() => null);
+    if (intent) {
+      const requestedAmount = Number(tx.requested_amount || 0) / 100 || grossAmount;
+      if (Math.abs(Number(intent.Amount || 0) - requestedAmount) > 0.01) {
+        return Response.json({ ok: false, message: 'The verified amount does not match the initialized form purchase.' }, { status: 409 });
+      }
+      if (String(intent.ParentEmail || '').trim().toLowerCase() &&
+          String(intent.ParentEmail).trim().toLowerCase() !== String((tx.customer && tx.customer.email) || '').trim().toLowerCase()) {
+        return Response.json({ ok: false, message: 'The verified form purchase belongs to a different parent email.' }, { status: 409 });
+      }
+    }
     const expiryDays = Number(env.ADMISSION_FORM_EXPIRY_DAYS || 30);
     const receiptNo = makeReceiptNo(tx.reference || reference, await getSchoolCode(env));
     const basePayload = {
@@ -229,6 +243,12 @@ export async function onRequestPost(context) {
       Phone: meta.phone || '',
       ClassApplyingFor: meta.classApplyingFor || '',
       AmountPaid: amountPaid,
+      FormAmount: Number.isFinite(formAmount) && formAmount > 0 ? formAmount : grossAmount,
+      GrossAmount: grossAmount,
+      GatewayFee: gatewayFee,
+      NetAmount: netAmount,
+      Gateway: 'Paystack',
+      PaymentMethod: 'Online',
       FormLink: `${origin}/verify.html`,
       PaymentDate: tx.paid_at || tx.paidAt || new Date().toISOString(),
       PaymentReference: tx.reference || reference,
@@ -253,6 +273,17 @@ export async function onRequestPost(context) {
     }
 
     const verificationCode = recordData.verificationCode || recordData.VerificationCode || '';
+    if (intent) {
+      await upsertDocument(env, 'paymentIntents', String(tx.reference || reference).replace(/[\/\\?#\[\]]/g, '-'), {
+        ...intent,
+        Status: 'Completed',
+        CompletedAt: new Date().toISOString(),
+        GrossAmount: grossAmount,
+        GatewayFee: gatewayFee,
+        NetAmount: netAmount,
+        ReceiptNo: receiptNo
+      });
+    }
     const emailResult = await sendSchoolFormPurchaseEmail(env, {
       ...basePayload,
       VerificationCode: verificationCode
@@ -265,7 +296,10 @@ export async function onRequestPost(context) {
       email: basePayload.Email,
       receiptNo,
       verificationCode,
-      amount,
+      amount: netAmount,
+      grossAmount,
+      gatewayFee,
+      netAmount,
       currency: tx.currency || 'NGN',
       reference: tx.reference || reference,
       formLink: basePayload.FormLink,

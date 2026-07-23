@@ -1,5 +1,5 @@
-import { deleteDocument, listCollection, requireFirestoreEnv, upsertDocument } from '../lib/firestore.js';
-import { deleteSchoolDocument, getSchoolStructure, listSchoolCollection, safeScopeId, upsertSchoolDocument } from '../lib/school-scope.js';
+import { batchUpsertDocuments, createDocumentIfAbsent, deleteDocument, findOneByField, getDocument, listCollection, queryCollection, requireFirestoreEnv, upsertDocument } from '../lib/firestore.js';
+import { deleteSchoolDocument, getSchoolDocumentById, getSchoolStructure, listSchoolCollection, querySchoolCollection, safeScopeId, upsertSchoolDocument } from '../lib/school-scope.js';
 import { canonicalConfiguredClass, classNamesMatch } from '../lib/class-names.js';
 import { categoryApplies, ensureStoreCategories, resolveStoreCategory, saveStoreCategory } from '../lib/store-categories.js';
 import {
@@ -156,21 +156,42 @@ function studentIdFrom(data) {
 }
 
 async function findApplication(env, id) {
-  const rows = await listSchoolCollection(env, 'applications');
-  return rows.find((row) => {
-    return sameText(row.__id, safeDocumentId(id)) ||
-      sameText(row.ApplicationReference, id) ||
-      sameText(row.ApplicationID, id) ||
-      sameText(row.applicationReference, id);
-  }) || null;
+  const wanted = clean(id);
+  if (!wanted) return null;
+  const direct = await getSchoolDocumentById(env, 'applications', safeDocumentId(wanted));
+  if (direct) return direct;
+  for (const field of ['ApplicationReference', 'ApplicationID', 'applicationReference']) {
+    const rows = await querySchoolCollection(env, 'applications', {
+      filters: [{ field, op: '==', value: wanted }],
+      limit: 1
+    });
+    if (rows[0]) return rows[0];
+  }
+  return null;
 }
 
 async function findStudent(env, admissionNo, applicationReference = '') {
-  const rows = await listSchoolCollection(env, 'students');
-  return rows.find((row) => {
-    return (admissionNo && (sameText(row.__id, safeDocumentId(admissionNo)) || sameText(row.AdmissionNo, admissionNo) || sameText(row.admissionNo, admissionNo))) ||
-      (applicationReference && (sameText(row.ApplicationReference, applicationReference) || sameText(row.applicationReference, applicationReference)));
-  }) || null;
+  if (admissionNo) {
+    const direct = await getSchoolDocumentById(env, 'students', safeDocumentId(admissionNo));
+    if (direct) return direct;
+    for (const field of ['AdmissionNo', 'admissionNo', 'AccountRef']) {
+      const rows = await querySchoolCollection(env, 'students', {
+        filters: [{ field, op: '==', value: clean(admissionNo) }],
+        limit: 1
+      });
+      if (rows[0]) return rows[0];
+    }
+  }
+  if (applicationReference) {
+    for (const field of ['ApplicationReference', 'applicationReference']) {
+      const rows = await querySchoolCollection(env, 'students', {
+        filters: [{ field, op: '==', value: clean(applicationReference) }],
+        limit: 1
+      });
+      if (rows[0]) return rows[0];
+    }
+  }
+  return null;
 }
 
 async function findStudentByWalletCard(env, cardId) {
@@ -183,10 +204,16 @@ async function findStudentByWalletCard(env, cardId) {
 async function findStudentByAccountRef(env, accountRef) {
   const wanted = clean(accountRef);
   if (!wanted) return null;
-  const rows = await listSchoolCollection(env, 'students');
-  const normalized = rows.map(normalizeStudent);
-  return normalized.find((row) => [row.AdmissionNo, row.AccountRef, row.__id].some((value) => value && sameReferenceIdentity(value, wanted))) ||
-    normalized.find((row) => sameReferenceIdentity(row.ApplicationReference, wanted)) || null;
+  const direct = await getSchoolDocumentById(env, 'students', safeDocumentId(wanted));
+  if (direct) return normalizeStudent(direct);
+  for (const field of ['AdmissionNo', 'AccountRef', 'ApplicationReference']) {
+    const rows = await querySchoolCollection(env, 'students', {
+      filters: [{ field, op: '==', value: wanted }],
+      limit: 1
+    });
+    if (rows[0]) return normalizeStudent(rows[0]);
+  }
+  return null;
 }
 
 function findStudentByAccountRefInRows(rows, accountRef) {
@@ -512,7 +539,7 @@ function requireBackendSecret(env, body) {
 }
 
 const VERIFIED_ACTOR_ACTIONS = new Set([
-  'exportBackup', 'getAccountingOverview', 'getPayrollTaxConfiguration',
+  'exportBackup', 'getAccountingOverview', 'getSystemHealth', 'optimizeFirestoreData', 'getPayrollTaxConfiguration',
   'seedTraditionalPayeConfiguration', 'savePayrollSalaryComponent', 'savePayrollTaxProfile',
   'clonePayrollTaxProfile', 'savePayrollTaxBands', 'savePayrollTaxReliefRules',
   'savePayrollLedgerMapping', 'validatePayrollTaxConfiguration', 'migratePayrollTaxPhase2',
@@ -908,7 +935,6 @@ function isGeneralFeeCredit(row) {
 }
 
 async function findStudentForApplication(env, app) {
-  const students = (await listSchoolCollection(env, 'students')).map(normalizeStudent);
   const refs = [
     accountRefFromApplication(app),
     app.ApplicationReference,
@@ -916,17 +942,17 @@ async function findStudentForApplication(env, app) {
     app.AdmissionNo,
     app.AdmissionNumber
   ].map(clean).filter(Boolean);
-  let found = students.find((student) => refs.some((ref) => {
-    return referencesMatch(student.AdmissionNo, ref) ||
-      referencesMatch(student.ApplicationReference, ref) ||
-      sameText(student.AdmissionNo, ref) ||
-      sameText(student.ApplicationReference, ref);
-  }));
-  if (found) return found;
+  for (const ref of refs) {
+    const found = await findStudent(env, ref, ref);
+    if (found) return normalizeStudent(found);
+  }
   const appName = normalizeReferenceText(displayNameFromApplication(app));
   const appEmail = normalizeMatchText(app.VerificationEmail || app.ParentEmail || app.Email || '');
   if (!appName || !appEmail) return null;
-  found = students.find((student) => {
+  const candidates = await querySchoolCollection(env, 'students', {
+    filters: [{ field: 'ParentEmail', op: '==', value: lower(appEmail) }]
+  });
+  const found = candidates.map(normalizeStudent).find((student) => {
     const studentName = normalizeReferenceText(student.DisplayName || student.ApplicantName || '');
     const studentEmail = normalizeMatchText(student.ParentEmail || student.Email || '');
     return studentName === appName && studentEmail === appEmail;
@@ -1036,6 +1062,31 @@ async function getAppsScriptFormSales(env) {
   }
 }
 
+function uniqueFirestoreRows(rows = []) {
+  const unique = new Map();
+  rows.filter(Boolean).forEach((row) => {
+    const key = clean(row.__name || row.__id) || JSON.stringify(row);
+    unique.set(key, row);
+  });
+  return [...unique.values()];
+}
+
+async function queryParentIdentityRows(env, collection, email, code, fields = []) {
+  const queries = [];
+  if (email) {
+    const emailFields = collection === 'applications' ? ['VerificationEmail'] : ['ParentEmail'];
+    emailFields.forEach((field) => queries.push(querySchoolCollection(env, collection, {
+      filters: [{ field, op: '==', value: email }]
+    }).catch(() => [])));
+  }
+  if (code) {
+    fields.forEach((field) => queries.push(querySchoolCollection(env, collection, {
+      filters: [{ field, op: '==', value: code }]
+    }).catch(() => [])));
+  }
+  return uniqueFirestoreRows((await Promise.all(queries)).flat());
+}
+
 export async function getPayableFees(env, body = {}) {
   const email = lower(body.Email || body.email);
   const code = clean(body.VerificationCode || body.code).toUpperCase();
@@ -1047,11 +1098,13 @@ export async function getPayableFees(env, body = {}) {
   }
 
   const [firestoreApplications, sheetApplications, firestoreStudents, sheetStudents, firestoreSales, sheetSales] = await Promise.all([
-    listSchoolCollection(env, 'applications').catch(() => []),
+    queryParentIdentityRows(env, 'applications', email, code, ['VerificationCode']),
     getAppsScriptApplications(env),
-    listSchoolCollection(env, 'students').catch(() => []),
+    queryParentIdentityRows(env, 'students', email, code, ['ParentLoginCode', 'VerificationCode', 'LoginCode']),
     getAppsScriptStudents(env),
-    listCollection(env, 'formSales').catch(() => []),
+    queryCollection(env, 'formSales', {
+      filters: [{ field: 'VerificationCode', op: '==', value: code }]
+    }).catch(() => []),
     getAppsScriptFormSales(env)
   ]);
   const applications = [...firestoreApplications, ...sheetApplications].map(normalizeApplication);
@@ -1176,9 +1229,9 @@ export async function getPayableFees(env, body = {}) {
 
   let [feeRows, paymentRows, invoiceRows, ledgerRows] = await Promise.all([
     listCollection(env, 'feeItems'),
-    listCollection(env, 'payments'),
-    listCollection(env, 'invoices'),
-    listCollection(env, 'ledger')
+    queryAccountRows(env, 'payments', accountRef),
+    queryAccountRows(env, 'invoices', accountRef),
+    queryAccountRows(env, 'ledger', accountRef)
   ]);
   if (!feeRows.length) {
     const sheetFinance = await getAppsScriptAccountsOverview(env);
@@ -1917,12 +1970,14 @@ async function saveSchoolProfile(env, body) {
 }
 
 async function getSchoolProfile(env) {
-  const rows = await listCollection(env, 'settings');
-  const profile = rows.find((row) => row.__id === 'schoolProfile') || rows.find((row) => clean(row.SchoolName));
-  const branding = rows.find((row) => row.__id === 'webBranding');
-  const structure = rows.find((row) => row.__id === 'schoolStructure') || await getSchoolStructure(env);
-  const documentSettings = rows.find((row) => row.__id === 'admissionDocuments') || {};
-  const enabledDocuments = documentSettings.Enabled && typeof documentSettings.Enabled === 'object' ? documentSettings.Enabled : {};
+  const [profile, branding, storedStructure, documentSettings] = await Promise.all([
+    getDocument(env, 'settings', 'schoolProfile').catch(() => null),
+    getDocument(env, 'settings', 'webBranding').catch(() => null),
+    getDocument(env, 'settings', 'schoolStructure').catch(() => null),
+    getDocument(env, 'settings', 'admissionDocuments').catch(() => null)
+  ]);
+  const structure = storedStructure || await getSchoolStructure(env);
+  const enabledDocuments = documentSettings?.Enabled && typeof documentSettings.Enabled === 'object' ? documentSettings.Enabled : {};
   return {
     ok: true,
     profile: { ...(profile || {
@@ -2319,6 +2374,40 @@ async function markApplicationFlag(env, body, flagName, dateName, message) {
   return { ok: true, message, application: saved };
 }
 
+export function formSaleFinancialAmounts(body = {}) {
+  const recorded = asMoneyNumber(body.AmountPaid || body.Amount || body.amount);
+  const gross = asMoneyNumber(body.GrossAmount || body.grossAmount || recorded);
+  const gatewayFee = asMoneyNumber(body.GatewayFee || body.gatewayFee);
+  const explicitNet = asMoneyNumber(body.NetAmount || body.netAmount);
+  const net = gatewayFee > 0 ? Math.max(0, explicitNet || gross - gatewayFee) : (explicitNet || recorded || gross);
+  const formAmount = asMoneyNumber(body.FormAmount || body.formAmount || recorded || net);
+  return {
+    FormAmount: formAmount,
+    GrossAmount: gross || formAmount,
+    GatewayFee: gatewayFee,
+    NetAmount: net || formAmount,
+    RecognizedAmount: net || formAmount
+  };
+}
+
+async function writeFormSaleAccountingJournal(env, sale) {
+  const sourceId = clean(sale.ReceiptNo || sale.PaymentReference || sale.__id);
+  const amount = formSaleFinancialAmounts(sale).RecognizedAmount;
+  if (!sourceId || amount <= 0) return;
+  const journalNo = `SYS-FORM-${safeDocumentId(sourceId)}`;
+  const cashCode = accountingCashAccountFor(sale.PaymentMethod, sale.Gateway);
+  await upsertDocument(env, 'accountingJournals', safeDocumentId(journalNo), {
+    JournalNo: journalNo, Date: sale.PaymentDate || sale.Time || nowIso(), Status: 'Posted',
+    Description: `Admission form sale: ${clean(sale.ApplicantName || sourceId)}`,
+    Reference: sourceId, Source: 'Admission Form Sale', SourceId: sourceId, RecordedBy: 'System',
+    Lines: [
+      { AccountCode: cashCode, Debit: amount, Credit: 0, Description: 'Form sale net receipt' },
+      { AccountCode: '4010', Debit: 0, Credit: amount, Description: 'Admission form revenue' }
+    ],
+    TotalDebit: amount, TotalCredit: amount, CreatedAt: sale.CreatedAt || nowIso(), UpdatedAt: nowIso()
+  });
+}
+
 export async function recordSale(env, body) {
   const email = lower(body.Email || body.email);
   const code = clean(body.VerificationCode || body.verificationCode).toUpperCase();
@@ -2328,8 +2417,10 @@ export async function recordSale(env, body) {
     err.status = 400;
     throw err;
   }
-  const existing = await listCollection(env, 'formSales');
-  const sameReceipt = receiptNo && existing.find((row) => sameText(row.ReceiptNo, receiptNo) || sameText(row.__id, safeDocumentId(receiptNo)));
+  const sameReceipt = receiptNo
+    ? (await getDocument(env, 'formSales', safeDocumentId(receiptNo)).catch(() => null)) ||
+      (await findOneByField(env, 'formSales', 'ReceiptNo', receiptNo).catch(() => null))
+    : null;
   if (sameReceipt) {
     return {
       ok: true,
@@ -2341,13 +2432,14 @@ export async function recordSale(env, body) {
       expiryDate: pick(sameReceipt, ['ExpiryDate'])
     };
   }
-  const sameCode = existing.find((row) => sameText(row.VerificationCode, code));
+  const sameCode = await findOneByField(env, 'formSales', 'VerificationCode', code).catch(() => null);
   if (sameCode) {
     const err = new Error('This verification code already exists. Generate a different code.');
     err.status = 400;
     throw err;
   }
   const schoolCode = await getSchoolCode(env);
+  const amounts = formSaleFinancialAmounts(body);
   const sale = {
     Time: body.Time || nowIso(),
     ReceiptNo: receiptNo || `${schoolCode}-FORM-${Date.now()}`,
@@ -2355,7 +2447,14 @@ export async function recordSale(env, body) {
     Email: email,
     Phone: clean(body.Phone),
     ClassApplyingFor: canonicalConfiguredClass(clean(body.ClassApplyingFor), await configuredClassNames(env)),
-    AmountPaid: formatNairaAmount(body.AmountPaid),
+    AmountPaid: formatNairaAmount(amounts.RecognizedAmount),
+    FormAmount: amounts.FormAmount,
+    GrossAmount: amounts.GrossAmount,
+    GatewayFee: amounts.GatewayFee,
+    NetAmount: amounts.NetAmount,
+    Gateway: clean(body.Gateway) || (amounts.GatewayFee > 0 ? 'Paystack' : 'Manual'),
+    PaymentMethod: clean(body.PaymentMethod || body.Method) || (amounts.GatewayFee > 0 ? 'Online' : 'Manual'),
+    PaymentReference: clean(body.PaymentReference || body.Reference),
     FormLink: clean(body.FormLink),
     VerificationCode: code,
     PaymentDate: body.PaymentDate || nowIso().slice(0, 10),
@@ -2365,7 +2464,26 @@ export async function recordSale(env, body) {
     CreatedAt: nowIso(),
     UpdatedAt: nowIso()
   };
-  await upsertDocument(env, 'formSales', safeDocumentId(sale.ReceiptNo), sale);
+  const created = await createDocumentIfAbsent(env, 'formSales', safeDocumentId(sale.ReceiptNo), sale);
+  if (!created.created) {
+    return {
+      ok: true, duplicate: true, message: 'Sale already recorded.',
+      receiptNo: sale.ReceiptNo, verificationCode: created.document?.VerificationCode || sale.VerificationCode,
+      email: created.document?.Email || sale.Email, expiryDate: created.document?.ExpiryDate || sale.ExpiryDate
+    };
+  }
+  if (sale.GatewayFee > 0) {
+    const chargeId = safeDocumentId(`PAYSTACK-FORM-FEE-${sale.PaymentReference || sale.ReceiptNo}`);
+    await upsertDocument(env, 'paymentGatewayCharges', chargeId, {
+      ChargeId: chargeId, Date: sale.PaymentDate,
+      Description: `Paystack admission-form transaction charge - ${sale.PaymentReference || sale.ReceiptNo}`,
+      Amount: sale.GatewayFee, GrossCollection: sale.GrossAmount, NetSettlement: sale.NetAmount,
+      Treatment: 'DeductedBeforeRevenueRecognition', Status: 'Recorded',
+      Reference: sale.PaymentReference || sale.ReceiptNo, Source: 'Paystack Admission Form',
+      CreatedAt: nowIso(), UpdatedAt: nowIso()
+    });
+  }
+  await writeFormSaleAccountingJournal(env, sale);
   return {
     ok: true,
     message: 'Sale saved.',
@@ -2634,6 +2752,73 @@ async function seedDefaultFeeItems(env) {
   return { ok: true, message: added ? 'Default fee items created in Firestore.' : 'Default fee items already exist in Firestore.', added };
 }
 
+async function queryAccountRows(env, collection, accountRef) {
+  const wanted = clean(accountRef);
+  if (!wanted) return [];
+  const groups = await Promise.all(['AccountRef', 'AdmissionNo', 'ApplicationReference'].map((field) => {
+    return queryCollection(env, collection, {
+      filters: [{ field, op: '==', value: wanted }]
+    }).catch(() => []);
+  }));
+  const unique = new Map();
+  groups.flat().forEach((row) => unique.set(clean(row.__name || row.__id) || JSON.stringify(row), row));
+  return [...unique.values()];
+}
+
+async function findPaymentByReference(env, reference) {
+  const documentId = safeDocumentId(reference);
+  const direct = await getDocument(env, 'payments', documentId).catch(() => null);
+  if (direct) return direct;
+  const byReference = await findOneByField(env, 'payments', 'Reference', reference).catch(() => null);
+  if (byReference) return byReference;
+  return findOneByField(env, 'payments', 'GatewayReference', reference).catch(() => null);
+}
+
+async function writePaymentAccountingJournal(env, payment, hasMatchingInvoice) {
+  const sourceId = clean(payment.Reference || payment.GatewayReference || payment.PaymentId);
+  const amount = paymentCreditedAmount(payment);
+  if (!sourceId || amount <= 0) return;
+  const journalNo = `SYS-PAY-${safeDocumentId(sourceId)}`;
+  const cash = accountingCashAccountFor(payment.Method, payment.Gateway);
+  const destination = accountingDestinationForPayment(payment, hasMatchingInvoice);
+  const lines = [
+    { AccountCode: cash, Debit: amount, Credit: 0, Description: clean(payment.Method || payment.Gateway || 'Payment received') },
+    { AccountCode: destination, Debit: 0, Credit: amount, Description: clean(payment.AccountRef || payment.DisplayName) }
+  ];
+  await upsertDocument(env, 'accountingJournals', safeDocumentId(journalNo), {
+    JournalNo: journalNo, Date: payment.PaidAt || nowIso(), Status: 'Posted',
+    Description: `Receipt: ${sourceId}`, Reference: sourceId,
+    Source: 'Fee Payment', SourceId: sourceId, RecordedBy: 'System',
+    AcademicSession: payment.AcademicSession || '', Term: payment.Term || '',
+    Lines: lines, TotalDebit: amount, TotalCredit: amount,
+    CreatedAt: payment.RecordedAt || nowIso(), UpdatedAt: nowIso()
+  });
+}
+
+async function refreshAccountFinancialSummary(env, accountRef) {
+  const [invoices, ledger] = await Promise.all([
+    queryAccountRows(env, 'invoices', accountRef),
+    queryAccountRows(env, 'ledger', accountRef)
+  ]);
+  const debit = invoices.map(normalizeInvoice).reduce((sum, row) => sum + asMoneyNumber(row.Debit || row.Amount), 0);
+  const normalizedLedger = ledger.map(normalizeLedger);
+  const nonWallet = normalizedLedger.filter((row) => !isWalletLedger(row));
+  const credit = nonWallet.reduce((sum, row) => sum + asMoneyNumber(row.Credit), 0);
+  const accountCreditDebits = nonWallet.filter((row) => normalizeMatchText(row.FeeCategory) === 'account credit')
+    .reduce((sum, row) => sum + asMoneyNumber(row.Debit), 0);
+  const wallet = normalizedLedger.filter(isWalletLedger)
+    .reduce((sum, row) => sum + asMoneyNumber(row.Credit) - asMoneyNumber(row.Debit), 0);
+  const balance = debit + accountCreditDebits - credit;
+  const summary = {
+    AccountRef: clean(accountRef), AccountRefNormalized: normalizeReferenceText(accountRef),
+    TotalDebit: debit, TotalCredit: credit, AccountCreditDebits: accountCreditDebits,
+    OutstandingBalance: Math.max(0, balance), CreditBalance: Math.max(0, -balance),
+    WalletBalance: wallet, UpdatedAt: nowIso()
+  };
+  await upsertDocument(env, 'accountSummaries', safeDocumentId(accountRef), summary);
+  return summary;
+}
+
 export async function recordManualPayment(env, body) {
   const accountRef = clean(body.AccountRef || body.accountRef || body.ApplicationReference);
   const feeCode = clean(body.FeeCode || body.feeCode);
@@ -2654,10 +2839,14 @@ export async function recordManualPayment(env, body) {
     err.status = 400;
     throw err;
   }
-  const existingPayment = (await listCollection(env, 'payments')).find((row) => sameText(row.Reference, reference) || sameText(row.GatewayReference, reference));
+  const existingPayment = await findPaymentByReference(env, reference);
   if (existingPayment) return { ok: true, message: 'Payment was already recorded.', duplicate: true, payment: normalizePayment(existingPayment) };
-  const configuredFees = (await listCollection(env, 'feeItems')).map(normalizeFeeItem);
-  const fee = configuredFees.find((item) => sameText(item.FeeCode, feeCode)) || {};
+  const isTotalPayment = normalizeReferenceText(feeCode) === normalizeReferenceText(SCHOOL_FEES_TOTAL_CODE);
+  const directFee = await getDocument(env, 'feeItems', safeDocumentId(feeCode)).catch(() => null);
+  const configuredFees = isTotalPayment
+    ? (await listCollection(env, 'feeItems')).map(normalizeFeeItem)
+    : (directFee ? [normalizeFeeItem(directFee)] : []);
+  const fee = configuredFees.find((item) => sameText(item.FeeCode, feeCode)) || normalizeFeeItem(body);
   const schoolFeeCodes = new Set(configuredFees.filter((item) => isSchoolFeeCategory(item.FeeCategory)).map((item) => normalizeReferenceText(item.FeeCode)));
   const student = await findStudentByAccountRef(env, accountRef);
   const paymentId = ledgerDocumentId('PAY');
@@ -2672,6 +2861,7 @@ export async function recordManualPayment(env, body) {
   const payment = {
     PaymentId: paymentId,
     AccountRef: accountRef,
+    AccountRefNormalized: normalizeReferenceText(accountRef),
     ApplicationReference: clean(body.ApplicationReference || (student && student.ApplicationReference)),
     AdmissionNo: clean(body.AdmissionNo || (student && student.AdmissionNo)),
     DisplayName: clean(body.DisplayName || (student && (student.DisplayName || student.ApplicantName))),
@@ -2700,12 +2890,19 @@ export async function recordManualPayment(env, body) {
     ReceiptNo: clean(body.ReceiptNo) || paymentId,
     Metadata: clean(body.Metadata)
   };
-  await upsertDocument(env, 'payments', safeDocumentId(paymentId), payment);
-  const ledgerNo = ledgerDocumentId('LED');
+  const paymentCreate = await createDocumentIfAbsent(env, 'payments', safeDocumentId(reference), {
+    ...payment,
+    ProcessingStatus: 'Processing'
+  });
+  if (!paymentCreate.created) {
+    return { ok: true, message: 'Payment was already recorded.', duplicate: true, payment: normalizePayment(paymentCreate.document || payment) };
+  }
+  const ledgerNo = `LED-${safeDocumentId(reference)}`;
   await upsertDocument(env, 'ledger', safeDocumentId(ledgerNo), {
     LedgerNo: ledgerNo,
     Date: payment.PaidAt,
     AccountRef: payment.AccountRef,
+    AccountRefNormalized: normalizeReferenceText(payment.AccountRef),
     ApplicationReference: payment.ApplicationReference,
     AdmissionNo: payment.AdmissionNo,
     DisplayName: payment.DisplayName,
@@ -2725,7 +2922,7 @@ export async function recordManualPayment(env, body) {
     Source: payment.Gateway || payment.Method,
     Metadata: payment.Metadata
   });
-  const matchingInvoices = (await listCollection(env, 'invoices')).map(normalizeInvoice).filter((invoice) => {
+  const matchingInvoices = (await queryAccountRows(env, 'invoices', accountRef)).map(normalizeInvoice).filter((invoice) => {
     return sameText(invoice.AccountRef, accountRef) &&
       (isSchoolFeesTotalPayment(payment)
         ? isSchoolFeeCategory(invoice.FeeCategory) || schoolFeeCodes.has(normalizeReferenceText(invoice.FeeCode))
@@ -2760,6 +2957,22 @@ export async function recordManualPayment(env, body) {
       });
     }
   }
+  if (payment.GatewayFee > 0) {
+    const chargeId = safeDocumentId(`PAYSTACK-FEE-${payment.Reference || payment.GatewayReference || payment.PaymentId}`);
+    await upsertDocument(env, 'paymentGatewayCharges', chargeId, {
+      ChargeId: chargeId, Date: payment.PaidAt,
+      Description: `Paystack transaction charge - ${payment.Reference || payment.PaymentId}`,
+      Amount: payment.GatewayFee, GrossCollection: payment.GrossAmount, NetSettlement: creditedAmount,
+      Treatment: 'DeductedBeforeStudentCredit', Status: 'Recorded',
+      Reference: payment.Reference || payment.PaymentId, Source: payment.Gateway || 'Paystack',
+      CreatedAt: nowIso(), UpdatedAt: nowIso()
+    });
+  }
+  await writePaymentAccountingJournal(env, payment, matchingInvoices.length > 0);
+  await refreshAccountFinancialSummary(env, accountRef);
+  payment.ProcessingStatus = 'Completed';
+  payment.CompletedAt = nowIso();
+  await upsertDocument(env, 'payments', safeDocumentId(reference), payment);
   return { ok: true, message: 'Payment recorded in Firestore.', payment };
 }
 
@@ -2796,8 +3009,8 @@ async function generateSchoolFeeInvoices(env, body) {
     err.status = 400;
     throw err;
   }
-  const existing = (await listCollection(env, 'invoices')).map(normalizeInvoice);
-  const ledgerRows = (await listCollection(env, 'ledger')).map(normalizeLedger).filter((row) => {
+  const existing = (await queryAccountRows(env, 'invoices', accountRef)).map(normalizeInvoice);
+  const ledgerRows = (await queryAccountRows(env, 'ledger', accountRef)).map(normalizeLedger).filter((row) => {
     return sameReferenceIdentity(row.AccountRef, accountRef) && sameFinancialPeriod(row, billingSession, billingTerm);
   });
   let availableSchoolCredit = ledgerRows.reduce((sum, row) => {
@@ -2833,6 +3046,7 @@ async function generateSchoolFeeInvoices(env, body) {
       ...(duplicate || {}),
       InvoiceId: invoiceId,
       AccountRef: accountRef,
+      AccountRefNormalized: normalizeReferenceText(accountRef),
       ApplicationReference: student.ApplicationReference || '',
       AdmissionNo: student.AdmissionNo || '',
       DisplayName: student.DisplayName || student.ApplicantName || '',
@@ -2859,6 +3073,7 @@ async function generateSchoolFeeInvoices(env, body) {
     if (duplicate) updated += 1;
     else created += 1;
   }
+  await refreshAccountFinancialSummary(env, accountRef);
   return { ok: true, message: `${created} school fee invoice item(s) generated, ${updated} updated.`, created, updated };
 }
 
@@ -2875,7 +3090,7 @@ function sameDayIso(value, today = new Date()) {
 }
 
 async function walletBalanceForAccount(env, accountRef) {
-  const rows = (await listCollection(env, 'ledger')).map(normalizeLedger);
+  const rows = (await queryAccountRows(env, 'ledger', accountRef)).map(normalizeLedger);
   return rows.filter((row) => {
     if (!sameText(row.AccountRef, accountRef) && !referencesMatch(row.AccountRef, accountRef)) return false;
     return normalizeMatchText(row.FeeCategory) === 'wallet' || normalizeMatchText(row.EntryType).startsWith('wallet');
@@ -2883,16 +3098,10 @@ async function walletBalanceForAccount(env, accountRef) {
 }
 
 async function accountCreditBalanceForAccount(env, accountRef) {
-  const overview = await getAccountsOverview(env);
-  const account = (overview.accounts || []).find((row) => {
-    return sameText(row.AccountRef, accountRef) ||
-      sameText(row.AdmissionNo, accountRef) ||
-      referencesMatch(row.AccountRef, accountRef) ||
-      referencesMatch(row.AdmissionNo, accountRef);
-  });
-  if (!account) return 0;
+  const account = await getDocument(env, 'accountSummaries', safeDocumentId(accountRef)).catch(() => null) ||
+    await refreshAccountFinancialSummary(env, accountRef);
   return Math.max(
-    asMoneyNumber(account.ExcessCredit),
+    asMoneyNumber(account.ExcessCredit || account.CreditBalance),
     asMoneyNumber(account.CreditBalance),
     Math.max(0, asMoneyNumber(account.TotalCredit) - asMoneyNumber(account.TotalDebit)),
     Math.max(0, -asMoneyNumber(account.Balance))
@@ -2900,7 +3109,7 @@ async function accountCreditBalanceForAccount(env, accountRef) {
 }
 
 async function walletSpentTodayForAccount(env, accountRef) {
-  const rows = (await listCollection(env, 'ledger')).map(normalizeLedger);
+  const rows = (await queryAccountRows(env, 'ledger', accountRef)).map(normalizeLedger);
   return rows.filter((row) => {
     if (!sameText(row.AccountRef, accountRef) && !referencesMatch(row.AccountRef, accountRef)) return false;
     return normalizeMatchText(row.EntryType) === 'wallet purchase' && sameDayIso(row.Date || row.createdAt);
@@ -3751,16 +3960,35 @@ async function syncRevenueToAccounting(env) {
   for (const row of sales) {
     const sourceId = clean(row.ReceiptNo || row.receiptNo || row.__id);
     const journalNo = `SYS-FORM-${safeDocumentId(sourceId)}`;
-    const amount = asMoneyNumber(row.AmountPaid || row.Amount || row.amount);
-    if (!sourceId || amount <= 0 || existing.has(journalNo)) continue;
+    const amounts = formSaleFinancialAmounts(row);
+    const amount = amounts.RecognizedAmount;
+    if (!sourceId || amount <= 0) continue;
+    if (amounts.GatewayFee > 0) {
+      const chargeId = safeDocumentId(`PAYSTACK-FORM-FEE-${row.PaymentReference || sourceId}`);
+      const existingCharge = gatewayCharges.find((charge) => sameText(charge.ChargeId || charge.__id, chargeId));
+      if (!existingCharge) {
+        await upsertDocument(env, 'paymentGatewayCharges', chargeId, {
+          ChargeId: chargeId, Date: row.PaymentDate || row.Time || nowIso(),
+          Description: `Paystack admission-form transaction charge - ${row.PaymentReference || sourceId}`,
+          Amount: amounts.GatewayFee, GrossCollection: amounts.GrossAmount, NetSettlement: amounts.NetAmount,
+          Treatment: 'DeductedBeforeRevenueRecognition', Status: 'Recorded',
+          Reference: row.PaymentReference || sourceId, Source: 'Paystack Admission Form',
+          CreatedAt: nowIso(), UpdatedAt: nowIso()
+        });
+        created += 1;
+      }
+    }
+    const lines = [
+      { AccountCode: accountingCashAccountFor(row.PaymentMethod, row.Gateway), Debit: amount, Credit: 0, Description: 'Form sale net receipt' },
+      { AccountCode: '4010', Debit: 0, Credit: amount, Description: 'Admission form revenue' }
+    ];
+    const prior = journalsByNo.get(journalNo);
+    if (prior && journalLineSignature(prior.Lines) === journalLineSignature(lines)) continue;
     await saveAccountingJournal(env, {
       JournalNo: journalNo, Date: row.PaymentDate || row.Timestamp || nowIso(), Status: 'Posted',
       Description: `Admission form sale: ${clean(row.ApplicantName || sourceId)}`, Reference: sourceId,
       Source: 'Admission Form Sale', SourceId: sourceId, RecordedBy: 'System',
-      Lines: [
-        { AccountCode: accountingCashAccountFor(row.PaymentMethod, row.Gateway), Debit: amount, Credit: 0, Description: 'Form sale receipt' },
-        { AccountCode: '4010', Debit: 0, Credit: amount, Description: 'Admission form revenue' }
-      ]
+      Lines: lines
     }, true);
     existing.add(journalNo); created += 1;
   }
@@ -4885,6 +5113,100 @@ async function deleteStaffUserFromDesktop(env, body) {
   return { ok: true, message: 'Staff user deleted from Firestore.' };
 }
 
+function withoutFirestoreMetadata(row = {}) {
+  const copy = { ...row };
+  delete copy.__id;
+  delete copy.__name;
+  delete copy.__scopePath;
+  return copy;
+}
+
+async function optimizeFirestoreData(env, body) {
+  requireAccountingRole(body, ['Super Admin']);
+  const rootCollections = ['payments', 'ledger', 'invoices', 'storeOrders', 'clinicRecords', 'formSales'];
+  const [rootGroups, applications, students] = await Promise.all([
+    Promise.all(rootCollections.map((collection) => listCollection(env, collection).catch(() => []))),
+    listSchoolCollection(env, 'applications').catch(() => []),
+    listSchoolCollection(env, 'students').catch(() => [])
+  ]);
+  const writes = [];
+  rootCollections.forEach((collectionPath, index) => {
+    rootGroups[index].forEach((row) => {
+      const accountRef = clean(row.AccountRef || row.AdmissionNo || row.ApplicationReference);
+      const reference = clean(row.Reference || row.GatewayReference || row.PaymentReference || row.ReceiptNo);
+      const data = {
+        ...withoutFirestoreMetadata(row),
+        ...(accountRef ? { AccountRefNormalized: normalizeReferenceText(accountRef) } : {}),
+        ...(reference ? { ReferenceNormalized: normalizeReferenceText(reference) } : {}),
+        OptimizationVersion: 1,
+        OptimizedAt: nowIso()
+      };
+      writes.push({ collectionPath, documentId: row.__id, data });
+    });
+  });
+  for (const [collection, rows] of [['applications', applications], ['students', students]]) {
+    rows.forEach((row) => {
+      const email = lower(row.ParentEmail || row.VerificationEmail || row.Email);
+      const data = {
+        ...withoutFirestoreMetadata(row),
+        ...(email ? { ParentEmailNormalized: email } : {}),
+        OptimizationVersion: 1,
+        OptimizedAt: nowIso()
+      };
+      writes.push({ collectionPath: row.__scopePath || collection, documentId: row.__id, data });
+    });
+  }
+  for (let index = 0; index < writes.length; index += 450) {
+    await batchUpsertDocuments(env, writes.slice(index, index + 450));
+  }
+  return {
+    ok: true,
+    message: `${writes.length} existing records were prepared for targeted Firestore access.`,
+    optimized: writes.length,
+    version: 1
+  };
+}
+
+async function getSystemHealth(env, body) {
+  requireAccountingRole(body, ['Super Admin']);
+  const [pendingIntents, processingPayments, recentPayments] = await Promise.all([
+    queryCollection(env, 'paymentIntents', {
+      filters: [{ field: 'Status', op: '==', value: 'Pending' }],
+      limit: 50
+    }).catch(() => []),
+    queryCollection(env, 'payments', {
+      filters: [{ field: 'ProcessingStatus', op: '==', value: 'Processing' }],
+      limit: 50
+    }).catch(() => []),
+    queryCollection(env, 'payments', {
+      orderBy: [{ field: 'PaidAt', direction: 'DESCENDING' }],
+      limit: 20
+    }).catch(() => [])
+  ]);
+  const journalChecks = await Promise.all(recentPayments.map(async (payment) => {
+    const sourceId = clean(payment.Reference || payment.GatewayReference || payment.PaymentId);
+    if (!sourceId) return { payment, journal: null };
+    const journal = await getDocument(env, 'accountingJournals', safeDocumentId(`SYS-PAY-${safeDocumentId(sourceId)}`)).catch(() => null);
+    return { payment, journal };
+  }));
+  const unjournaled = journalChecks.filter((row) => !row.journal).map((row) => ({
+    Reference: clean(row.payment.Reference || row.payment.GatewayReference || row.payment.PaymentId),
+    AccountRef: clean(row.payment.AccountRef),
+    Amount: paymentCreditedAmount(row.payment),
+    PaidAt: clean(row.payment.PaidAt)
+  }));
+  return {
+    ok: true,
+    message: 'Firestore and payment health checks completed.',
+    checkedAt: nowIso(),
+    pendingPaymentIntents: pendingIntents.length,
+    processingPayments: processingPayments.length,
+    recentPaymentsChecked: recentPayments.length,
+    unjournaledPayments: unjournaled,
+    healthy: processingPayments.length === 0 && unjournaled.length === 0
+  };
+}
+
 async function routeAction(env, action, body = {}) {
   switch (action) {
     case 'ping':
@@ -4919,6 +5241,10 @@ async function routeAction(env, action, body = {}) {
       schoolCollections.forEach((name, index) => { collections[name] = schoolGroups[index]; });
       return { ok: true, message: 'Complete Firestore backup prepared.', exportedAt: nowIso(), collections };
     }
+    case 'getSystemHealth':
+      return getSystemHealth(env, body);
+    case 'optimizeFirestoreData':
+      return optimizeFirestoreData(env, body);
     case 'getApplications':
       return {
         ok: true,

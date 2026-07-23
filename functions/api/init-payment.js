@@ -2,7 +2,7 @@
 // Initializes Paystack checkout from the backend so the secret key stays private.
 
 import { getPayableFees, getSchoolCode } from './backend.js';
-import { listCollection, requireFirestoreEnv } from '../lib/firestore.js';
+import { createDocumentIfAbsent, findOneByField, getDocument, requireFirestoreEnv } from '../lib/firestore.js';
 import { normalizeClassKey } from '../lib/class-names.js';
 import { legacyGoogleDataEnabled } from '../lib/backend-mode.js';
 
@@ -11,6 +11,10 @@ const SCHOOL_FEES_TOTAL_CODE = 'SCHOOL_FEES_TOTAL';
 
 function cleanReference(value) {
   return String(value || '').replace(/[^A-Za-z0-9_.=-]/g, '-');
+}
+
+function safeDocumentId(value) {
+  return String(value || '').replace(/[\/\\?#\[\]]/g, '-').replace(/\s+/g, '_').slice(0, 140);
 }
 
 function toAmount(value) {
@@ -170,14 +174,17 @@ export async function onRequestPost(context) {
     let fee = (feeData.fees || []).find((item) => String(item.FeeCode || '').trim() === feeCode);
     if (feeCode === 'STORE_CART') {
       const requestedCart = Array.isArray(body.storeCart) ? body.storeCart.slice(0, 25) : [];
-      const catalog = await listCollection(env, 'storeItems');
-      storeCart = requestedCart.map((entry) => {
-        const item = catalog.find((row) => String(row.ItemCode || '').trim() === String(entry.itemCode || '').trim() && String(row.StoreType || '').trim() === String(entry.storeType || '').trim() && storeItemIsPurchasable(row, payableAccount));
+      storeCart = await Promise.all(requestedCart.map(async (entry) => {
+        const itemCode = String(entry.itemCode || '').trim();
+        const storeType = String(entry.storeType || '').trim();
+        const direct = await getDocument(env, 'storeItems', safeDocumentId(`${storeType}-${itemCode}`)).catch(() => null);
+        const fallback = direct || await findOneByField(env, 'storeItems', 'ItemCode', itemCode).catch(() => null);
+        const item = fallback && String(fallback.StoreType || '').trim() === storeType && storeItemIsPurchasable(fallback, payableAccount) ? fallback : null;
         if (!item || !isYes(item.Active === undefined ? 'YES' : item.Active)) throw new Error('A selected store item is no longer available.');
         const quantity = Math.max(1, Math.floor(toAmount(entry.quantity || 1)));
         if (quantity > toAmount(item.Quantity)) throw new Error(`${item.ItemName} does not have enough stock.`);
         return { ItemCode: item.ItemCode, ItemName: item.ItemName, StoreType: item.StoreType, CategoryId: item.CategoryId || '', Category: item.Category || '', Size: item.Size || '', Gender: item.Gender || 'All', BranchId: item.BranchId || 'main', SchoolSection: item.SchoolSection || '', Quantity: quantity, UnitPrice: toAmount(item.Price), Amount: toAmount(item.Price) * quantity };
-      });
+      }));
       if (!storeCart.length) throw new Error('Choose at least one store item.');
       const cartTotal = storeCart.reduce((sum, item) => sum + item.Amount, 0);
       fee = { FeeCode: 'STORE_CART', FeeName: 'School Store Purchase', FeeCategory: 'Store', Amount: cartTotal, Currency: 'NGN', AllowInstallment: 'NO', StoreCart: storeCart };
@@ -280,6 +287,20 @@ export async function onRequestPost(context) {
     const schoolCode = await getSchoolCode(env);
     const reference = cleanReference(`${schoolCode}-${feeCode}-${account.ApplicationReference || account.AccountRef}-${Date.now()}`);
     const callbackUrl = `${origin}/payment-success.html?reference=${encodeURIComponent(reference)}`;
+    await createDocumentIfAbsent(env, 'paymentIntents', safeDocumentId(reference), {
+      Reference: reference,
+      AccountRef: account.AccountRef,
+      AccountRefNormalized: safeDocumentId(account.AccountRef).toLowerCase(),
+      ApplicationReference: account.ApplicationReference || '',
+      AdmissionNo: account.AdmissionNo || '',
+      FeeCode: feeCode,
+      FeeName: fee.FeeName,
+      FeeCategory: fee.FeeCategory || '',
+      Amount: amount,
+      Currency: String(fee.Currency || 'NGN'),
+      Status: 'Pending',
+      CreatedAt: new Date().toISOString()
+    });
 
     const paystackRes = await fetch(PAYSTACK_INIT_URL, {
       method: 'POST',
