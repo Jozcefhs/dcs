@@ -2533,11 +2533,21 @@ async function saveAdmissionClasses(env, body) {
   };
 }
 
+export function feeCodeRenameAllowed(originalFeeCode, feeCode) {
+  return !clean(originalFeeCode) || sameText(originalFeeCode, feeCode);
+}
+
 async function saveFeeItem(env, body) {
   const feeCode = clean(body.FeeCode || body.feeCode);
   if (!feeCode) {
     const err = new Error('FeeCode is required.');
     err.status = 400;
+    throw err;
+  }
+  const originalFeeCode = clean(body.OriginalFeeCode || body.originalFeeCode);
+  if (!feeCodeRenameAllowed(originalFeeCode, feeCode)) {
+    const err = new Error('FeeCode is a permanent accounting identifier and cannot be renamed. Create a new fee code instead.');
+    err.status = 409;
     throw err;
   }
   const existing = (await listCollection(env, 'feeItems')).find((row) => sameText(row.FeeCode, feeCode) || sameText(row.__id, safeDocumentId(feeCode))) || {};
