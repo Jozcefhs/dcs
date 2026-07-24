@@ -34,6 +34,10 @@ const tabConfig = [
   ['admissions', 'Admissions'],
   ['formPurchases', 'Form Purchases'],
   ['students', 'Students'],
+  ['members', 'Members & Households'],
+  ['services', 'Services & Attendance'],
+  ['funds', 'Funds & Mappings'],
+  ['offerings', 'Offerings'],
   ['accounts', 'Accounts'],
   ['financeRequests', 'Bills & Requisitions'],
   ['payroll', 'My Payroll'],
@@ -437,6 +441,227 @@ async function loadStaffStore(section) {
   try { const response = await fetch('/api/staff-stores', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'list', section }) }); const data = await response.json(); if (!response.ok || !data.ok) throw new Error(data.message || 'Could not load school store.'); renderStaffStore(section, data); } catch (error) { panelEl.innerHTML = `<p class="status bad">${escapeHtml(error.message || String(error))}</p>`; }
 }
 
+async function loadChurchMembership() {
+  try {
+    const response = await fetch('/api/staff-members', {
+      method: 'POST', credentials: 'same-origin', cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'list', BranchId: currentUser?.branchId || 'main' })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.message || 'Could not load church membership.');
+    if (activeSection !== 'members') return;
+    panelEl.innerHTML = `
+      <div class="workflow-intro"><div><p class="eyebrow">Church directory</p><h2>Members & Households</h2><p class="muted">Branch ${escapeHtml(data.branchId || 'main')} · ${data.members.length} members · ${data.households.length} households</p></div><button type="button" id="refreshChurchMembers">Refresh</button></div>
+      ${table('Members', data.members || [], [
+        { label: 'Member ID', value: (row) => pick(row, ['MemberId', '__id']) },
+        { label: 'Name', value: (row) => pick(row, ['DisplayName']) },
+        { label: 'Phone', value: (row) => pick(row, ['Phone']) },
+        { label: 'Email', value: (row) => pick(row, ['Email']) },
+        { label: 'Household', value: (row) => pick(row, ['HouseholdId']) },
+        { label: 'Status', value: (row) => pick(row, ['MembershipStatus']) }
+      ])}
+      ${table('Households', data.households || [], [
+        { label: 'Household ID', value: (row) => pick(row, ['HouseholdId', '__id']) },
+        { label: 'Household', value: (row) => pick(row, ['HouseholdName']) },
+        { label: 'Primary contact', value: (row) => pick(row, ['PrimaryContactMemberId']) },
+        { label: 'Phone', value: (row) => pick(row, ['Phone']) },
+        { label: 'Status', value: (row) => pick(row, ['Status']) }
+      ])}`;
+    document.getElementById('refreshChurchMembers')?.addEventListener('click', loadChurchMembership);
+  } catch (error) {
+    if (activeSection === 'members') panelEl.innerHTML = `<p class="status bad">${escapeHtml(error.message || String(error))}</p>`;
+  }
+}
+
+async function loadChurchServices() {
+  try {
+    const response = await fetch('/api/staff-services', {
+      method: 'POST', credentials: 'same-origin', cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'list', BranchId: currentUser?.branchId || 'main' })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.message || 'Could not load church services.');
+    if (activeSection !== 'services') return;
+    panelEl.innerHTML = `
+      <div class="workflow-intro"><div><p class="eyebrow">Gatherings</p><h2>Services & Attendance</h2><p class="muted">Branch ${escapeHtml(data.branchId || 'main')} · ${data.services.length} service definitions · ${data.attendance.length} check-ins</p></div><button type="button" id="refreshChurchServices">Refresh</button></div>
+      ${table('Service Occurrences', data.occurrences || [], [
+        { label: 'Date', value: (row) => pick(row, ['Date']) },
+        { label: 'Service', value: (row) => pick(row, ['ServiceName', 'ServiceId']) },
+        { label: 'Time', value: (row) => pick(row, ['StartTime']) },
+        { label: 'Status', value: (row) => pick(row, ['Status']) },
+        { label: 'Members', value: (row) => pick(row, ['MemberAttendance']) },
+        { label: 'Visitors', value: (row) => pick(row, ['VisitorAttendance']) },
+        { label: 'Total', value: (row) => pick(row, ['TotalAttendance']) }
+      ])}
+      ${table('Recent Attendance', (data.attendance || []).slice(0, 100), [
+        { label: 'Date', value: (row) => pick(row, ['OccurrenceDate']) },
+        { label: 'Service', value: (row) => pick(row, ['ServiceName']) },
+        { label: 'Name', value: (row) => pick(row, ['DisplayName']) },
+        { label: 'Type', value: (row) => pick(row, ['AttendanceType']) },
+        { label: 'Check-in', value: (row) => pick(row, ['CheckInAt']) }
+      ])}`;
+    document.getElementById('refreshChurchServices')?.addEventListener('click', loadChurchServices);
+  } catch (error) {
+    if (activeSection === 'services') panelEl.innerHTML = `<p class="status bad">${escapeHtml(error.message || String(error))}</p>`;
+  }
+}
+
+async function loadChurchFunds() {
+  try {
+    const response = await fetch('/api/staff-funds', {
+      method: 'POST', credentials: 'same-origin', cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'list', BranchId: currentUser?.branchId || 'main' })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.message || 'Could not load church funds.');
+    if (activeSection !== 'funds') return;
+    panelEl.innerHTML = `
+      <div class="workflow-intro"><div><p class="eyebrow">Church finance setup</p><h2>Funds & Accounting Mappings</h2><p class="muted">Branch ${escapeHtml(data.branchId || 'main')} Â· ${data.funds.length} funds Â· ${data.mappings.length} mappings</p></div><button type="button" id="refreshChurchFunds">Refresh</button></div>
+      <p class="muted">Fund setup is managed in the desktop suite. Mappings use the shared Chart of Accounts and do not create a separate church ledger.</p>
+      ${table('Funds', data.funds || [], [
+        { label: 'Fund ID', value: (row) => pick(row, ['FundId', '__id']) },
+        { label: 'Name', value: (row) => pick(row, ['Name']) },
+        { label: 'Type', value: (row) => pick(row, ['FundType']) },
+        { label: 'Purpose', value: (row) => pick(row, ['Purpose']) },
+        { label: 'Currency', value: (row) => pick(row, ['Currency']) },
+        { label: 'Online', value: (row) => pick(row, ['AllowOnline']) },
+        { label: 'Status', value: (row) => pick(row, ['Active']) }
+      ])}
+      ${table('Accounting Mappings', data.mappings || [], [
+        { label: 'Fund', value: (row) => pick(row, ['FundName', 'FundId']) },
+        { label: 'Debit account', value: (row) => [pick(row, ['DebitAccountCode']), pick(row, ['DebitAccountName'])].filter(Boolean).join(' - ') },
+        { label: 'Income account', value: (row) => [pick(row, ['IncomeAccountCode']), pick(row, ['IncomeAccountName'])].filter(Boolean).join(' - ') },
+        { label: 'Effective from', value: (row) => pick(row, ['EffectiveFrom']) },
+        { label: 'Effective to', value: (row) => pick(row, ['EffectiveTo']) },
+        { label: 'Status', value: (row) => pick(row, ['Active']) }
+      ])}
+      ${table('Recent Fund Audit', data.audit || [], [
+        { label: 'Time', value: (row) => pick(row, ['Timestamp']) },
+        { label: 'Action', value: (row) => pick(row, ['Action']) },
+        { label: 'Record', value: (row) => [pick(row, ['EntityType']), pick(row, ['EntityId'])].filter(Boolean).join(' - ') },
+        { label: 'Actor', value: (row) => pick(row, ['Actor']) },
+        { label: 'Details', value: (row) => pick(row, ['Details']) }
+      ])}`;
+    document.getElementById('refreshChurchFunds')?.addEventListener('click', loadChurchFunds);
+  } catch (error) {
+    if (activeSection === 'funds') panelEl.innerHTML = `<p class="status bad">${escapeHtml(error.message || String(error))}</p>`;
+  }
+}
+
+async function doOfferingAction(action, offeringId, reason = '') {
+  if (!offeringId) return;
+  const response = await fetch('/api/staff-offerings', {
+    method: 'POST', credentials: 'same-origin', cache: 'no-store',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action,
+      OfferingId: offeringId,
+      BranchId: currentUser?.branchId || 'main',
+      Reason: reason
+    })
+  });
+  const data = await response.json();
+  if (!response.ok || !data.ok) throw new Error(data.message || 'Offering action failed.');
+  return data;
+}
+
+async function loadChurchOfferings() {
+  try {
+    const response = await fetch('/api/staff-offerings', {
+      method: 'POST', credentials: 'same-origin', cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'list', BranchId: currentUser?.branchId || 'main' })
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.message || 'Could not load church offerings.');
+    if (activeSection !== 'offerings') return;
+    const summary = data.summary || {};
+    const capabilities = data.capabilities || {};
+    panelEl.innerHTML = `
+      <div class="workflow-intro"><div><p class="eyebrow">Giving control</p><h2>Offering Batches</h2><p class="muted">Branch ${escapeHtml(data.branchId || 'main')} Ã‚Â· ${summary.count || 0} batches Ã‚Â· ${summary.reconciled || 0} reconciled</p></div><button type="button" id="refreshChurchOfferings">Refresh</button></div>
+      <div class="workflow-kpis">
+        <div><small>Total offerings</small><strong>${escapeHtml(money(summary.total || 0))}</strong><span>All captured methods</span></div>
+        <div><small>Cash</small><strong>${escapeHtml(money(summary.cash || 0))}</strong><span>Counted by denomination</span></div>
+        <div><small>Non-cash</small><strong>${escapeHtml(money(summary.nonCash || 0))}</strong><span>Transfer, POS, online and cheque</span></div>
+        <div><small>Draft batches</small><strong>${escapeHtml(summary.draft || 0)}</strong><span>Awaiting reconciliation</span></div>
+        <div><small>Pending approval</small><strong>${escapeHtml(summary.pendingApproval || 0)}</strong><span>Reconciled but waiting review</span></div>
+        <div><small>Approved</small><strong>${escapeHtml(summary.approved || 0)}</strong><span>Ready for posting</span></div>
+        <div><small>Posted</small><strong>${escapeHtml(summary.posted || 0)}</strong><span>Accounting transfer created</span></div>
+      </div>
+      <p class="muted">Capture and reconciliation are managed in the desktop suite. Reconciliation locks the batch and prepares a journal preview; it still requires approval before posting to accounting.</p>
+      ${table('Offering Batches', data.offerings || [], [
+        { label: 'Date', value: (row) => pick(row, ['Date']) },
+        { label: 'Batch', value: (row) => pick(row, ['BatchReference']) },
+        { label: 'Service', value: (row) => pick(row, ['ServiceName', 'ServiceOccurrenceId']) },
+        { label: 'Fund', value: (row) => pick(row, ['FundName', 'FundId']) },
+        { label: 'Cash', value: (row) => money(pick(row, ['CashAmount'])) },
+        { label: 'Non-cash', value: (row) => money(Number(row.TotalAmount || 0) - Number(row.CashAmount || 0)) },
+        { label: 'Total', value: (row) => money(pick(row, ['TotalAmount'])) },
+        { label: 'Difference', value: (row) => money(pick(row, ['ReconciliationDifference'])) },
+        { label: 'Status', value: (row) => pick(row, ['Status']) },
+        { label: 'Approval', value: (row) => pick(row, ['ApprovalStatus']) || 'Pending' },
+        { label: 'Accounting', value: (row) => pick(row, ['AccountingStatus']) || 'Unposted' },
+        { label: 'Route', value: (row) => pick(row, ['ApprovalRoute']) || 'DEFAULT' },
+        { label: 'Mapped', value: (row) => row.HasAccountingMapping ? 'YES' : 'NO' },
+        {
+          label: 'Actions',
+          render: (row) => {
+            const status = clean(pick(row, ['Status'])).toLowerCase();
+            const approvalStatus = clean(pick(row, ['ApprovalStatus'])).toLowerCase();
+            const accountingStatus = clean(pick(row, ['AccountingStatus'])).toLowerCase();
+            const buttons = [];
+            if (capabilities.canReconcile && status !== 'reconciled') {
+              buttons.push(`<button type="button" class="table-action" data-offering-action="reconcile" data-offering-id="${escapeHtml(pick(row, ['OfferingId', '__id']))}">Reconcile</button>`);
+            }
+            if (row.CanApprove && status === 'reconciled' && approvalStatus !== 'approved' && accountingStatus !== 'posted') {
+              buttons.push(`<button type="button" class="table-action" data-offering-action="approvechurchoffering" data-offering-id="${escapeHtml(pick(row, ['OfferingId', '__id']))}">Approve</button>`);
+              buttons.push(`<button type="button" class="table-action workflow-reject" data-offering-action="rejectchurchoffering" data-offering-id="${escapeHtml(pick(row, ['OfferingId', '__id']) )}">Reject</button>`);
+            }
+            if (row.CanPost && status === 'reconciled' && approvalStatus === 'approved' && accountingStatus !== 'posted') {
+              buttons.push(`<button type="button" class="table-action" data-offering-action="postchurchoffering" data-offering-id="${escapeHtml(pick(row, ['OfferingId', '__id']) )}">Post to Accounting</button>`);
+            }
+            return buttons.length ? buttons.join(' ') : 'No actions';
+          }
+        }
+      ])}
+      ${table('Recent Offering Audit', data.audit || [], [
+        { label: 'Time', value: (row) => pick(row, ['Timestamp']) },
+        { label: 'Action', value: (row) => pick(row, ['Action']) },
+        { label: 'Batch', value: (row) => pick(row, ['BatchReference']) },
+        { label: 'Actor', value: (row) => pick(row, ['Actor']) },
+        { label: 'Details', value: (row) => pick(row, ['Details']) }
+      ])}`;
+    panelEl.querySelectorAll('[data-offering-action]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const offeringId = button.getAttribute('data-offering-id');
+        const action = button.getAttribute('data-offering-action');
+        const actionLabel = {
+          reconcile: 'reconcile',
+          approvechurchoffering: 'approve',
+          rejectchurchoffering: 'reject',
+          postchurchoffering: 'post'
+        }[action] || action;
+        if (!offeringId) return;
+        if ((actionLabel === 'approve' || actionLabel === 'reconcile' || actionLabel === 'post') && !window.confirm(`Confirm ${actionLabel} for ${offeringId}?`)) return;
+        const reason = actionLabel === 'reject' ? window.prompt(`Optional reason for rejecting ${offeringId}`) : '';
+        try {
+          const data = await doOfferingAction(action, offeringId, reason);
+          setStatus(dashboardStatus, data.message, 'ok');
+          await loadChurchOfferings();
+        } catch (error) {
+          setStatus(dashboardStatus, error.message || String(error), 'bad');
+        }
+      });
+    });
+    document.getElementById('refreshChurchOfferings')?.addEventListener('click', loadChurchOfferings);
+  } catch (error) {
+    if (activeSection === 'offerings') panelEl.innerHTML = `<p class="status bad">${escapeHtml(error.message || String(error))}</p>`;
+  }
+}
+
 function renderSection(active) {
   if (!dashboardData) return;
   panelEl.classList.toggle('school-store-panel', active === 'bookstore' || active === 'uniformStore');
@@ -478,6 +703,18 @@ function renderSection(active) {
       { label: 'Profile', render: (row) => `<button type="button" class="table-action" data-edit-student="${escapeHtml(pick(row, ['AdmissionNo', 'AccountRef', '__id']))}">Edit</button>` }
     ]) + renderStudentEditor(students);
     bindStudentEditor(students);
+  } else if (active === 'members') {
+    panelEl.innerHTML = '<p class="muted">Loading church members and households...</p>';
+    loadChurchMembership();
+  } else if (active === 'services') {
+    panelEl.innerHTML = '<p class="muted">Loading church services and attendance...</p>';
+    loadChurchServices();
+  } else if (active === 'funds') {
+    panelEl.innerHTML = '<p class="muted">Loading church funds and accounting mappings...</p>';
+    loadChurchFunds();
+  } else if (active === 'offerings') {
+    panelEl.innerHTML = '<p class="muted">Loading church offering batches...</p>';
+    loadChurchOfferings();
   } else if (active === 'bookstore' || active === 'uniformStore') {
     panelEl.innerHTML = '<p class="muted">Loading store catalog...</p>';
     loadStaffStore(active);
@@ -852,7 +1089,7 @@ function renderStaffUsers() {
         <section class="config-group"><header><strong>Account identity</strong><small>Basic sign-in identity and organizational access.</small></header><div class="config-grid">
           <label>Username <span class="required">*</span><input name="Username" required></label>
           <label>Display name <span class="required">*</span><input name="DisplayName" required></label>
-          <label>Role <select name="Role" required>${['Super Admin','Admissions Officer','Accounts Officer','Management','Department User','Tuck Shop User','Clinic User','Kitchen User','Front Desk'].map((role) => `<option>${role}</option>`).join('')}</select></label>
+          <label>Role <select name="Role" required>${['Super Admin','Admissions Officer','Accounts Officer','Management','Department User','Tuck Shop User','Clinic User','Kitchen User','Front Desk','Pastor','Church Administrator','Membership Officer','Treasurer','Auditor'].map((role) => `<option>${role}</option>`).join('')}</select></label>
           <label>Department<input name="Department" placeholder="Required for Department User"></label>
           <label>Branch ID<input name="BranchId" placeholder="Blank allows all branches"></label>
           <label>School section<select name="SchoolSectionAccess"><option>All</option><option>Primary</option><option>Secondary</option></select></label>

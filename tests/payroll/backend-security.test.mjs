@@ -13,12 +13,12 @@ test('shared-secret comparison accepts only an exact value', () => {
 test('authoritative staff record replaces client-supplied role and actor metadata', () => {
   const actor = resolveAuthoritativeDesktopActor(
     { UserUsername: 'ada', UserRole: 'Super Admin', RecordedBy: 'Forged' },
-    [{ Username: 'Ada', DisplayName: 'Ada Okafor', Role: 'Accounts Officer', Department: 'Accounts', Active: true }]
+    [{ Username: 'Ada', DisplayName: 'Ada Okafor', Role: 'Accounts Officer', Department: 'Accounts', BranchId: 'main', Active: true }]
   );
   const body = applyAuthoritativeActor({ UserRole: 'Super Admin', RecordedBy: 'Forged' }, actor);
   assert.deepEqual(
-    { username: body.UserUsername, role: body.UserRole, department: body.UserDepartment, name: body.RecordedBy },
-    { username: 'Ada', role: 'Accounts Officer', department: 'Accounts', name: 'Ada Okafor' }
+    { username: body.UserUsername, role: body.UserRole, department: body.UserDepartment, branchId: body.UserBranchId, name: body.RecordedBy },
+    { username: 'Ada', role: 'Accounts Officer', department: 'Accounts', branchId: 'main', name: 'Ada Okafor' }
   );
 });
 

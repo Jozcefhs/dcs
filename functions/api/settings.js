@@ -1,4 +1,5 @@
 import { listCollection, requireFirestoreEnv, upsertDocument } from '../lib/firestore.js';
+import { organizationProfileDocument, resolveOrganizationConfig } from '../lib/organization-config.js';
 
 function clean(value) {
   return String(value ?? '').trim();
@@ -23,7 +24,12 @@ function requireAdmin(env, password) {
 }
 
 function defaultProfile(env) {
+  const organization = resolveOrganizationConfig({ env });
   return {
+    OrganisationEdition: organization.Edition,
+    OrganisationName: organization.Name,
+    OrganisationCode: organization.Code,
+    FeatureFlags: organization.FeatureFlags,
     SchoolName: clean(env.SCHOOL_NAME) || 'Integrated School Management Suite',
     SchoolCode: normalizeSchoolCode(env.SCHOOL_CODE),
     SchoolAddress: clean(env.SCHOOL_ADDRESS) || '',
@@ -63,6 +69,12 @@ async function getProfile(env) {
     if (saved) {
       profile = { ...profile, ...saved };
     }
+    const savedOrganization = rows.find((row) => row.__id === 'organisationProfile');
+    const organization = resolveOrganizationConfig({ env, organizationProfile: savedOrganization, legacyProfile: profile });
+    profile.OrganisationEdition = organization.Edition;
+    profile.OrganisationName = organization.Name;
+    profile.OrganisationCode = organization.Code;
+    profile.FeatureFlags = organization.FeatureFlags;
     const branding = rows.find((row) => row.__id === 'webBranding');
     if (branding && clean(branding.WebLogoDataUrl)) {
       profile.WebLogoConfigured = true;
@@ -94,9 +106,23 @@ export async function onRequestPost(context) {
 
     const incoming = body.profile || {};
     const existing = await getProfile(env);
+    const organization = resolveOrganizationConfig({
+      env,
+      organizationProfile: {
+        Edition: incoming.OrganisationEdition || incoming.OrganizationEdition || existing.OrganisationEdition,
+        Name: incoming.OrganisationName || incoming.OrganizationName || incoming.SchoolName || existing.OrganisationName,
+        Code: incoming.OrganisationCode || incoming.OrganizationCode || incoming.SchoolCode || existing.OrganisationCode,
+        FeatureFlags: incoming.FeatureFlags || incoming.Features || existing.FeatureFlags
+      },
+      legacyProfile: { ...existing, ...incoming }
+    });
     const profile = {
       ...defaultProfile(env),
       ...existing,
+      OrganisationEdition: organization.Edition,
+      OrganisationName: organization.Name,
+      OrganisationCode: organization.Code,
+      FeatureFlags: organization.FeatureFlags,
       SchoolName: clean(incoming.SchoolName) || 'Integrated School Management Suite',
       SchoolCode: normalizeSchoolCode(incoming.SchoolCode),
       SchoolAddress: clean(incoming.SchoolAddress),
@@ -134,6 +160,9 @@ export async function onRequestPost(context) {
     }
     delete profile.WebLogoUrl;
     delete profile.WebLogoConfigured;
+    await upsertDocument(env, 'settings', 'organisationProfile', organizationProfileDocument(organization, {
+      UpdatedAt: profile.UpdatedAt, UpdatedBy: 'Setup'
+    }));
     await upsertDocument(env, 'settings', 'schoolProfile', profile);
     return Response.json({ ok: true, message: 'School setup saved.', profile: await getProfile(env) });
   } catch (err) {

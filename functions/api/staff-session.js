@@ -4,7 +4,7 @@ import {
   createStaffSession,
   readStaffSession,
   staffSessionCookie,
-  allowedSectionsFor
+  staffAccessFor
 } from '../lib/staff-auth.js';
 import { listCollection, requireFirestoreEnv, upsertDocument } from '../lib/firestore.js';
 import { hashStaffPassword } from '../lib/staff-auth.js';
@@ -18,10 +18,11 @@ function response(data, status = 200, cookie = '') {
 export async function onRequestGet(context) {
   try {
     const user = await readStaffSession(context.env, context.request);
+    const access = user ? await staffAccessFor(context.env, user) : null;
     return response({
       ok: true,
       authenticated: Boolean(user),
-      user: user ? { ...user, allowedSections: allowedSectionsFor(user) } : null
+      user: user ? { ...user, ...access } : null
     });
   } catch (err) {
     return response({ ok: false, authenticated: false, message: err.message || String(err) }, err.status || 500);
@@ -70,16 +71,18 @@ export async function onRequestPost(context) {
         mustChangePassword: false
       };
       const refreshedToken = await createStaffSession(env, refreshedUser);
-      return response({ ok: true, authenticated: true, message: 'Password changed successfully.', user: { ...refreshedUser, allowedSections: allowedSectionsFor(refreshedUser) } }, 200, staffSessionCookie(refreshedToken));
+      const access = await staffAccessFor(env, refreshedUser);
+      return response({ ok: true, authenticated: true, message: 'Password changed successfully.', user: { ...refreshedUser, ...access } }, 200, staffSessionCookie(refreshedToken));
     }
     const user = await authenticateStaff(env, body.username, body.password);
     if (!user) return response({ ok: false, message: 'Invalid username/password or inactive account.' }, 401);
     const token = await createStaffSession(env, user);
+    const access = await staffAccessFor(env, user);
     return response({
       ok: true,
       authenticated: true,
       message: 'Signed in.',
-      user: { ...user, allowedSections: allowedSectionsFor(user) }
+      user: { ...user, ...access }
     }, 200, staffSessionCookie(token));
   } catch (err) {
     return response({ ok: false, message: err.message || String(err) }, err.status || 500);

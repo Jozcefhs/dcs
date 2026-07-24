@@ -48,3 +48,4 @@ payments left in processing, and recent payments without accounting journals.
 - Repeated Paystack callbacks return the existing payment instead of crediting twice.
 - Application-form revenue is posted immediately to account 4010 using the net
   settlement, while gross collection and Paystack charges remain separately auditable.
+   

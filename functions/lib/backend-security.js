@@ -34,6 +34,7 @@ export function resolveAuthoritativeDesktopActor(body = {}, users = [], env = {}
       displayName: clean(user.DisplayName || user.displayName || authoritativeUsername),
       role: clean(user.Role || user.role) || 'Front Desk',
       department: clean(user.Department || user.department),
+      branchId: clean(user.BranchId || user.branchId),
       source: 'staffUsers'
     };
   }
@@ -44,6 +45,7 @@ export function resolveAuthoritativeDesktopActor(body = {}, users = [], env = {}
       displayName: clean(env.ADMIN_WEB_DISPLAY_NAME || 'Super Admin'),
       role: 'Super Admin',
       department: '',
+      branchId: '',
       source: 'environment-admin'
     };
   }
@@ -59,6 +61,7 @@ export function applyAuthoritativeActor(body, actor) {
     UserUsername: actor.username,
     UserRole: actor.role,
     UserDepartment: actor.department,
+    UserBranchId: actor.branchId,
     RecordedBy: actor.displayName
   };
 }

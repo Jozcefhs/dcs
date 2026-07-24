@@ -41,6 +41,7 @@ Backend requirement:
 - In Apps Script, enable Project Settings > Show "appsscript.json" manifest file, then copy docs/appsscript.json from the Admissions Suite docs folder into the manifest.
 - Redeploy the Web App and approve the requested Google Drive permission. Parent document upload stores files in Drive.
 - The backend must include uploadParentDocument, updateApplicantIntelligence, getPayableFees, recordOnlinePayment, and accounts ledger actions.
+- Organisation editions use `settings/organisationProfile`; missing configuration defaults to the school edition. See `../suite/docs/ORGANISATION_EDITIONS.md` for the church foundation and feature boundaries.
 - In the FeeItems sheet, set the Acceptance Fee amount before parents start paying online. The default amount is 0 until updated.
 
 After replacing website files:

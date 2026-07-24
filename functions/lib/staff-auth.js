@@ -1,4 +1,5 @@
-import { listCollection, upsertDocument } from './firestore.js';
+import { getDocument, listCollection, upsertDocument } from './firestore.js';
+import { filterSectionsForFeatures, resolveOrganizationConfig } from './organization-config.js';
 
 const encoder = new TextEncoder();
 const SESSION_COOKIE = 'school_staff_session';
@@ -125,29 +126,50 @@ function publicUser(user) {
   };
 }
 
-export function allowedSectionsFor(user = {}) {
+export function allowedSectionsFor(user = {}, featureFlags = null) {
   const role = clean(user.role || user.Role);
   const department = lower(user.department || user.Department);
   const custom = Array.isArray(user.tabAccess || user.TabAccess) ? (user.tabAccess || user.TabAccess).map(clean).filter(Boolean) : [];
-  if (custom.length) return [...new Set(role === 'Super Admin' ? [...custom, 'staffUsers'] : custom)];
+  if (custom.length) return filterSectionsForFeatures(
+    role === 'Super Admin' ? [...custom, 'staffUsers'] : custom,
+    featureFlags
+  );
   const roleSections = {
-    'Super Admin': ['admissions', 'formPurchases', 'students', 'accounts', 'financeRequests', 'payroll', 'clinic', 'kitchen', 'tuckShop', 'bookstore', 'uniformStore', 'staffUsers'],
+    'Super Admin': ['admissions', 'formPurchases', 'students', 'accounts', 'members', 'services', 'funds', 'offerings', 'financeRequests', 'payroll', 'clinic', 'kitchen', 'tuckShop', 'bookstore', 'uniformStore', 'staffUsers'],
     'Admissions Officer': ['admissions', 'formPurchases', 'students', 'financeRequests', 'payroll'],
     'Accounts Officer': ['students', 'accounts', 'financeRequests', 'payroll', 'clinic', 'kitchen', 'tuckShop', 'bookstore', 'uniformStore'],
     Management: ['admissions', 'formPurchases', 'students', 'accounts', 'financeRequests', 'payroll', 'clinic', 'kitchen', 'tuckShop', 'bookstore', 'uniformStore'],
     'Tuck Shop User': ['tuckShop', 'financeRequests', 'payroll'],
     'Clinic User': ['clinic', 'financeRequests', 'payroll'],
     'Kitchen User': ['kitchen', 'financeRequests', 'payroll'],
-    'Front Desk': ['admissions', 'formPurchases', 'students', 'financeRequests', 'payroll']
+    'Front Desk': ['admissions', 'formPurchases', 'students', 'financeRequests', 'payroll'],
+    Pastor: ['members', 'services', 'funds', 'offerings'],
+    'Church Administrator': ['members', 'services', 'funds', 'offerings', 'financeRequests', 'payroll'],
+    'Membership Officer': ['members', 'services'],
+    Treasurer: ['funds', 'offerings', 'financeRequests', 'payroll'],
+    Auditor: ['funds', 'offerings', 'financeRequests']
   };
   if (role === 'Department User') {
-    if (department.includes('clinic')) return ['clinic', 'financeRequests', 'payroll'];
-    if (department.includes('kitchen')) return ['kitchen', 'financeRequests', 'payroll'];
-    if (department.includes('tuck')) return ['tuckShop', 'financeRequests', 'payroll'];
-    if (department.includes('account') || department.includes('finance')) return ['accounts', 'financeRequests', 'payroll'];
-    return ['financeRequests', 'payroll'];
+    if (department.includes('clinic')) return filterSectionsForFeatures(['clinic', 'financeRequests', 'payroll'], featureFlags);
+    if (department.includes('kitchen')) return filterSectionsForFeatures(['kitchen', 'financeRequests', 'payroll'], featureFlags);
+    if (department.includes('tuck')) return filterSectionsForFeatures(['tuckShop', 'financeRequests', 'payroll'], featureFlags);
+    if (department.includes('account') || department.includes('finance')) return filterSectionsForFeatures(['accounts', 'financeRequests', 'payroll'], featureFlags);
+    return filterSectionsForFeatures(['financeRequests', 'payroll'], featureFlags);
   }
-  return roleSections[role] || [];
+  return filterSectionsForFeatures(roleSections[role] || [], featureFlags);
+}
+
+export async function staffAccessFor(env, user = {}) {
+  const [organizationProfile, legacyProfile] = await Promise.all([
+    getDocument(env, 'settings', 'organisationProfile').catch(() => null),
+    getDocument(env, 'settings', 'schoolProfile').catch(() => null)
+  ]);
+  const organization = resolveOrganizationConfig({ env, organizationProfile, legacyProfile });
+  return {
+    edition: organization.Edition,
+    featureFlags: organization.FeatureFlags,
+    allowedSections: allowedSectionsFor(user, organization.FeatureFlags)
+  };
 }
 
 export async function authenticateStaff(env, username, password) {
@@ -273,7 +295,8 @@ export async function requireStaffSession(env, request) {
     err.status = 428;
     throw err;
   }
-  return { ...user, allowedSections: allowedSectionsFor(user) };
+  const access = await staffAccessFor(env, user);
+  return { ...user, ...access };
 }
 
 export function staffSessionCookie(token) {

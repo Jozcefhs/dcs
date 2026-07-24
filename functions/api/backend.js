@@ -13,6 +13,12 @@ import { assertPayrollCanRegenerate, buildFinalizedRunSnapshot, validatePayrollF
 import { buildPayrollJournalLines } from '../lib/payroll/payroll-ledger-service.js';
 import { applyAuthoritativeActor, resolveAuthoritativeDesktopActor, secureTextEqual } from '../lib/backend-security.js';
 import { legacyGoogleDataEnabled } from '../lib/backend-mode.js';
+import { organizationProfileDocument, resolveOrganizationConfig } from '../lib/organization-config.js';
+import { handleChurchMembershipAction } from '../lib/church-membership.js';
+import { CHURCH_COLLECTIONS, churchCollectionPath } from '../lib/church-foundation.js';
+import { handleChurchServiceAction } from '../lib/church-services.js';
+import { handleChurchFundAction } from '../lib/church-funds.js';
+import { handleChurchOfferingAction } from '../lib/church-offerings.js';
 
 export const SCHOOL_FEES_TOTAL_CODE = 'SCHOOL_FEES_TOTAL';
 
@@ -567,7 +573,11 @@ const VERIFIED_ACTOR_ACTIONS = new Set([
   'savePayrollLedgerMapping', 'validatePayrollTaxConfiguration', 'migratePayrollTaxPhase2',
   'savePayrollProfile', 'createPayrollProfilesFromStaff', 'importPayrollProfiles',
   'generatePayrollRun', 'requestPayrollTaxOverride', 'approvePayrollTaxOverride',
-  'savePayrollRunStatus', 'payPayrollItem'
+  'savePayrollRunStatus', 'payPayrollItem',
+  'getChurchMembership', 'saveChurchMember', 'saveChurchHousehold', 'importChurchMembers',
+  'getChurchServices', 'saveChurchService', 'saveChurchServiceOccurrence', 'recordChurchAttendance',
+  'getChurchFunds', 'saveChurchFund', 'saveChurchFundMapping',
+  'getChurchOfferings', 'saveChurchOffering', 'reconcileChurchOffering'
 ]);
 
 async function verifyDesktopActor(env, action, body) {
@@ -2100,6 +2110,7 @@ async function saveBrevoSettings(env, body) {
 }
 
 async function saveSchoolProfile(env, body) {
+  const existingOrganization = await getDocument(env, 'settings', 'organisationProfile').catch(() => null);
   const branchValues = Array.isArray(body.SchoolBranches) ? body.SchoolBranches : clean(body.SchoolBranches || body.schoolBranches || 'Main Branch').split(',');
   const requestedActiveBranchId = safeScopeId(body.ActiveBranchId || body.activeBranchId || 'main');
   const branches = branchValues.map((value) => {
@@ -2149,6 +2160,21 @@ async function saveSchoolProfile(env, body) {
     UpdatedAt: nowIso(),
     UpdatedBy: clean(body.UserRole || body.UpdatedBy || body.updatedBy) || 'Super Admin'
   };
+  const organization = resolveOrganizationConfig({
+    env,
+    organizationProfile: {
+      ...(existingOrganization || {}),
+      Edition: body.OrganisationEdition || body.OrganizationEdition || body.organisationEdition || body.organizationEdition || existingOrganization?.Edition,
+      Name: body.OrganisationName || body.OrganizationName || body.organisationName || body.organizationName || existingOrganization?.Name || profile.SchoolName,
+      Code: body.OrganisationCode || body.OrganizationCode || body.organisationCode || body.organizationCode || existingOrganization?.Code || profile.SchoolCode,
+      FeatureFlags: body.FeatureFlags || body.featureFlags || existingOrganization?.FeatureFlags
+    },
+    legacyProfile: profile
+  });
+  profile.OrganisationEdition = organization.Edition;
+  profile.OrganisationName = organization.Name;
+  profile.OrganisationCode = organization.Code;
+  profile.FeatureFlags = organization.FeatureFlags;
   if (body.WebLogoDataUrl !== undefined || body.webLogoDataUrl !== undefined) {
     const webLogo = clean(body.WebLogoDataUrl ?? body.webLogoDataUrl);
     if (webLogo && (!/^data:image\/(png|jpeg|webp);base64,/i.test(webLogo) || webLogo.length > 750000)) {
@@ -2181,19 +2207,24 @@ async function saveSchoolProfile(env, body) {
   await upsertDocument(env, 'settings', 'admissionDocuments', {
     Enabled: documentRequirements, UpdatedAt: nowIso(), UpdatedBy: profile.UpdatedBy
   });
+  await upsertDocument(env, 'settings', 'organisationProfile', organizationProfileDocument(organization, {
+    UpdatedAt: profile.UpdatedAt, UpdatedBy: profile.UpdatedBy
+  }));
   await upsertDocument(env, 'settings', 'schoolProfile', profile);
   return { ok: true, message: 'School profile saved to Firestore.', profile };
 }
 
 async function getSchoolProfile(env) {
-  const [profile, branding, storedStructure, documentSettings] = await Promise.all([
+  const [profile, branding, storedStructure, documentSettings, organizationProfile] = await Promise.all([
     getDocument(env, 'settings', 'schoolProfile').catch(() => null),
     getDocument(env, 'settings', 'webBranding').catch(() => null),
     getDocument(env, 'settings', 'schoolStructure').catch(() => null),
-    getDocument(env, 'settings', 'admissionDocuments').catch(() => null)
+    getDocument(env, 'settings', 'admissionDocuments').catch(() => null),
+    getDocument(env, 'settings', 'organisationProfile').catch(() => null)
   ]);
   const structure = storedStructure || await getSchoolStructure(env);
   const enabledDocuments = documentSettings?.Enabled && typeof documentSettings.Enabled === 'object' ? documentSettings.Enabled : {};
+  const organization = resolveOrganizationConfig({ env, organizationProfile, legacyProfile: profile || {} });
   return {
     ok: true,
     profile: { ...(profile || {
@@ -2221,6 +2252,10 @@ async function getSchoolProfile(env) {
       ResultDisplayMode: 'subjects',
       ShowResultsOnline: 'NO'
     }),
+      OrganisationEdition: organization.Edition,
+      OrganisationName: organization.Name,
+      OrganisationCode: organization.Code,
+      FeatureFlags: organization.FeatureFlags,
       SchoolBranches: (structure.Branches || []).map((row) => clean(typeof row === 'string' ? row : row.Name || row.Id)).filter(Boolean).join(', '),
       ActiveBranchId: clean(structure.ActiveBranchId || 'main'),
       EnablePrimarySection: (structure.Sections || []).includes('primary') ? 'YES' : 'NO',
@@ -4095,7 +4130,7 @@ async function writeAccountingAudit(env, action, entityType, entityId, body, det
   });
 }
 
-async function saveAccountingJournal(env, body, system = false) {
+export async function saveAccountingJournal(env, body, system = false) {
   const existingId = clean(body.JournalNo || body.journalNo);
   const journalNo = existingId || ledgerDocumentId(system ? 'SYS' : 'JRN');
   const existingRows = await listCollection(env, 'accountingJournals');
@@ -5483,6 +5518,7 @@ async function saveStaffUserFromDesktop(env, body) {
     DisplayName: clean(incoming.DisplayName) || username,
     Role: role,
     Department: department,
+    BranchId: clean(incoming.BranchId || incoming.branchId || existing?.BranchId),
     Active: active,
     Salt: clean(incoming.Salt),
     PasswordHash: clean(incoming.PasswordHash),
@@ -5639,13 +5675,25 @@ async function routeAction(env, action, body = {}) {
         'tuckShopPurchases', 'storeItems', 'storeOrders', 'storeCategories'
       ];
       const schoolCollections = ['applications', 'students'];
-      const [rootGroups, schoolGroups] = await Promise.all([
+      const [organizationProfile, legacyProfile] = await Promise.all([
+        getDocument(env, 'settings', 'organisationProfile').catch(() => null),
+        getDocument(env, 'settings', 'schoolProfile').catch(() => null)
+      ]);
+      const organization = resolveOrganizationConfig({ env, organizationProfile, legacyProfile });
+      const structure = await getSchoolStructure(env);
+      const churchPaths = organization.Edition === 'church'
+        ? (structure.Branches || [{ Id: 'main' }]).flatMap((branch) =>
+          Object.values(CHURCH_COLLECTIONS).map((collection) => churchCollectionPath(collection, branch.Id || branch.id || 'main')))
+        : [];
+      const [rootGroups, schoolGroups, churchGroups] = await Promise.all([
         Promise.all(rootCollections.map((name) => listCollection(env, name).catch(() => []))),
-        Promise.all(schoolCollections.map((name) => listSchoolCollection(env, name).catch(() => [])))
+        Promise.all(schoolCollections.map((name) => listSchoolCollection(env, name).catch(() => []))),
+        Promise.all(churchPaths.map((path) => listCollection(env, path).catch(() => [])))
       ]);
       const collections = {};
       rootCollections.forEach((name, index) => { collections[name] = rootGroups[index]; });
       schoolCollections.forEach((name, index) => { collections[name] = schoolGroups[index]; });
+      churchPaths.forEach((path, index) => { collections[path] = churchGroups[index]; });
       return { ok: true, message: 'Complete Firestore backup prepared.', exportedAt: nowIso(), collections };
     }
     case 'getSystemHealth':
@@ -5664,6 +5712,48 @@ async function routeAction(env, action, body = {}) {
         message: 'Students loaded from Firestore.',
         students: (await listSchoolCollection(env, 'students')).map(normalizeStudent)
       };
+    case 'getChurchMembership':
+    case 'saveChurchMember':
+    case 'saveChurchHousehold':
+    case 'importChurchMembers':
+      return handleChurchMembershipAction(env, {
+        username: clean(body.UserUsername),
+        displayName: clean(body.RecordedBy),
+        role: clean(body.UserRole),
+        department: clean(body.UserDepartment),
+        branchId: clean(body.UserBranchId)
+      }, body);
+    case 'getChurchServices':
+    case 'saveChurchService':
+    case 'saveChurchServiceOccurrence':
+    case 'recordChurchAttendance':
+      return handleChurchServiceAction(env, {
+        username: clean(body.UserUsername),
+        displayName: clean(body.RecordedBy),
+        role: clean(body.UserRole),
+        department: clean(body.UserDepartment),
+        branchId: clean(body.UserBranchId)
+      }, body);
+    case 'getChurchFunds':
+    case 'saveChurchFund':
+    case 'saveChurchFundMapping':
+      return handleChurchFundAction(env, {
+        username: clean(body.UserUsername),
+        displayName: clean(body.RecordedBy),
+        role: clean(body.UserRole),
+        department: clean(body.UserDepartment),
+        branchId: clean(body.UserBranchId)
+      }, body);
+    case 'getChurchOfferings':
+    case 'saveChurchOffering':
+    case 'reconcileChurchOffering':
+      return handleChurchOfferingAction(env, {
+        username: clean(body.UserUsername),
+        displayName: clean(body.RecordedBy),
+        role: clean(body.UserRole),
+        department: clean(body.UserDepartment),
+        branchId: clean(body.UserBranchId)
+      }, body);
     case 'updateStudentProfile':
       return updateStudentProfile(env, body);
     case 'getAdmissionClasses':
